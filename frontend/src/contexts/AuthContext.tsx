@@ -12,9 +12,20 @@ interface AuthState {
   initialized: boolean;
 }
 
+interface SignUpOptions {
+  agency_id?: string;
+  location_id?: string;
+}
+
 interface AuthContextType extends AuthState {
   signIn: (email: string, password: string) => Promise<void>;
-  signUp: (email: string, password: string, firstName: string, lastName: string) => Promise<{ needsEmailConfirmation: boolean }>;
+  signUp: (
+    email: string,
+    password: string,
+    firstName: string,
+    lastName: string,
+    options?: SignUpOptions
+  ) => Promise<{ needsEmailConfirmation: boolean }>;
   signOut: () => Promise<void>;
   resetPassword: (email: string) => Promise<void>;
 }
@@ -123,13 +134,21 @@ export function AuthProvider({ children }: { children: React.ReactNode }) {
     email: string,
     password: string,
     firstName: string,
-    lastName: string
+    lastName: string,
+    options?: SignUpOptions
   ): Promise<{ needsEmailConfirmation: boolean }> => {
+    // Include agency_id and location_id in user metadata
+    // These will be used when creating the application
     const { data, error } = await supabase.auth.signUp({
       email,
       password,
       options: {
-        data: { first_name: firstName, last_name: lastName },
+        data: {
+          first_name: firstName,
+          last_name: lastName,
+          agency_id: options?.agency_id,
+          location_id: options?.location_id,
+        },
       },
     });
     
