@@ -11,7 +11,9 @@ class UserRole(str, Enum):
     """User role within the MediVault system."""
     APPLICANT = "applicant"
     EMPLOYEE = "employee"
+    MANAGER = "manager"
     ADMIN = "admin"
+    SUPERADMIN = "superadmin"
 
 
 class UserProfile(BaseModel):
