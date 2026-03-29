@@ -1,8 +1,10 @@
 import React, { useEffect } from 'react';
-import { useNavigate } from 'react-router-dom';
+import { useNavigate, Link } from 'react-router-dom';
 import { WizardShell } from '../../components/application/WizardShell';
 import { useApplication } from '../../hooks/useApplication';
 import { Alert } from '../../components/ui/Alert';
+import { Button } from '../../components/ui/Button';
+import { Card } from '../../components/ui/Card';
 
 export function ApplicationPage() {
   const navigate = useNavigate();
@@ -14,8 +16,11 @@ export function ApplicationPage() {
     error,
     hasUnsavedChanges,
     steps,
+    applicationStatus,
+    isLocked,
     loadApplication,
     saveStep,
+    submitApplication,
     nextStep,
     prevStep,
     getStepData,
@@ -39,6 +44,12 @@ export function ApplicationPage() {
     nextStep();
   };
 
+  const handleSubmit = async () => {
+    await saveStep(currentStep, getStepData(currentStep), true);
+    await submitApplication();
+    navigate('/applicant');
+  };
+
   const handleSaveAndExit = async () => {
     await saveStep(currentStep, getStepData(currentStep), false);
     navigate('/applicant');
@@ -46,6 +57,7 @@ export function ApplicationPage() {
 
   const handleReturnToDashboard = async () => {
     await saveStep(currentStep, getStepData(currentStep), true);
+    await submitApplication();
     navigate('/applicant');
   };
 
@@ -59,6 +71,34 @@ export function ApplicationPage() {
           </svg>
           <p className="mt-3 text-sm text-gray">Loading your application...</p>
         </div>
+      </div>
+    );
+  }
+
+  // If application is locked, show read-only message
+  if (isLocked) {
+    return (
+      <div className="mx-auto max-w-2xl">
+        <Card>
+          <div className="text-center py-8">
+            <div className="mx-auto mb-4 flex h-16 w-16 items-center justify-center rounded-full bg-success-bg">
+              <svg className="h-8 w-8 text-success" fill="none" viewBox="0 0 24 24" stroke="currentColor">
+                <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M9 12l2 2 4-4m6 2a9 9 0 11-18 0 9 9 0 0118 0z" />
+              </svg>
+            </div>
+            <h2 className="font-display text-xl font-bold text-navy mb-2">
+              Application Submitted
+            </h2>
+            <p className="text-gray mb-6">
+              Your application has been submitted and is currently <strong>{applicationStatus.replace('_', ' ')}</strong>.
+              <br />
+              You can no longer edit your application, but you can still upload any missing documents from your dashboard.
+            </p>
+            <Link to="/applicant">
+              <Button>Go to Dashboard</Button>
+            </Link>
+          </div>
+        </Card>
       </div>
     );
   }
@@ -89,6 +129,7 @@ export function ApplicationPage() {
         onSaveAndExit={handleSaveAndExit}
         onChange={handleChange}
         onReturnToDashboard={handleReturnToDashboard}
+        onSubmit={handleSubmit}
       />
     </div>
   );

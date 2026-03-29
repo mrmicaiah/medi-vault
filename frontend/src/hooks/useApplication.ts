@@ -1,6 +1,6 @@
 import { useState, useCallback, useEffect, useRef } from 'react';
 import { api } from '../lib/api';
-import type { ApplicationStep } from '../types';
+import type { ApplicationStep, ApplicationStatus } from '../types';
 
 interface StepState {
   data: Record<string, unknown>;
@@ -9,6 +9,7 @@ interface StepState {
 
 interface ApplicationState {
   applicationId: string | null;
+  applicationStatus: ApplicationStatus;
   currentStep: number;
   steps: Record<number, StepState>;
   loading: boolean;
@@ -20,6 +21,7 @@ interface ApplicationState {
 export function useApplication() {
   const [state, setState] = useState<ApplicationState>({
     applicationId: null,
+    applicationStatus: 'not_started',
     currentStep: 1,
     steps: {},
     loading: false,
@@ -29,6 +31,9 @@ export function useApplication() {
   });
 
   const initialDataRef = useRef<Record<string, unknown>>({});
+
+  // Check if application is locked (submitted or beyond)
+  const isLocked = ['submitted', 'under_review', 'approved', 'rejected'].includes(state.applicationStatus);
 
   // Warn before leaving with unsaved changes
   useEffect(() => {
@@ -48,7 +53,7 @@ export function useApplication() {
     setState((prev) => ({ ...prev, loading: true, error: null }));
     try {
       const res = await api.get<{
-        application: { id: string; current_step: number };
+        application: { id: string; current_step: number; status: ApplicationStatus };
         steps: ApplicationStep[];
       }>('/applications/me');
 
@@ -57,12 +62,12 @@ export function useApplication() {
         stepsMap[step.step_number] = { data: step.data || {}, status: step.status };
       });
 
-      // Store initial data for change detection
       initialDataRef.current = stepsMap[res.application.current_step]?.data || {};
 
       setState((prev) => ({
         ...prev,
         applicationId: res.application.id,
+        applicationStatus: res.application.status,
         currentStep: res.application.current_step,
         steps: stepsMap,
         loading: false,
@@ -111,7 +116,6 @@ export function useApplication() {
           status: completed ? 'completed' : 'in_progress',
         });
 
-        // Update initial data ref after successful save
         initialDataRef.current = data;
 
         setState((prev) => ({
@@ -133,6 +137,30 @@ export function useApplication() {
     },
     [state.applicationId]
   );
+
+  const submitApplication = useCallback(async () => {
+    if (!state.applicationId) {
+      setState((prev) => ({ ...prev, error: 'No application found' }));
+      return;
+    }
+
+    setState((prev) => ({ ...prev, saving: true, error: null }));
+    try {
+      await api.post(`/applications/${state.applicationId}/submit`, {});
+
+      setState((prev) => ({
+        ...prev,
+        applicationStatus: 'submitted',
+        saving: false,
+      }));
+    } catch (err) {
+      setState((prev) => ({
+        ...prev,
+        saving: false,
+        error: err instanceof Error ? err.message : 'Failed to submit application',
+      }));
+    }
+  }, [state.applicationId]);
 
   const skipStep = useCallback(
     async (stepNumber: number) => {
@@ -216,10 +244,12 @@ export function useApplication() {
 
   return {
     ...state,
+    isLocked,
     completedCount,
     loadApplication,
     saveStep,
     skipStep,
+    submitApplication,
     goToStep,
     nextStep,
     prevStep,

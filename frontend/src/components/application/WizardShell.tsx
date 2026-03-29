@@ -31,6 +31,7 @@ interface WizardShellProps {
   onSaveAndExit: () => void;
   onChange?: () => void;
   onReturnToDashboard: () => void;
+  onSubmit: () => void;
 }
 
 export function WizardShell({
@@ -45,6 +46,7 @@ export function WizardShell({
   onSaveAndExit,
   onChange,
   onReturnToDashboard,
+  onSubmit,
 }: WizardShellProps) {
   const stepName = STEP_NAMES[currentStep] || `Step ${currentStep}`;
   const isFirst = currentStep === 1;
@@ -54,23 +56,17 @@ export function WizardShell({
 
   // Check if current step can proceed
   const canProceed = (): boolean => {
-    // If it's an upload step
     if (isUploadStep) {
-      // If skipped, always allow
       if (currentStepSkipped) return true;
       
-      // Check required fields for this step
       const requiredFields = UPLOAD_STEP_REQUIRED_FIELDS[currentStep] || [];
-      if (requiredFields.length === 0) return true; // Optional steps
+      if (requiredFields.length === 0) return true;
       
-      // Check all required fields are filled
       return requiredFields.every(field => {
         const value = stepData[field];
         return value !== undefined && value !== null && value !== '';
       });
     }
-    
-    // Non-upload steps - let them proceed (validation handled in step components)
     return true;
   };
 
@@ -90,7 +86,6 @@ export function WizardShell({
     return step?.data?.skip === true;
   }).length;
 
-  // Get missing required fields for current step
   const getMissingFields = (): string[] => {
     if (!isUploadStep || currentStepSkipped) return [];
     const requiredFields = UPLOAD_STEP_REQUIRED_FIELDS[currentStep] || [];
@@ -165,7 +160,6 @@ export function WizardShell({
           onChange={onChange}
         />
 
-        {/* Validation message for upload steps */}
         {showValidationError && (
           <Alert variant="error" className="mt-4" title="Required Fields Missing">
             Please {missingFields.includes('file_name') ? 'upload the document' : 'fill in all required fields'}, 
@@ -198,7 +192,7 @@ export function WizardShell({
                 </p>
               </div>
             ) : (
-              <Button onClick={handleNextClick} loading={saving}>
+              <Button onClick={onSubmit} loading={saving}>
                 Submit Application
               </Button>
             )
