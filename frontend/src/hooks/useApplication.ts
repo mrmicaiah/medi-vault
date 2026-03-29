@@ -2,10 +2,15 @@ import { useState, useCallback, useEffect, useRef } from 'react';
 import { api } from '../lib/api';
 import type { ApplicationStep } from '../types';
 
+interface StepState {
+  data: Record<string, unknown>;
+  status: string;
+}
+
 interface ApplicationState {
   applicationId: string | null;
   currentStep: number;
-  steps: Record<number, { data: Record<string, unknown>; status: string }>;
+  steps: Record<number, StepState>;
   loading: boolean;
   saving: boolean;
   error: string | null;
@@ -47,7 +52,7 @@ export function useApplication() {
         steps: ApplicationStep[];
       }>('/applications/me');
 
-      const stepsMap: Record<number, { data: Record<string, unknown>; status: string }> = {};
+      const stepsMap: Record<number, StepState> = {};
       res.steps.forEach((step) => {
         stepsMap[step.step_number] = { data: step.data || {}, status: step.status };
       });
@@ -75,6 +80,20 @@ export function useApplication() {
 
   const markDirty = useCallback(() => {
     setState((prev) => ({ ...prev, hasUnsavedChanges: true }));
+  }, []);
+
+  const updateLocalStepData = useCallback((stepNumber: number, data: Record<string, unknown>) => {
+    setState((prev) => ({
+      ...prev,
+      steps: {
+        ...prev.steps,
+        [stepNumber]: { 
+          ...prev.steps[stepNumber],
+          data: { ...(prev.steps[stepNumber]?.data || {}), ...data },
+        },
+      },
+      hasUnsavedChanges: true,
+    }));
   }, []);
 
   const saveStep = useCallback(
@@ -126,15 +145,15 @@ export function useApplication() {
       try {
         await api.post(`/applications/${state.applicationId}/steps`, {
           step_number: stepNumber,
-          data: {},
-          status: 'skipped',
+          data: { skip: true },
+          status: 'completed',
         });
 
         setState((prev) => ({
           ...prev,
           steps: {
             ...prev.steps,
-            [stepNumber]: { data: {}, status: 'skipped' },
+            [stepNumber]: { data: { skip: true }, status: 'completed' },
           },
           saving: false,
           hasUnsavedChanges: false,
@@ -179,13 +198,13 @@ export function useApplication() {
   const isStepCompleted = useCallback(
     (stepNumber: number): boolean => {
       const step = state.steps[stepNumber];
-      return step?.status === 'completed' || step?.status === 'skipped';
+      return step?.status === 'completed';
     },
     [state.steps]
   );
 
   const completedCount = Object.values(state.steps).filter(
-    (s) => s.status === 'completed' || s.status === 'skipped'
+    (s) => s.status === 'completed'
   ).length;
 
   const confirmLeave = useCallback((): boolean => {
@@ -208,5 +227,6 @@ export function useApplication() {
     isStepCompleted,
     markDirty,
     confirmLeave,
+    updateLocalStepData,
   };
 }

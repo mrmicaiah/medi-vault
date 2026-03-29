@@ -13,6 +13,7 @@ export function ApplicationPage() {
     loading,
     error,
     hasUnsavedChanges,
+    steps,
     loadApplication,
     saveStep,
     skipStep,
@@ -56,6 +57,12 @@ export function ApplicationPage() {
     }
   };
 
+  const handleReturnToDashboard = async () => {
+    // Save current step and return to dashboard
+    await saveStep(currentStep, getStepData(currentStep), true);
+    navigate('/applicant');
+  };
+
   if (loading) {
     return (
       <div className="flex h-64 items-center justify-center">
@@ -89,6 +96,7 @@ export function ApplicationPage() {
         completedCount={completedCount}
         saving={saving}
         stepData={getStepData(currentStep)}
+        allStepsData={steps}
         onNext={handleNext}
         onPrev={prevStep}
         onSave={handleSave}
@@ -96,6 +104,7 @@ export function ApplicationPage() {
         onSaveAndExit={handleSaveAndExit}
         onExit={handleExit}
         onChange={handleChange}
+        onReturnToDashboard={handleReturnToDashboard}
       />
     </div>
   );
