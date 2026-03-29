@@ -18,6 +18,9 @@ from app.schemas.application import (
     StepData,
 )
 
+# Steps that can be updated after submission (document uploads)
+UPDATABLE_STEPS_AFTER_SUBMISSION = [11, 12, 13, 14, 15, 16, 17]
+
 
 class ApplicationService:
     """Handles application CRUD and step management."""
@@ -182,7 +185,19 @@ class ApplicationService:
         # Verify ownership
         app = self.get_application(app_id, user_id)
 
-        if app.status not in (ApplicationStatus.IN_PROGRESS,):
+        # Check if step can be modified
+        if app.status == ApplicationStatus.IN_PROGRESS:
+            # All steps can be modified
+            pass
+        elif app.status in (ApplicationStatus.SUBMITTED, ApplicationStatus.UNDER_REVIEW):
+            # Only document upload steps can be modified after submission
+            if step_number not in UPDATABLE_STEPS_AFTER_SUBMISSION:
+                raise HTTPException(
+                    status_code=status.HTTP_400_BAD_REQUEST,
+                    detail="This step cannot be modified after submission",
+                )
+        else:
+            # Approved or rejected - no modifications
             raise HTTPException(
                 status_code=status.HTTP_400_BAD_REQUEST,
                 detail="Application is not in a modifiable state",
@@ -221,8 +236,8 @@ class ApplicationService:
                 detail=f"Step {step_number} not found",
             )
 
-        # Update application's current step if moving forward
-        if is_completed and step_number >= app.current_step:
+        # Update application's current step if moving forward (only for in_progress apps)
+        if app.status == ApplicationStatus.IN_PROGRESS and is_completed and step_number >= app.current_step:
             next_step = min(step_number + 1, 22)
             self.supabase.table("applications").update(
                 {
@@ -286,17 +301,21 @@ class ApplicationService:
                 detail="Application is not in progress",
             )
 
-        # Check all required steps are completed
+        # Check all required steps are completed (steps 1-10 and 18-22 must be done)
+        # Document uploads (11-17) can be skipped
+        required_steps = list(range(1, 11)) + list(range(18, 23))
+        
         incomplete = (
             self.supabase.table("application_steps")
-            .select("step_number, step_name", count="exact")
+            .select("step_number, step_name")
             .eq("application_id", app_id)
             .eq("is_completed", False)
+            .in_("step_number", required_steps)
             .execute()
         )
 
-        if incomplete.count and incomplete.count > 0:
-            names = [s["step_name"] for s in (incomplete.data or [])]
+        if incomplete.data and len(incomplete.data) > 0:
+            names = [s["step_name"] for s in incomplete.data]
             raise HTTPException(
                 status_code=status.HTTP_400_BAD_REQUEST,
                 detail=f"Incomplete steps: {', '.join(names)}",
