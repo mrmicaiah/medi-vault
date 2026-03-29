@@ -1,29 +1,48 @@
 import React, { useState, useEffect } from 'react';
-import { Link, useNavigate, useSearchParams } from 'react-router-dom';
+import { Link, useNavigate, useParams, useSearchParams } from 'react-router-dom';
 import { useAuth } from '../../hooks/useAuth';
 import { Input } from '../../components/ui/Input';
 import { Button } from '../../components/ui/Button';
 import { Alert } from '../../components/ui/Alert';
 import { Card } from '../../components/ui/Card';
+import { api } from '../../lib/api';
 
-// TODO: Fetch from API when multi-agency is implemented
-const AGENCY = {
-  name: 'Eveready HomeCare',
-  tagline: 'Always Ready to Meet Your Needs',
-  logo: '/logo.png',
-};
+interface Location {
+  id: string;
+  name: string;
+  slug: string;
+  address_line1: string | null;
+  address_line2: string | null;
+  city: string;
+  state: string;
+  zip: string | null;
+  is_hiring: boolean;
+}
 
-const LOCATIONS = [
-  { id: 'dumfries', name: 'Dumfries', address: 'Dumfries, VA' },
-  { id: 'arlington', name: 'Arlington', address: '2700 S. Quincy Street Suite #220, Arlington, VA 22206' },
-  { id: 'sterling', name: 'Sterling', address: 'Sterling, VA' },
-  { id: 'hampton', name: 'Hampton', address: 'Hampton, VA' },
-];
+interface Agency {
+  id: string;
+  name: string;
+  slug: string;
+  tagline: string | null;
+  logo_url: string | null;
+  primary_color: string | null;
+  secondary_color: string | null;
+  website: string | null;
+  phone: string | null;
+  email: string | null;
+  locations: Location[];
+}
 
 export function ApplyPage() {
+  const { agencySlug } = useParams<{ agencySlug?: string }>();
   const { signUp, user } = useAuth();
   const navigate = useNavigate();
   const [searchParams] = useSearchParams();
+  
+  // Agency data
+  const [agency, setAgency] = useState<Agency | null>(null);
+  const [loadingAgency, setLoadingAgency] = useState(true);
+  const [agencyError, setAgencyError] = useState<string | null>(null);
   
   const [step, setStep] = useState<'welcome' | 'location' | 'account'>('welcome');
   const [selectedLocation, setSelectedLocation] = useState<string>('');
@@ -37,13 +56,36 @@ export function ApplyPage() {
   const [loading, setLoading] = useState(false);
   const [success, setSuccess] = useState(false);
 
+  // Fetch agency data
+  useEffect(() => {
+    const fetchAgency = async () => {
+      // Use slug from URL params, or default to 'eveready-homecare'
+      const slug = agencySlug || 'eveready-homecare';
+      
+      try {
+        setLoadingAgency(true);
+        const data = await api.get<Agency>(`/agencies/by-slug/${slug}`);
+        setAgency(data);
+      } catch (err) {
+        setAgencyError('Agency not found. Please check the URL and try again.');
+      } finally {
+        setLoadingAgency(false);
+      }
+    };
+    
+    fetchAgency();
+  }, [agencySlug]);
+
   // Pre-select location from URL if provided
   useEffect(() => {
     const loc = searchParams.get('location');
-    if (loc && LOCATIONS.find(l => l.id === loc)) {
-      setSelectedLocation(loc);
+    if (loc && agency?.locations.find(l => l.slug === loc || l.id === loc)) {
+      const location = agency.locations.find(l => l.slug === loc || l.id === loc);
+      if (location) {
+        setSelectedLocation(location.id);
+      }
     }
-  }, [searchParams]);
+  }, [searchParams, agency]);
 
   // If user is already logged in, redirect to application
   useEffect(() => {
@@ -68,8 +110,11 @@ export function ApplyPage() {
 
     setLoading(true);
     try {
-      // TODO: Pass selectedLocation to signUp when multi-location is implemented
-      await signUp(email, password, firstName, lastName);
+      // Pass agency_id and location_id with signup
+      await signUp(email, password, firstName, lastName, {
+        agency_id: agency?.id,
+        location_id: selectedLocation,
+      });
       setSuccess(true);
     } catch (err) {
       setError(err instanceof Error ? err.message : 'Failed to create account');
@@ -78,6 +123,42 @@ export function ApplyPage() {
     }
   };
 
+  // Loading state
+  if (loadingAgency) {
+    return (
+      <div className="min-h-screen bg-gradient-to-br from-navy via-navy to-maroon flex items-center justify-center">
+        <div className="text-center">
+          <svg className="mx-auto h-8 w-8 animate-spin text-white" fill="none" viewBox="0 0 24 24">
+            <circle className="opacity-25" cx="12" cy="12" r="10" stroke="currentColor" strokeWidth="4" />
+            <path className="opacity-75" fill="currentColor" d="M4 12a8 8 0 018-8V0C5.373 0 0 5.373 0 12h4z" />
+          </svg>
+          <p className="mt-3 text-white/60">Loading...</p>
+        </div>
+      </div>
+    );
+  }
+
+  // Agency not found
+  if (agencyError || !agency) {
+    return (
+      <div className="min-h-screen bg-gradient-to-br from-navy via-navy to-maroon flex items-center justify-center p-4">
+        <Card className="max-w-md w-full p-8 text-center">
+          <div className="mx-auto mb-4 flex h-16 w-16 items-center justify-center rounded-full bg-red-100">
+            <svg className="h-8 w-8 text-red-600" fill="none" viewBox="0 0 24 24" stroke="currentColor">
+              <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M6 18L18 6M6 6l12 12" />
+            </svg>
+          </div>
+          <h2 className="mb-2 font-display text-2xl font-bold text-navy">Agency Not Found</h2>
+          <p className="mb-6 text-gray">{agencyError}</p>
+          <Link to="/">
+            <Button variant="secondary">Go Home</Button>
+          </Link>
+        </Card>
+      </div>
+    );
+  }
+
+  // Success state
   if (success) {
     return (
       <div className="min-h-screen bg-gradient-to-br from-navy via-navy to-maroon flex items-center justify-center p-4">
@@ -111,17 +192,25 @@ export function ApplyPage() {
     );
   }
 
+  const selectedLocationData = agency.locations.find(l => l.id === selectedLocation);
+
   return (
     <div className="min-h-screen bg-gradient-to-br from-navy via-navy to-maroon">
       {/* Header */}
       <header className="p-4">
         <div className="max-w-4xl mx-auto flex items-center gap-3">
-          <div className="h-10 w-10 rounded-lg bg-white/10 flex items-center justify-center">
-            <span className="text-white font-bold text-lg">E</span>
-          </div>
+          {agency.logo_url ? (
+            <img src={agency.logo_url} alt={agency.name} className="h-10 w-10 rounded-lg object-contain bg-white" />
+          ) : (
+            <div className="h-10 w-10 rounded-lg bg-white/10 flex items-center justify-center">
+              <span className="text-white font-bold text-lg">{agency.name[0]}</span>
+            </div>
+          )}
           <div>
-            <h1 className="text-white font-display font-bold">{AGENCY.name}</h1>
-            <p className="text-white/60 text-xs">{AGENCY.tagline}</p>
+            <h1 className="text-white font-display font-bold">{agency.name}</h1>
+            {agency.tagline && (
+              <p className="text-white/60 text-xs">{agency.tagline}</p>
+            )}
           </div>
         </div>
       </header>
@@ -207,54 +296,65 @@ export function ApplyPage() {
               Choose the office location closest to you. You can work with clients throughout the area.
             </p>
             
-            <div className="grid grid-cols-1 md:grid-cols-2 gap-4 mb-8">
-              {LOCATIONS.map((location) => (
-                <button
-                  key={location.id}
-                  onClick={() => setSelectedLocation(location.id)}
-                  className={`p-6 rounded-xl text-left transition-all ${
-                    selectedLocation === location.id
-                      ? 'bg-white ring-4 ring-maroon'
-                      : 'bg-white/10 hover:bg-white/20'
-                  }`}
+            {agency.locations.length === 0 ? (
+              <div className="bg-white/10 rounded-xl p-8 text-center">
+                <p className="text-white/70">No locations are currently hiring. Please check back later.</p>
+              </div>
+            ) : (
+              <>
+                <div className="grid grid-cols-1 md:grid-cols-2 gap-4 mb-8">
+                  {agency.locations.map((location) => (
+                    <button
+                      key={location.id}
+                      onClick={() => setSelectedLocation(location.id)}
+                      className={`p-6 rounded-xl text-left transition-all ${
+                        selectedLocation === location.id
+                          ? 'bg-white ring-4 ring-maroon'
+                          : 'bg-white/10 hover:bg-white/20'
+                      }`}
+                    >
+                      <div className="flex items-start gap-4">
+                        <div className={`h-6 w-6 rounded-full border-2 flex items-center justify-center flex-shrink-0 mt-0.5 ${
+                          selectedLocation === location.id
+                            ? 'border-maroon bg-maroon'
+                            : 'border-white/40'
+                        }`}>
+                          {selectedLocation === location.id && (
+                            <svg className="h-4 w-4 text-white" fill="none" viewBox="0 0 24 24" stroke="currentColor">
+                              <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={3} d="M5 13l4 4L19 7" />
+                            </svg>
+                          )}
+                        </div>
+                        <div>
+                          <h3 className={`font-semibold text-lg ${
+                            selectedLocation === location.id ? 'text-navy' : 'text-white'
+                          }`}>
+                            {location.name}
+                          </h3>
+                          <p className={`text-sm ${
+                            selectedLocation === location.id ? 'text-gray' : 'text-white/60'
+                          }`}>
+                            {location.address_line1 
+                              ? `${location.address_line1}, ${location.city}, ${location.state}`
+                              : `${location.city}, ${location.state}`
+                            }
+                          </p>
+                        </div>
+                      </div>
+                    </button>
+                  ))}
+                </div>
+                
+                <Button 
+                  size="lg"
+                  className="px-12"
+                  disabled={!selectedLocation}
+                  onClick={() => setStep('account')}
                 >
-                  <div className="flex items-start gap-4">
-                    <div className={`h-6 w-6 rounded-full border-2 flex items-center justify-center flex-shrink-0 mt-0.5 ${
-                      selectedLocation === location.id
-                        ? 'border-maroon bg-maroon'
-                        : 'border-white/40'
-                    }`}>
-                      {selectedLocation === location.id && (
-                        <svg className="h-4 w-4 text-white" fill="none" viewBox="0 0 24 24" stroke="currentColor">
-                          <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={3} d="M5 13l4 4L19 7" />
-                        </svg>
-                      )}
-                    </div>
-                    <div>
-                      <h3 className={`font-semibold text-lg ${
-                        selectedLocation === location.id ? 'text-navy' : 'text-white'
-                      }`}>
-                        {location.name}
-                      </h3>
-                      <p className={`text-sm ${
-                        selectedLocation === location.id ? 'text-gray' : 'text-white/60'
-                      }`}>
-                        {location.address}
-                      </p>
-                    </div>
-                  </div>
-                </button>
-              ))}
-            </div>
-            
-            <Button 
-              size="lg"
-              className="px-12"
-              disabled={!selectedLocation}
-              onClick={() => setStep('account')}
-            >
-              Continue
-            </Button>
+                  Continue
+                </Button>
+              </>
+            )}
           </div>
         )}
 
@@ -277,7 +377,7 @@ export function ApplyPage() {
                   Create Your Account
                 </h2>
                 <p className="text-gray text-sm">
-                  Applying to: <strong className="text-maroon">{LOCATIONS.find(l => l.id === selectedLocation)?.name}</strong>
+                  Applying to: <strong className="text-maroon">{selectedLocationData?.name}</strong>
                 </p>
               </div>
 
