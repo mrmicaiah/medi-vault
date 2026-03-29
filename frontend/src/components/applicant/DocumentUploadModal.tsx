@@ -4,6 +4,8 @@ import { FileUpload } from '../ui/FileUpload';
 import { Input, Select } from '../ui/Input';
 import { Alert } from '../ui/Alert';
 import { api } from '../../lib/api';
+import { supabase } from '../../lib/supabase';
+import { useAuth } from '../../hooks/useAuth';
 
 interface DocumentUploadModalProps {
   isOpen: boolean;
@@ -48,6 +50,17 @@ const ID_TYPES = [
   { value: 'passport', label: 'US Passport' },
 ];
 
+// Map step numbers to readable folder names for storage organization
+const STEP_FOLDER_NAMES: Record<number, string> = {
+  11: 'work-authorization',
+  12: 'id-front',
+  13: 'id-back',
+  14: 'ssn-card',
+  15: 'credentials',
+  16: 'cpr-certification',
+  17: 'tb-test',
+};
+
 export function DocumentUploadModal({
   isOpen,
   onClose,
@@ -57,8 +70,10 @@ export function DocumentUploadModal({
   stepName,
   existingData = {},
 }: DocumentUploadModalProps) {
+  const { user } = useAuth();
   const [saving, setSaving] = useState(false);
   const [error, setError] = useState<string | null>(null);
+  const [uploadProgress, setUploadProgress] = useState<string | null>(null);
   const [formData, setFormData] = useState<Record<string, unknown>>(existingData);
   const [file, setFile] = useState<File | null>(null);
 
@@ -73,23 +88,83 @@ export function DocumentUploadModal({
     setFormData(prev => ({ ...prev, file_name: selectedFile.name }));
   };
 
+  const uploadFileToStorage = async (file: File): Promise<{ path: string; url: string }> => {
+    if (!user?.id) {
+      throw new Error('User not authenticated');
+    }
+
+    // Create a unique file path: {user_id}/{step_folder}/{timestamp}_{filename}
+    const folderName = STEP_FOLDER_NAMES[stepNumber] || `step-${stepNumber}`;
+    const timestamp = Date.now();
+    const sanitizedFileName = file.name.replace(/[^a-zA-Z0-9.-]/g, '_');
+    const filePath = `${user.id}/${folderName}/${timestamp}_${sanitizedFileName}`;
+
+    setUploadProgress('Uploading file...');
+
+    // Upload to Supabase Storage
+    const { data, error: uploadError } = await supabase.storage
+      .from('documents')
+      .upload(filePath, file, {
+        cacheControl: '3600',
+        upsert: true, // Replace if exists
+      });
+
+    if (uploadError) {
+      console.error('Storage upload error:', uploadError);
+      throw new Error(`Failed to upload file: ${uploadError.message}`);
+    }
+
+    // Get the URL for accessing the file (signed URL for private bucket)
+    const { data: urlData } = await supabase.storage
+      .from('documents')
+      .createSignedUrl(data.path, 60 * 60 * 24 * 365); // 1 year expiry
+
+    setUploadProgress(null);
+
+    return {
+      path: data.path,
+      url: urlData?.signedUrl || '',
+    };
+  };
+
   const handleSubmit = async () => {
+    if (!file) {
+      setError('Please select a file to upload');
+      return;
+    }
+
     setSaving(true);
     setError(null);
 
     try {
-      // TODO: Upload file to storage first, then save step data
-      // For now, just save the metadata
+      // Step 1: Upload file to Supabase Storage
+      const { path, url } = await uploadFileToStorage(file);
+
+      // Step 2: Save step data with file metadata
+      setUploadProgress('Saving document info...');
+      
       await api.post(`/applications/${applicationId}/steps`, {
         step_number: stepNumber,
-        data: { ...formData, skip: false },
+        data: { 
+          ...formData, 
+          skip: false,
+          file_name: file.name,
+          file_size: file.size,
+          file_type: file.type,
+          storage_path: path,
+          storage_url: url,
+          uploaded_at: new Date().toISOString(),
+        },
         status: 'completed',
       });
 
+      setUploadProgress(null);
       onSuccess();
       onClose();
     } catch (err) {
+      console.error('Upload error:', err);
       setError(err instanceof Error ? err.message : 'Failed to upload document');
+      setUploadProgress(null);
     } finally {
       setSaving(false);
     }
@@ -247,7 +322,7 @@ export function DocumentUploadModal({
     }
   };
 
-  const canSubmit = formData.file_name && !saving;
+  const canSubmit = file && !saving;
 
   return (
     <div className="fixed inset-0 z-50 flex items-center justify-center bg-black/50">
@@ -259,6 +334,7 @@ export function DocumentUploadModal({
           <button
             onClick={onClose}
             className="text-gray hover:text-slate"
+            disabled={saving}
           >
             <svg className="h-5 w-5" fill="none" viewBox="0 0 24 24" stroke="currentColor">
               <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M6 18L18 6M6 6l12 12" />
@@ -272,6 +348,18 @@ export function DocumentUploadModal({
           </Alert>
         )}
 
+        {uploadProgress && (
+          <Alert variant="info" className="mb-4">
+            <div className="flex items-center gap-2">
+              <svg className="h-4 w-4 animate-spin" fill="none" viewBox="0 0 24 24">
+                <circle className="opacity-25" cx="12" cy="12" r="10" stroke="currentColor" strokeWidth="4" />
+                <path className="opacity-75" fill="currentColor" d="M4 12a8 8 0 018-8V0C5.373 0 0 5.373 0 12h4zm2 5.291A7.962 7.962 0 014 12H0c0 3.042 1.135 5.824 3 7.938l3-2.647z" />
+              </svg>
+              {uploadProgress}
+            </div>
+          </Alert>
+        )}
+
         <div className="space-y-4">
           {renderFields()}
 
@@ -280,8 +368,8 @@ export function DocumentUploadModal({
             onFileSelect={handleFileSelect}
             accept=".pdf,.jpg,.jpeg,.png"
             maxSize={10 * 1024 * 1024}
-            currentFile={formData.file_name ? { name: formData.file_name as string } : null}
-            helperText="Upload a clear photo or scan"
+            currentFile={file ? { name: file.name } : (formData.file_name ? { name: formData.file_name as string } : null)}
+            helperText="Upload a clear photo or scan (PDF, JPG, or PNG, max 10MB)"
           />
         </div>
 
@@ -290,7 +378,7 @@ export function DocumentUploadModal({
             Cancel
           </Button>
           <Button onClick={handleSubmit} loading={saving} disabled={!canSubmit}>
-            Upload Document
+            {saving ? 'Uploading...' : 'Upload Document'}
           </Button>
         </div>
       </div>
