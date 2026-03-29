@@ -13,6 +13,7 @@ interface ApplicationState {
   applicationStatus: ApplicationStatus;
   currentStep: number;
   steps: Record<number, StepState>;
+  pendingFiles: Record<number, File>;  // Files waiting to be uploaded on save
   loading: boolean;
   saving: boolean;
   error: string | null;
@@ -39,6 +40,7 @@ export function useApplication() {
     applicationStatus: 'not_started',
     currentStep: 1,
     steps: {},
+    pendingFiles: {},
     loading: false,
     saving: false,
     error: null,
@@ -53,7 +55,7 @@ export function useApplication() {
   // Warn before leaving with unsaved changes
   useEffect(() => {
     const handleBeforeUnload = (e: BeforeUnloadEvent) => {
-      if (state.hasUnsavedChanges) {
+      if (state.hasUnsavedChanges || Object.keys(state.pendingFiles).length > 0) {
         e.preventDefault();
         e.returnValue = 'You have unsaved changes. Are you sure you want to leave?';
         return e.returnValue;
@@ -62,7 +64,7 @@ export function useApplication() {
 
     window.addEventListener('beforeunload', handleBeforeUnload);
     return () => window.removeEventListener('beforeunload', handleBeforeUnload);
-  }, [state.hasUnsavedChanges]);
+  }, [state.hasUnsavedChanges, state.pendingFiles]);
 
   const loadApplication = useCallback(async () => {
     setState((prev) => ({ ...prev, loading: true, error: null }));
@@ -85,6 +87,7 @@ export function useApplication() {
         applicationStatus: res.application.status,
         currentStep: res.application.current_step,
         steps: stepsMap,
+        pendingFiles: {},
         loading: false,
         hasUnsavedChanges: false,
       }));
@@ -102,6 +105,36 @@ export function useApplication() {
     setState((prev) => ({ ...prev, hasUnsavedChanges: true }));
   }, []);
 
+  /**
+   * Store a file locally for a step (does NOT upload yet)
+   * Upload happens when saveStep is called
+   */
+  const setPendingFile = useCallback((stepNumber: number, file: File | null) => {
+    setState((prev) => {
+      const newPendingFiles = { ...prev.pendingFiles };
+      if (file) {
+        newPendingFiles[stepNumber] = file;
+      } else {
+        delete newPendingFiles[stepNumber];
+      }
+      return {
+        ...prev,
+        pendingFiles: newPendingFiles,
+        hasUnsavedChanges: true,
+      };
+    });
+  }, []);
+
+  /**
+   * Get pending file for a step (if any)
+   */
+  const getPendingFile = useCallback((stepNumber: number): File | null => {
+    return state.pendingFiles[stepNumber] || null;
+  }, [state.pendingFiles]);
+
+  /**
+   * Update local step data without saving to server
+   */
   const updateLocalStepData = useCallback((stepNumber: number, data: Record<string, unknown>) => {
     setState((prev) => ({
       ...prev,
@@ -154,6 +187,10 @@ export function useApplication() {
     };
   }, []);
 
+  /**
+   * Save step data to server
+   * If this is an upload step with a pending file, uploads the file first
+   */
   const saveStep = useCallback(
     async (stepNumber: number, data: Record<string, unknown>, completed: boolean = false) => {
       if (!state.applicationId) {
@@ -164,10 +201,11 @@ export function useApplication() {
       setState((prev) => ({ ...prev, saving: true, error: null }));
       
       try {
-        // Check if this step has a file that needs uploading
         let processedData = { ...data };
+        const pendingFile = state.pendingFiles[stepNumber];
         
-        if (UPLOAD_STEPS.includes(stepNumber) && data.file instanceof File) {
+        // If there's a pending file for this step, upload it first
+        if (UPLOAD_STEPS.includes(stepNumber) && pendingFile) {
           // Get current user ID
           const { data: { user } } = await supabase.auth.getUser();
           if (!user) {
@@ -175,16 +213,14 @@ export function useApplication() {
           }
 
           // Upload file to storage
-          const { path, url } = await uploadFile(data.file as File, stepNumber, user.id);
+          const { path, url } = await uploadFile(pendingFile, stepNumber, user.id);
           
-          // Replace file object with storage metadata
-          const file = data.file as File;
+          // Add file metadata to step data
           processedData = {
             ...data,
-            file: undefined, // Remove the File object
-            file_name: file.name,
-            file_size: file.size,
-            file_type: file.type,
+            file_name: pendingFile.name,
+            file_size: pendingFile.size,
+            file_type: pendingFile.type,
             storage_path: path,
             storage_url: url,
             uploaded_at: new Date().toISOString(),
@@ -193,7 +229,7 @@ export function useApplication() {
 
         // Remove any File objects from data (can't serialize to JSON)
         const cleanData = Object.fromEntries(
-          Object.entries(processedData).filter(([_, v]) => !(v instanceof File))
+          Object.entries(processedData).filter(([, v]) => !(v instanceof File))
         );
 
         await api.post(`/applications/${state.applicationId}/steps`, {
@@ -204,15 +240,22 @@ export function useApplication() {
 
         initialDataRef.current = cleanData;
 
-        setState((prev) => ({
-          ...prev,
-          steps: {
-            ...prev.steps,
-            [stepNumber]: { data: cleanData, status: completed ? 'completed' : 'in_progress' },
-          },
-          saving: false,
-          hasUnsavedChanges: false,
-        }));
+        // Clear pending file for this step after successful save
+        setState((prev) => {
+          const newPendingFiles = { ...prev.pendingFiles };
+          delete newPendingFiles[stepNumber];
+          
+          return {
+            ...prev,
+            steps: {
+              ...prev.steps,
+              [stepNumber]: { data: cleanData, status: completed ? 'completed' : 'in_progress' },
+            },
+            pendingFiles: newPendingFiles,
+            saving: false,
+            hasUnsavedChanges: false,
+          };
+        });
       } catch (err) {
         console.error('Save step error:', err);
         setState((prev) => ({
@@ -222,7 +265,7 @@ export function useApplication() {
         }));
       }
     },
-    [state.applicationId, uploadFile]
+    [state.applicationId, state.pendingFiles, uploadFile]
   );
 
   const submitApplication = useCallback(async () => {
@@ -264,15 +307,22 @@ export function useApplication() {
           status: 'completed',
         });
 
-        setState((prev) => ({
-          ...prev,
-          steps: {
-            ...prev.steps,
-            [stepNumber]: { data: { skip: true }, status: 'completed' },
-          },
-          saving: false,
-          hasUnsavedChanges: false,
-        }));
+        // Clear any pending file for this step
+        setState((prev) => {
+          const newPendingFiles = { ...prev.pendingFiles };
+          delete newPendingFiles[stepNumber];
+          
+          return {
+            ...prev,
+            steps: {
+              ...prev.steps,
+              [stepNumber]: { data: { skip: true }, status: 'completed' },
+            },
+            pendingFiles: newPendingFiles,
+            saving: false,
+            hasUnsavedChanges: false,
+          };
+        });
       } catch (err) {
         setState((prev) => ({
           ...prev,
@@ -323,11 +373,11 @@ export function useApplication() {
   ).length;
 
   const confirmLeave = useCallback((): boolean => {
-    if (state.hasUnsavedChanges) {
+    if (state.hasUnsavedChanges || Object.keys(state.pendingFiles).length > 0) {
       return window.confirm('You have unsaved changes. Are you sure you want to leave?');
     }
     return true;
-  }, [state.hasUnsavedChanges]);
+  }, [state.hasUnsavedChanges, state.pendingFiles]);
 
   return {
     ...state,
@@ -345,5 +395,7 @@ export function useApplication() {
     markDirty,
     confirmLeave,
     updateLocalStepData,
+    setPendingFile,
+    getPendingFile,
   };
 }
