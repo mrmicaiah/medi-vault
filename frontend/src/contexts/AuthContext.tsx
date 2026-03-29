@@ -34,33 +34,32 @@ export function AuthProvider({ children }: { children: React.ReactNode }) {
   const fetchProfile = useCallback(async (userId: string): Promise<Profile | null> => {
     console.log('[Auth] Fetching profile for:', userId);
     
-    // Add timeout to prevent hanging forever
-    const controller = new AbortController();
-    const timeoutId = setTimeout(() => controller.abort(), 5000);
-    
     try {
-      const { data, error } = await supabase
+      // Race between the query and a timeout
+      const timeoutPromise = new Promise<null>((resolve) => {
+        setTimeout(() => {
+          console.warn('[Auth] Profile fetch timed out');
+          resolve(null);
+        }, 5000);
+      });
+
+      const queryPromise = supabase
         .from('profiles')
         .select('*')
         .eq('id', userId)
         .maybeSingle()
-        .abortSignal(controller.signal);
+        .then(({ data, error }) => {
+          if (error) {
+            console.error('[Auth] Profile fetch error:', error);
+            return null;
+          }
+          console.log('[Auth] Profile fetched:', data);
+          return data as Profile | null;
+        });
 
-      clearTimeout(timeoutId);
-
-      if (error) {
-        console.error('[Auth] Profile fetch error:', error);
-        return null;
-      }
-      console.log('[Auth] Profile fetched:', data);
-      return data as Profile | null;
-    } catch (err: unknown) {
-      clearTimeout(timeoutId);
-      if (err instanceof Error && err.name === 'AbortError') {
-        console.error('[Auth] Profile fetch timed out');
-      } else {
-        console.error('[Auth] Profile fetch exception:', err);
-      }
+      return await Promise.race([queryPromise, timeoutPromise]);
+    } catch (err) {
+      console.error('[Auth] Profile fetch exception:', err);
       return null;
     }
   }, []);
@@ -98,8 +97,7 @@ export function AuthProvider({ children }: { children: React.ReactNode }) {
     );
 
     // Then get the initial session
-    // The onAuthStateChange will fire with INITIAL_SESSION
-    supabase.auth.getSession().then(({ data: { session }, error }) => {
+    supabase.auth.getSession().then(({ error }) => {
       if (error) {
         console.error('[Auth] getSession error:', error);
         setState(prev => ({
@@ -108,8 +106,7 @@ export function AuthProvider({ children }: { children: React.ReactNode }) {
           initialized: true,
         }));
       }
-      // Don't set state here - let onAuthStateChange handle it
-      // This avoids race conditions
+      // Let onAuthStateChange handle the state update
     });
 
     return () => {
