@@ -1,8 +1,9 @@
 """Application management endpoints."""
 
-from typing import List
+from typing import List, Optional
 
-from fastapi import APIRouter, Depends
+from fastapi import APIRouter, Depends, HTTPException
+from pydantic import BaseModel
 from supabase import Client
 
 from app.dependencies import get_supabase, get_current_user
@@ -15,6 +16,40 @@ from app.schemas.application import (
 from app.services.application_service import ApplicationService
 
 router = APIRouter(prefix="/applications", tags=["Applications"])
+
+
+class StepSubmission(BaseModel):
+    step_number: int
+    data: dict = {}
+    status: str = "in_progress"
+
+
+class ApplicationWithSteps(BaseModel):
+    application: ApplicationResponse
+    steps: List[ApplicationStepResponse]
+
+
+@router.get("/me", response_model=ApplicationWithSteps)
+async def get_my_application(
+    user: UserProfile = Depends(get_current_user),
+    supabase: Client = Depends(get_supabase),
+):
+    """Get or create the current user's application with all steps."""
+    service = ApplicationService(supabase)
+    
+    # Try to get existing application
+    applications = service.get_user_applications(user.id)
+    
+    if applications:
+        # Return the most recent application
+        app = applications[0]
+        steps = service.get_steps(app.id, user.id)
+        return {"application": app, "steps": steps}
+    else:
+        # Create a new application
+        app = service.create_application(user.id)
+        steps = service.get_steps(app.id, user.id)
+        return {"application": app, "steps": steps}
 
 
 @router.post("/", response_model=ApplicationResponse, status_code=201)
@@ -48,6 +83,24 @@ async def get_application(
     return service.get_application(app_id, user.id)
 
 
+@router.post("/{app_id}/steps", response_model=ApplicationStepResponse)
+async def save_step(
+    app_id: str,
+    step_data: StepSubmission,
+    user: UserProfile = Depends(get_current_user),
+    supabase: Client = Depends(get_supabase),
+):
+    """Save data for a specific application step."""
+    service = ApplicationService(supabase)
+    return service.save_step(
+        app_id, 
+        step_data.step_number, 
+        step_data.data, 
+        step_data.status,
+        user.id
+    )
+
+
 @router.put("/{app_id}/steps/{step_number}", response_model=ApplicationStepResponse)
 async def update_step(
     app_id: str,
@@ -56,7 +109,7 @@ async def update_step(
     user: UserProfile = Depends(get_current_user),
     supabase: Client = Depends(get_supabase),
 ):
-    """Submit data for a specific application step."""
+    """Update data for a specific application step."""
     service = ApplicationService(supabase)
     return service.update_step(app_id, step_number, step_data, user.id)
 
