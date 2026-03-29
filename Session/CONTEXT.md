@@ -25,7 +25,7 @@ MediVault is a proprietary software platform for home care agency management, be
 | Backend | Python 3.11 + FastAPI | Render | https://medi-vault-api.onrender.com |
 | Database | PostgreSQL | Supabase | (Supabase Dashboard) |
 | Auth | Supabase Auth | Supabase | Integrated |
-| File Storage | Supabase Storage | Supabase | (Not fully implemented yet) |
+| File Storage | Supabase Storage | Supabase | `documents` bucket |
 
 ### Repository Structure
 
@@ -42,7 +42,7 @@ medi-vault/
 │   │   │   └── AuthContext.tsx     # Supabase auth state management
 │   │   ├── hooks/
 │   │   │   ├── useAuth.ts          # Auth hook
-│   │   │   └── useApplication.ts   # Application wizard state
+│   │   │   └── useApplication.ts   # Application wizard state + file uploads
 │   │   ├── lib/
 │   │   │   ├── api.ts              # API client (fetch wrapper)
 │   │   │   ├── supabase.ts         # Supabase client
@@ -81,7 +81,7 @@ medi-vault/
 │       ├── 003_rls_policies.sql
 │       ├── 004_functions.sql
 │       ├── 005_triggers.sql
-│       ├── 006_storage.sql
+│       ├── 006_storage.sql         # Documents & agreements buckets + RLS
 │       ├── 007_seed_data.sql
 │       ├── 008_sensitive_data.sql
 │       └── 009_fix_rls_recursion.sql  # IMPORTANT: Fixes auth spinning issue
@@ -127,21 +127,29 @@ ENCRYPTION_KEY=<generated-fernet-key>
    - Steps 18-22: Final agreements and signature
    - Progress tracking, step navigation, save & exit
 
-3. **Application Lifecycle**
+3. **File Uploads to Supabase Storage** ✅ (Implemented March 29, 2026)
+   - `useApplication.ts` hook now uploads files to Supabase Storage bucket `documents`
+   - `DocumentUploadModal.tsx` uploads files when user uploads from dashboard
+   - Files organized by: `{user_id}/{step_folder}/{timestamp}_{filename}`
+   - Step folders: work-authorization, id-front, id-back, ssn-card, credentials, cpr-certification, tb-test
+   - Saves metadata: file_name, file_size, file_type, storage_path, storage_url, uploaded_at
+   - Signed URLs generated with 1-year expiry
+
+4. **Application Lifecycle**
    - `in_progress` → Wizard is editable
    - `submitted` → Wizard shows read-only view, uploads via Dashboard modal
    - `under_review` → Same as submitted
    - `approved` → Same, but with congratulations message
    - `rejected` → Read-only, no upload buttons
 
-4. **Dashboard**
+5. **Dashboard**
    - Shows application progress
    - Documents table with status (Uploaded, Needed, Optional, Expired)
    - Yellow highlighting for required missing docs
    - Upload modal for submitted applications
    - Smart button: Start/Continue/View Application based on status
 
-5. **Backend API**
+6. **Backend API**
    - `GET /api/applications/me` - Get or create user's application
    - `POST /api/applications/{id}/steps` - Save step data
    - `POST /api/applications/{id}/submit` - Submit application
@@ -155,18 +163,12 @@ ENCRYPTION_KEY=<generated-fernet-key>
    - **MUST RUN migration 009_fix_rls_recursion.sql in Supabase SQL Editor**
    - Added 5-second timeout as fallback, but the RLS fix is required
 
-2. **File Uploads Not Actually Uploading**
-   - The UI captures file metadata (name, size)
-   - But files are NOT being uploaded to Supabase Storage yet
-   - DocumentUploadModal saves metadata only
-   - **TODO:** Implement actual file upload to Supabase Storage
-
-3. **SSN Encryption**
+2. **SSN Encryption**
    - Backend endpoints exist (`/api/sensitive/ssn`)
    - Frontend SSNInput component exists
    - Not fully integrated into the application flow
 
-4. **Admin Panel**
+3. **Admin Panel**
    - Pages exist but are mostly placeholders
    - Pipeline, employee management, compliance views need work
 
@@ -209,11 +211,16 @@ step_number INTEGER (1-22)
 step_name TEXT
 step_type TEXT ('form', 'agreement', 'upload')
 is_completed BOOLEAN
-data JSONB
+data JSONB  -- Contains file metadata for upload steps
 completed_at TIMESTAMPTZ
 created_at TIMESTAMPTZ
 updated_at TIMESTAMPTZ
 ```
+
+### Supabase Storage
+- **Bucket:** `documents` (private)
+- **Structure:** `{user_id}/{step_folder}/{timestamp}_{filename}`
+- **RLS:** Users can only access their own files, admins can read all
 
 ### Key RLS Policies
 - Users can only read/write their own profile, application, and steps
@@ -224,30 +231,30 @@ updated_at TIMESTAMPTZ
 
 ## Application Steps (22 Total)
 
-| # | Name | Type | Notes |
-|---|------|------|-------|
-| 1 | Application Basics | form | |
-| 2 | Personal Information | form | Includes SSN input |
-| 3 | Emergency Contact | form | |
-| 4 | Education | form | |
-| 5 | Reference 1 | form | |
-| 6 | Reference 2 | form | |
-| 7 | Employment History | form | |
-| 8 | Work Preferences | form | |
-| 9 | Confidentiality Agreement | agreement | |
-| 10 | E-Signature Agreement | agreement | |
-| 11 | Work Authorization | upload | Required, can skip |
-| 12 | ID Front | upload | Required, can skip |
-| 13 | ID Back | upload | Required, can skip |
-| 14 | Social Security Card | upload | Required, can skip |
-| 15 | Credentials | upload | Optional, can skip |
-| 16 | CPR Certification | upload | Optional, can skip |
-| 17 | TB Test | upload | Optional, can skip |
-| 18 | Orientation Training | agreement | |
-| 19 | Criminal Background | agreement | |
-| 20 | VA Code Disclosure | agreement | |
-| 21 | Job Description | agreement | |
-| 22 | Final Signature | agreement | |
+| # | Name | Type | Storage Folder |
+|---|------|------|----------------|
+| 1 | Application Basics | form | - |
+| 2 | Personal Information | form | - |
+| 3 | Emergency Contact | form | - |
+| 4 | Education | form | - |
+| 5 | Reference 1 | form | - |
+| 6 | Reference 2 | form | - |
+| 7 | Employment History | form | - |
+| 8 | Work Preferences | form | - |
+| 9 | Confidentiality Agreement | agreement | - |
+| 10 | E-Signature Agreement | agreement | - |
+| 11 | Work Authorization | upload | work-authorization |
+| 12 | ID Front | upload | id-front |
+| 13 | ID Back | upload | id-back |
+| 14 | Social Security Card | upload | ssn-card |
+| 15 | Credentials | upload | credentials |
+| 16 | CPR Certification | upload | cpr-certification |
+| 17 | TB Test | upload | tb-test |
+| 18 | Orientation Training | agreement | - |
+| 19 | Criminal Background | agreement | - |
+| 20 | VA Code Disclosure | agreement | - |
+| 21 | Job Description | agreement | - |
+| 22 | Final Signature | agreement | - |
 
 ---
 
@@ -255,7 +262,7 @@ updated_at TIMESTAMPTZ
 
 ### Frontend
 - `frontend/src/contexts/AuthContext.tsx` - Auth state, login/logout, profile fetching
-- `frontend/src/hooks/useApplication.ts` - Application wizard state management
+- `frontend/src/hooks/useApplication.ts` - Application wizard state + file upload to Supabase
 - `frontend/src/pages/applicant/DashboardPage.tsx` - Main applicant dashboard
 - `frontend/src/pages/applicant/ApplicationPage.tsx` - Wizard or read-only view
 - `frontend/src/components/application/WizardShell.tsx` - Wizard UI wrapper
@@ -269,16 +276,34 @@ updated_at TIMESTAMPTZ
 - `backend/app/services/application_service.py` - Business logic
 
 ### Database
+- `supabase/migrations/006_storage.sql` - Storage bucket creation + RLS policies
 - `supabase/migrations/009_fix_rls_recursion.sql` - MUST BE RUN to fix auth issues
+
+---
+
+## Recent Changes (March 29, 2026)
+
+### File Upload Implementation
+1. **`DocumentUploadModal.tsx`** - Now actually uploads files to Supabase Storage
+   - Uses `supabase.storage.from('documents').upload()` 
+   - Generates signed URLs for access
+   - Saves complete metadata to application step data
+
+2. **`useApplication.ts`** - Added file upload capability
+   - Detects File objects in step data
+   - Uploads to Supabase Storage before saving step
+   - Cleans data to remove File objects before API call
+   - Stores: file_name, file_size, file_type, storage_path, storage_url, uploaded_at
 
 ---
 
 ## Immediate TODOs for Next Session
 
 1. **Verify RLS Fix** - Confirm migration 009 was run and auth works on hard refresh
-2. **Implement File Uploads** - Actually upload files to Supabase Storage
+2. ~~**Implement File Uploads**~~ ✅ Done - Files now upload to Supabase Storage
 3. **Test Full Flow** - Create account → Complete 22 steps → Submit → Upload missing docs
-4. **Fix Any Build Errors** - Check Cloudflare/Render logs
+4. **Fix Any Build Errors** - Check Cloudflare/Render logs after deploy
+5. **Admin Panel** - View uploaded documents, review applications
 
 ---
 
@@ -295,6 +320,9 @@ cd backend && pip install -r requirements.txt && uvicorn app.main:app --reload
 
 # Make user admin
 UPDATE profiles SET role = 'admin' WHERE email = 'your@email.com';
+
+# Check uploaded files
+# Supabase Dashboard → Storage → documents bucket
 ```
 
 ---
