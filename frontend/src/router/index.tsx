@@ -8,6 +8,9 @@ import { AppLayout } from '../components/layout/AppLayout';
 import { LoginPage } from '../pages/auth/LoginPage';
 import { SignupPage } from '../pages/auth/SignupPage';
 import { ResetPasswordPage } from '../pages/auth/ResetPasswordPage';
+import { InvitePage } from '../pages/auth/InvitePage';
+
+import { ApplyPage } from '../pages/public/ApplyPage';
 
 import { ApplicantDashboardPage } from '../pages/applicant/DashboardPage';
 import { ApplicationPage } from '../pages/applicant/ApplicationPage';
@@ -69,6 +72,12 @@ function RootRedirect() {
 export function RouterConfig() {
   return (
     <Routes>
+      {/* Public application page - no auth required */}
+      <Route path="/apply" element={<ApplyPage />} />
+      
+      {/* Staff invitation page - no auth required */}
+      <Route path="/invite/:token" element={<InvitePage />} />
+
       {/* Auth routes */}
       <Route element={<AuthLayout />}>
         <Route path="/auth/login" element={<LoginPage />} />
