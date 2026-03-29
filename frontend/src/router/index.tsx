@@ -20,6 +20,7 @@ import { EmployeesPage } from '../pages/admin/EmployeesPage';
 import { EmployeeDetailPage } from '../pages/admin/EmployeeDetailPage';
 import { CompliancePage } from '../pages/admin/CompliancePage';
 import { HirePage } from '../pages/admin/HirePage';
+import { UsersPage } from '../pages/admin/UsersPage';
 
 function ProtectedRoute({ children }: { children: React.ReactNode }) {
   const { user, loading, initialized } = useAuth();
@@ -50,7 +51,7 @@ function AdminRoute({ children }: { children: React.ReactNode }) {
 
   if (!initialized || loading) return null;
 
-  if (role !== 'admin' && role !== 'superadmin') {
+  if (role !== 'admin' && role !== 'superadmin' && role !== 'manager') {
     return <Navigate to="/applicant" replace />;
   }
 
@@ -59,7 +60,7 @@ function AdminRoute({ children }: { children: React.ReactNode }) {
 
 function RootRedirect() {
   const { role } = useAuth();
-  if (role === 'admin' || role === 'superadmin') {
+  if (role === 'admin' || role === 'superadmin' || role === 'manager') {
     return <Navigate to="/admin" replace />;
   }
   return <Navigate to="/applicant" replace />;
@@ -88,7 +89,7 @@ export function RouterConfig() {
         <Route path="/applicant/documents" element={<DocumentsPage />} />
       </Route>
 
-      {/* Protected admin routes */}
+      {/* Protected admin/manager routes */}
       <Route
         element={
           <ProtectedRoute>
@@ -105,6 +106,7 @@ export function RouterConfig() {
         <Route path="/admin/employee/:id" element={<EmployeeDetailPage />} />
         <Route path="/admin/compliance" element={<CompliancePage />} />
         <Route path="/admin/hire/:id" element={<HirePage />} />
+        <Route path="/admin/users" element={<UsersPage />} />
       </Route>
 
       {/* Root redirect */}
