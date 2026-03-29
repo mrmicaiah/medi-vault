@@ -1,0 +1,39 @@
+{% extends "base.html" %}
+
+{% block title %}E-Signature Consent - {{ company_name }}{% endblock %}
+{% block document_title %}Electronic Signature Consent Agreement{% endblock %}
+{% block subtitle %}Consent to Use Electronic Signatures{% endblock %}
+
+{% block content %}
+<p>This Electronic Signature Consent Agreement ("Agreement") is entered into by <strong>{{ applicant_name }}</strong> ("Signee") and <strong>{{ company_name }}</strong> ("Agency").</p>
+
+<h2>1. Consent to Electronic Signatures</h2>
+<p>By signing this Agreement, I consent to the use of electronic signatures in lieu of handwritten signatures for all documents, forms, and agreements required during my application process, onboarding, and employment with the Agency.</p>
+
+<h2>2. Legal Validity</h2>
+<p>I understand and agree that:</p>
+<ol>
+    <li>My electronic signature carries the same legal weight and effect as a handwritten signature under the Electronic Signatures in Global and National Commerce Act (E-SIGN Act) and the Uniform Electronic Transactions Act (UETA).</li>
+    <li>Documents signed electronically are legally binding and enforceable.</li>
+    <li>I may request a paper copy of any electronically signed document at any time.</li>
+</ol>
+
+<h2>3. Authentication</h2>
+<p>I acknowledge that my electronic signature is authenticated through:</p>
+<ul>
+    <li>My unique login credentials (email and password)</li>
+    <li>My typed signature as entered in the signature field</li>
+    <li>Timestamp and IP address recorded at the time of signing</li>
+</ul>
+
+<h2>4. Record Retention</h2>
+<p>The Agency will maintain electronic records of all signed documents for the duration required by applicable laws and regulations. I may request access to my signed documents at any time.</p>
+
+<h2>5. Right to Withdraw Consent</h2>
+<p>I understand that I may withdraw my consent to use electronic signatures at any time by providing written notice to the Agency. However, withdrawal of consent may affect my ability to complete the application or employment process electronically.</p>
+
+<h2>6. Hardware and Software Requirements</h2>
+<p>I confirm that I have access to a device and internet browser capable of supporting electronic signatures and viewing PDF documents.</p>
+
+<p><strong>By signing below, I consent to the use of electronic signatures and acknowledge that I have read and understood the terms of this Agreement.</strong></p>
+{% endblock %}

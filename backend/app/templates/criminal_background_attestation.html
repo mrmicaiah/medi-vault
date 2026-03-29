@@ -1,0 +1,44 @@
+{% extends "base.html" %}
+
+{% block title %}Criminal Background Attestation - {{ company_name }}{% endblock %}
+{% block document_title %}Criminal Background Check Attestation{% endblock %}
+{% block subtitle %}Disclosure and Authorization{% endblock %}
+
+{% block content %}
+<p>I, <strong>{{ applicant_name }}</strong>, provide the following attestation and authorization in connection with my application for employment with <strong>{{ company_name }}</strong>.</p>
+
+<h2>1. Disclosure</h2>
+<p>I attest that I have disclosed to the Agency any and all criminal convictions, pending charges, or other legal matters that may be relevant to my employment, including but not limited to:</p>
+<ul>
+    <li>Felony convictions</li>
+    <li>Misdemeanor convictions</li>
+    <li>Pending criminal charges</li>
+    <li>Participation in diversion or deferred adjudication programs</li>
+    <li>Any findings of abuse, neglect, or exploitation by any state or federal registry</li>
+</ul>
+
+<h2>2. Authorization for Background Check</h2>
+<p>I authorize <strong>{{ company_name }}</strong> and its designated agents to:</p>
+<ol>
+    <li>Conduct a comprehensive criminal background check, including federal, state, and local records.</li>
+    <li>Search the National Sex Offender Public Registry and applicable state registries.</li>
+    <li>Verify my identity through government-issued identification.</li>
+    <li>Contact previous employers and references provided in my application.</li>
+    <li>Search the Office of Inspector General (OIG) List of Excluded Individuals/Entities.</li>
+    <li>Conduct any additional background screening required by Virginia state law for home care workers.</li>
+</ol>
+
+<h2>3. Ongoing Obligation</h2>
+<p>I understand that I am obligated to report any new arrests, charges, or convictions to the Agency within 24 hours of the occurrence during my employment.</p>
+
+<h2>4. Acknowledgment</h2>
+<p>I understand that:</p>
+<ul>
+    <li>A criminal record does not automatically disqualify me from employment.</li>
+    <li>Any false or misleading information provided may result in denial of employment or termination.</li>
+    <li>Background check results will be maintained confidentially in accordance with applicable laws.</li>
+    <li>I have the right to dispute the accuracy of any information obtained through the background check.</li>
+</ul>
+
+<p><strong>By signing below, I certify that the information I have provided is true and complete, and I authorize the background check described above.</strong></p>
+{% endblock %}

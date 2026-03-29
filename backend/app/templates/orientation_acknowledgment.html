@@ -1,0 +1,35 @@
+{% extends "base.html" %}
+
+{% block title %}Orientation Acknowledgment - {{ company_name }}{% endblock %}
+{% block document_title %}Orientation Training Acknowledgment{% endblock %}
+{% block subtitle %}New Employee Orientation Completion{% endblock %}
+
+{% block content %}
+<p>I, <strong>{{ applicant_name }}</strong>, acknowledge that I have completed the new employee orientation training provided by <strong>{{ company_name }}</strong>.</p>
+
+<h2>1. Training Topics Covered</h2>
+<p>I confirm that the orientation training covered the following topics:</p>
+<ol>
+    <li><strong>Agency Overview:</strong> Mission, vision, values, and organizational structure</li>
+    <li><strong>Policies and Procedures:</strong> Employee handbook, workplace policies, and standard operating procedures</li>
+    <li><strong>HIPAA and Privacy:</strong> Patient privacy rights, PHI handling, and data security protocols</li>
+    <li><strong>Safety and Emergency Procedures:</strong> Workplace safety, infection control, emergency response, and incident reporting</li>
+    <li><strong>Client Care Standards:</strong> Care delivery standards, documentation requirements, and quality assurance</li>
+    <li><strong>Abuse and Neglect Reporting:</strong> Mandatory reporting requirements, signs of abuse/neglect, and reporting procedures</li>
+    <li><strong>Cultural Competency:</strong> Diversity, inclusion, and culturally sensitive care delivery</li>
+    <li><strong>Technology and Systems:</strong> Agency software, timekeeping, and communication tools</li>
+    <li><strong>Scheduling and Attendance:</strong> Scheduling procedures, call-off policies, and attendance expectations</li>
+    <li><strong>Code of Ethics:</strong> Professional conduct, boundaries, and ethical standards</li>
+</ol>
+
+<h2>2. Acknowledgment</h2>
+<p>I acknowledge that:</p>
+<ul>
+    <li>I have had the opportunity to ask questions about any topics covered during orientation.</li>
+    <li>I understand that I am responsible for adhering to all policies and procedures presented during orientation.</li>
+    <li>I understand that failure to comply with Agency policies may result in disciplinary action, up to and including termination.</li>
+    <li>I have received or been given access to the Employee Handbook and understand my responsibility to review it.</li>
+</ul>
+
+<p><strong>By signing below, I confirm that I have completed the orientation training and understand the material presented.</strong></p>
+{% endblock %}

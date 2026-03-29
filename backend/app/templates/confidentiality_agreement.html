@@ -1,0 +1,45 @@
+{% extends "base.html" %}
+
+{% block title %}Confidentiality Agreement - {{ company_name }}{% endblock %}
+{% block document_title %}Confidentiality &amp; Non-Disclosure Agreement{% endblock %}
+{% block subtitle %}Employee/Applicant Confidentiality Obligations{% endblock %}
+
+{% block content %}
+<p>This Confidentiality and Non-Disclosure Agreement ("Agreement") is entered into by <strong>{{ applicant_name }}</strong> ("Employee/Applicant") and <strong>{{ company_name }}</strong> ("Agency").</p>
+
+<h2>1. Purpose</h2>
+<p>As a condition of employment or engagement with the Agency, the Employee/Applicant acknowledges that they may have access to confidential and proprietary information related to the Agency's clients, operations, and business practices.</p>
+
+<h2>2. Definition of Confidential Information</h2>
+<p>Confidential Information includes, but is not limited to:</p>
+<ul>
+    <li>Client personal information, medical records, and care plans</li>
+    <li>Client and family contact information and home addresses</li>
+    <li>Agency business strategies, financial data, and operational procedures</li>
+    <li>Employee records, compensation details, and personnel files</li>
+    <li>Proprietary software, systems, and technology used by the Agency</li>
+    <li>Any information designated as confidential by the Agency</li>
+</ul>
+
+<h2>3. Obligations</h2>
+<p>The Employee/Applicant agrees to:</p>
+<ol>
+    <li>Maintain strict confidentiality of all Confidential Information during and after employment.</li>
+    <li>Not disclose, publish, or otherwise reveal any Confidential Information to any third party without prior written authorization.</li>
+    <li>Not use Confidential Information for personal gain or for the benefit of any entity other than the Agency.</li>
+    <li>Take reasonable precautions to prevent unauthorized access to Confidential Information.</li>
+    <li>Comply with all applicable HIPAA regulations regarding Protected Health Information (PHI).</li>
+    <li>Return all materials containing Confidential Information upon termination of employment.</li>
+</ol>
+
+<h2>4. HIPAA Compliance</h2>
+<p>The Employee/Applicant understands that violations of HIPAA regulations may result in civil and criminal penalties, including fines up to $250,000 and imprisonment up to 10 years for certain violations.</p>
+
+<h2>5. Duration</h2>
+<p>This Agreement shall remain in effect during the Employee/Applicant's engagement with the Agency and shall survive the termination of such engagement indefinitely with respect to Confidential Information.</p>
+
+<h2>6. Breach</h2>
+<p>Any breach of this Agreement may result in immediate termination of employment and may subject the Employee/Applicant to legal action, including claims for damages and injunctive relief.</p>
+
+<p><strong>By signing below, I acknowledge that I have read, understand, and agree to abide by the terms of this Confidentiality and Non-Disclosure Agreement.</strong></p>
+{% endblock %}
