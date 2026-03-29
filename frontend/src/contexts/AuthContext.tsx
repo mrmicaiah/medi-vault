@@ -37,7 +37,7 @@ export function AuthProvider({ children }: { children: React.ReactNode }) {
       const { data, error } = await supabase
         .from('profiles')
         .select('*')
-        .eq('user_id', userId)
+        .eq('id', userId)
         .single();
 
       if (error) throw error;
@@ -120,14 +120,19 @@ export function AuthProvider({ children }: { children: React.ReactNode }) {
       setState((prev) => ({ ...prev, loading: false }));
       throw error;
     }
+    // The handle_new_user() trigger should create the profile automatically
+    // But if it doesn't exist yet, create it manually
     if (data.user) {
-      await supabase.from('profiles').insert({
-        user_id: data.user.id,
+      const { error: profileError } = await supabase.from('profiles').upsert({
+        id: data.user.id,
         first_name: firstName,
         last_name: lastName,
         email,
         role: 'applicant',
       });
+      if (profileError) {
+        console.error('Error creating profile:', profileError);
+      }
     }
   };
 
