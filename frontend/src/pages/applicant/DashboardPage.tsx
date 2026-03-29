@@ -37,7 +37,7 @@ const DOCUMENT_STEPS: Record<number, { name: string; category: string; required:
   17: { name: 'TB Test Results', category: 'health', required: false },
 };
 
-type DocStatus = 'uploaded' | 'skipped' | 'missing' | 'expired';
+type DocStatus = 'uploaded' | 'needed' | 'optional' | 'expired';
 
 interface DocItem {
   stepNumber: number;
@@ -51,15 +51,15 @@ interface DocItem {
 
 const statusVariant: Record<DocStatus, 'success' | 'warning' | 'error' | 'neutral'> = {
   uploaded: 'success',
-  skipped: 'warning',
-  missing: 'neutral',
+  needed: 'warning',
+  optional: 'neutral',
   expired: 'error',
 };
 
 const statusLabel: Record<DocStatus, string> = {
   uploaded: 'Uploaded',
-  skipped: 'Needed',
-  missing: 'Not Started',
+  needed: 'Needed',
+  optional: 'Optional',
   expired: 'Expired',
 };
 
@@ -113,22 +113,25 @@ export function ApplicantDashboardPage() {
     const step = steps.find(s => s.step_number === parseInt(stepNum));
     const data = step?.data || {};
     
-    let status: DocStatus = 'missing';
+    let status: DocStatus;
     let expirationDate: string | undefined;
 
-    if (step?.status === 'completed') {
-      if (data.skip) {
-        status = 'skipped';
-      } else if (data.file_name) {
-        status = 'uploaded';
-        const expDate = data.expiration_date as string | undefined;
-        if (expDate) {
-          expirationDate = expDate;
-          if (new Date(expDate) < new Date()) {
-            status = 'expired';
-          }
+    if (step?.status === 'completed' && data.file_name && !data.skip) {
+      // Has a file uploaded
+      status = 'uploaded';
+      const expDate = data.expiration_date as string | undefined;
+      if (expDate) {
+        expirationDate = expDate;
+        if (new Date(expDate) < new Date()) {
+          status = 'expired';
         }
       }
+    } else if (doc.required) {
+      // Required but not uploaded
+      status = 'needed';
+    } else {
+      // Optional and not uploaded
+      status = 'optional';
     }
 
     return {
@@ -148,7 +151,8 @@ export function ApplicantDashboardPage() {
   const currentStep = application?.current_step || 1;
   const hasApplication = application !== null;
 
-  const requiredMissing = documents.filter(d => d.required && (d.status === 'skipped' || d.status === 'missing'));
+  // Only count required docs that are missing
+  const requiredMissing = documents.filter(d => d.required && d.status === 'needed');
   const expiredDocs = documents.filter(d => d.status === 'expired');
   const expiringDocs = documents.filter(d => 
     d.expirationDate && d.status === 'uploaded' && 
@@ -174,7 +178,6 @@ export function ApplicantDashboardPage() {
     loadApplication();
   };
 
-  // Determine what button to show
   const getApplicationButton = () => {
     if (!hasApplication || completedSteps === 0) {
       return (
@@ -258,7 +261,6 @@ export function ApplicantDashboardPage() {
       {requiredMissing.length > 0 && isSubmitted && (
         <Alert variant="warning" title="Documents Still Needed">
           You have {requiredMissing.length} required document(s) that need to be uploaded before you can be hired.
-          Please upload them below.
         </Alert>
       )}
 
@@ -351,9 +353,10 @@ export function ApplicantDashboardPage() {
             <span className="col-span-2">Action</span>
           </div>
           {documents.map((doc) => {
-            const isSkippedRequired = doc.required && doc.status === 'skipped';
-            const needsAttention = isSkippedRequired || doc.status === 'expired';
+            // Yellow highlight only for required docs that are needed or expired
+            const needsAttention = doc.required && (doc.status === 'needed' || doc.status === 'expired');
             const canUpload = !isRejected;
+            const showUploadButton = doc.status === 'needed' || doc.status === 'optional' || doc.status === 'expired';
             
             return (
               <div
@@ -378,7 +381,7 @@ export function ApplicantDashboardPage() {
                   {doc.expirationDate ? formatDate(doc.expirationDate) : '--'}
                 </span>
                 <div className="col-span-2">
-                  {canUpload && (doc.status === 'skipped' || doc.status === 'missing' || doc.status === 'expired') && (
+                  {canUpload && showUploadButton && (
                     isSubmitted ? (
                       <Button 
                         size="sm" 
