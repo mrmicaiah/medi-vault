@@ -5,7 +5,7 @@ from datetime import datetime, timezone
 from fastapi import APIRouter, Depends, HTTPException, status
 from supabase import Client
 
-from app.dependencies import get_supabase, require_admin
+from app.dependencies import get_supabase, require_admin, require_staff
 from app.models.application import ApplicationStatus
 from app.models.user import UserProfile
 from app.schemas.admin import (
@@ -22,10 +22,10 @@ router = APIRouter(prefix="/admin", tags=["Admin"])
 
 @router.get("/dashboard", response_model=DashboardStats)
 async def get_dashboard(
-    admin: UserProfile = Depends(require_admin),
+    staff: UserProfile = Depends(require_staff),
     supabase: Client = Depends(get_supabase),
 ):
-    """Get admin dashboard statistics."""
+    """Get admin dashboard statistics. Available to admins and managers."""
     # Count applications by status
     statuses = ["in_progress", "submitted", "under_review", "approved", "rejected", "hired"]
     counts = {}
@@ -98,10 +98,10 @@ async def get_dashboard(
 
 @router.get("/pipeline", response_model=PipelineResponse)
 async def get_pipeline(
-    admin: UserProfile = Depends(require_admin),
+    staff: UserProfile = Depends(require_staff),
     supabase: Client = Depends(get_supabase),
 ):
-    """Get the full applicant pipeline with applicants at each stage."""
+    """Get the full applicant pipeline with applicants at each stage. Available to admins and managers."""
     pipeline_statuses = [
         "in_progress",
         "submitted",
@@ -149,10 +149,10 @@ async def get_pipeline(
 @router.get("/applicants/{app_id}", response_model=ApplicantDetail)
 async def get_applicant_detail(
     app_id: str,
-    admin: UserProfile = Depends(require_admin),
+    staff: UserProfile = Depends(require_staff),
     supabase: Client = Depends(get_supabase),
 ):
-    """Get detailed view of an applicant for review."""
+    """Get detailed view of an applicant for review. Available to admins and managers."""
     # Get application with profile
     app_result = (
         supabase.table("applications")
@@ -223,7 +223,7 @@ async def approve_applicant(
     admin: UserProfile = Depends(require_admin),
     supabase: Client = Depends(get_supabase),
 ):
-    """Approve an applicant's application."""
+    """Approve an applicant's application. Admins only."""
     # Verify application is in reviewable state
     app_result = (
         supabase.table("applications")
@@ -266,7 +266,7 @@ async def reject_applicant(
     admin: UserProfile = Depends(require_admin),
     supabase: Client = Depends(get_supabase),
 ):
-    """Reject an applicant's application."""
+    """Reject an applicant's application. Admins only."""
     app_result = (
         supabase.table("applications")
         .select("id, status")
