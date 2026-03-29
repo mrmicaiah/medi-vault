@@ -44,10 +44,6 @@ export function WizardShell({
   const stepName = STEP_NAMES[currentStep] || `Step ${currentStep}`;
   const isFirst = currentStep === 1;
   const isLast = currentStep === TOTAL_STEPS;
-  const isUploadStep = UPLOAD_STEPS.includes(currentStep);
-  
-  // Check if current step is skipped (upload later)
-  const currentStepSkipped = stepData.skip === true;
   
   // Check if any upload steps were skipped
   const hasSkippedUploads = UPLOAD_STEPS.some(stepNum => {
@@ -139,7 +135,6 @@ export function WizardShell({
         <div className="flex gap-3">
           {isLast ? (
             hasSkippedUploads ? (
-              // If uploads were skipped, show Return to Dashboard
               <div className="flex flex-col items-end gap-2">
                 <Button onClick={onReturnToDashboard} loading={saving}>
                   Return to Dashboard
@@ -149,13 +144,11 @@ export function WizardShell({
                 </p>
               </div>
             ) : (
-              // All uploads complete, can submit
               <Button onClick={onNext} loading={saving}>
                 Submit Application
               </Button>
             )
           ) : (
-            // Not last step - show Next
             <Button onClick={onNext} loading={saving}>
               Next
               <svg className="h-4 w-4" fill="none" viewBox="0 0 24 24" stroke="currentColor">
@@ -166,7 +159,6 @@ export function WizardShell({
         </div>
       </div>
 
-      {/* Show skipped uploads summary on last step */}
       {isLast && hasSkippedUploads && (
         <Alert variant="warning" className="mt-6" title="Documents Needed">
           <p className="text-sm">
