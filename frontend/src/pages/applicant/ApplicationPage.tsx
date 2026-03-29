@@ -1,6 +1,7 @@
 import React, { useEffect } from 'react';
 import { useNavigate, Link } from 'react-router-dom';
 import { WizardShell } from '../../components/application/WizardShell';
+import { ReadOnlyApplication } from '../../components/application/ReadOnlyApplication';
 import { useApplication } from '../../hooks/useApplication';
 import { Alert } from '../../components/ui/Alert';
 import { Button } from '../../components/ui/Button';
@@ -75,31 +76,13 @@ export function ApplicationPage() {
     );
   }
 
-  // If application is locked, show read-only message
+  // If application is locked (submitted/approved/rejected), show read-only view
   if (isLocked) {
     return (
-      <div className="mx-auto max-w-2xl">
-        <Card>
-          <div className="text-center py-8">
-            <div className="mx-auto mb-4 flex h-16 w-16 items-center justify-center rounded-full bg-success-bg">
-              <svg className="h-8 w-8 text-success" fill="none" viewBox="0 0 24 24" stroke="currentColor">
-                <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M9 12l2 2 4-4m6 2a9 9 0 11-18 0 9 9 0 0118 0z" />
-              </svg>
-            </div>
-            <h2 className="font-display text-xl font-bold text-navy mb-2">
-              Application Submitted
-            </h2>
-            <p className="text-gray mb-6">
-              Your application has been submitted and is currently <strong>{applicationStatus.replace('_', ' ')}</strong>.
-              <br />
-              You can no longer edit your application, but you can still upload any missing documents from your dashboard.
-            </p>
-            <Link to="/applicant">
-              <Button>Go to Dashboard</Button>
-            </Link>
-          </div>
-        </Card>
-      </div>
+      <ReadOnlyApplication
+        steps={steps}
+        applicationStatus={applicationStatus}
+      />
     );
   }
 
