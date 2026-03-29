@@ -1,76 +1,110 @@
-import React, { useState } from 'react';
+import React, { useState, useEffect } from 'react';
 import { Link } from 'react-router-dom';
 import { Card } from '../../components/ui/Card';
 import { Badge } from '../../components/ui/Badge';
 import { Button } from '../../components/ui/Button';
 import { Input } from '../../components/ui/Input';
+import { Alert } from '../../components/ui/Alert';
+import { api } from '../../lib/api';
 import type { ApplicationStatus } from '../../types';
 import { formatDate } from '../../lib/utils';
 
 interface Applicant {
-  id: string;
-  name: string;
+  application_id: string;
+  user_id: string;
+  first_name: string;
+  last_name: string;
   email: string;
-  position: string;
-  status: ApplicationStatus;
-  progress: number;
-  submitted_at?: string;
-  created_at: string;
+  current_step: number;
+  completed_steps: number;
+  submitted_at: string | null;
+  updated_at: string;
+  status?: string;
 }
 
-const mockApplicants: Applicant[] = [
-  { id: '1', name: 'Maria Johnson', email: 'maria@example.com', position: 'PCA', status: 'submitted', progress: 100, submitted_at: '2026-03-29', created_at: '2026-03-20' },
-  { id: '2', name: 'James Williams', email: 'james@example.com', position: 'HHA', status: 'under_review', progress: 100, submitted_at: '2026-03-27', created_at: '2026-03-15' },
-  { id: '3', name: 'Sarah Davis', email: 'sarah@example.com', position: 'CNA', status: 'in_progress', progress: 68, created_at: '2026-03-25' },
-  { id: '4', name: 'Robert Brown', email: 'robert@example.com', position: 'PCA', status: 'not_started', progress: 0, created_at: '2026-03-28' },
-  { id: '5', name: 'Emily Chen', email: 'emily@example.com', position: 'RN', status: 'approved', progress: 100, submitted_at: '2026-03-22', created_at: '2026-03-10' },
-  { id: '6', name: 'David Lee', email: 'david@example.com', position: 'LPN', status: 'rejected', progress: 100, submitted_at: '2026-03-20', created_at: '2026-03-05' },
-  { id: '7', name: 'Ana Martinez', email: 'ana@example.com', position: 'PCA', status: 'submitted', progress: 100, submitted_at: '2026-03-28', created_at: '2026-03-18' },
-  { id: '8', name: 'Kevin Wright', email: 'kevin@example.com', position: 'HHA', status: 'in_progress', progress: 45, created_at: '2026-03-26' },
-];
+interface PipelineStage {
+  status: string;
+  count: number;
+  applicants: Applicant[];
+}
 
-const statusFilters: { value: ApplicationStatus | 'all'; label: string }[] = [
+interface PipelineResponse {
+  stages: PipelineStage[];
+  total: number;
+}
+
+const statusFilters: { value: string; label: string }[] = [
   { value: 'all', label: 'All' },
-  { value: 'not_started', label: 'Not Started' },
   { value: 'in_progress', label: 'In Progress' },
   { value: 'submitted', label: 'Submitted' },
   { value: 'under_review', label: 'Under Review' },
   { value: 'approved', label: 'Approved' },
   { value: 'rejected', label: 'Rejected' },
+  { value: 'hired', label: 'Hired' },
 ];
 
-const statusBadgeVariant: Record<ApplicationStatus, 'success' | 'warning' | 'error' | 'info' | 'neutral'> = {
+const statusBadgeVariant: Record<string, 'success' | 'warning' | 'error' | 'info' | 'neutral'> = {
   not_started: 'neutral',
   in_progress: 'info',
   submitted: 'warning',
   under_review: 'info',
   approved: 'success',
   rejected: 'error',
+  hired: 'success',
 };
 
-type SortField = 'name' | 'position' | 'status' | 'progress' | 'created_at';
+type SortField = 'name' | 'status' | 'progress' | 'updated_at';
 
 export function PipelinePage() {
+  const [pipeline, setPipeline] = useState<PipelineResponse | null>(null);
+  const [loading, setLoading] = useState(true);
+  const [error, setError] = useState<string | null>(null);
+  
   const [search, setSearch] = useState('');
-  const [statusFilter, setStatusFilter] = useState<ApplicationStatus | 'all'>('all');
-  const [sortField, setSortField] = useState<SortField>('created_at');
+  const [statusFilter, setStatusFilter] = useState<string>('all');
+  const [sortField, setSortField] = useState<SortField>('updated_at');
   const [sortDir, setSortDir] = useState<'asc' | 'desc'>('desc');
 
-  const filtered = mockApplicants
+  useEffect(() => {
+    const loadPipeline = async () => {
+      try {
+        setLoading(true);
+        setError(null);
+        const res = await api.get<PipelineResponse>('/admin/pipeline');
+        setPipeline(res);
+      } catch (err) {
+        setError(err instanceof Error ? err.message : 'Failed to load pipeline');
+      } finally {
+        setLoading(false);
+      }
+    };
+    
+    loadPipeline();
+  }, []);
+
+  // Flatten all applicants with their status
+  const allApplicants: Applicant[] = pipeline?.stages
+    .flatMap(s => s.applicants.map(a => ({ ...a, status: s.status }))) || [];
+
+  const filtered = allApplicants
     .filter((a) => {
+      const name = `${a.first_name} ${a.last_name}`.toLowerCase();
       const matchesSearch =
         !search ||
-        a.name.toLowerCase().includes(search.toLowerCase()) ||
+        name.includes(search.toLowerCase()) ||
         a.email.toLowerCase().includes(search.toLowerCase());
       const matchesStatus = statusFilter === 'all' || a.status === statusFilter;
       return matchesSearch && matchesStatus;
     })
     .sort((a, b) => {
       let cmp = 0;
-      if (sortField === 'name') cmp = a.name.localeCompare(b.name);
-      else if (sortField === 'position') cmp = a.position.localeCompare(b.position);
-      else if (sortField === 'progress') cmp = a.progress - b.progress;
-      else if (sortField === 'created_at') cmp = a.created_at.localeCompare(b.created_at);
+      if (sortField === 'name') {
+        cmp = `${a.first_name} ${a.last_name}`.localeCompare(`${b.first_name} ${b.last_name}`);
+      } else if (sortField === 'progress') {
+        cmp = a.completed_steps - b.completed_steps;
+      } else if (sortField === 'updated_at') {
+        cmp = new Date(a.updated_at).getTime() - new Date(b.updated_at).getTime();
+      }
       return sortDir === 'asc' ? cmp : -cmp;
     });
 
@@ -89,16 +123,36 @@ export function PipelinePage() {
     </svg>
   );
 
+  if (loading) {
+    return (
+      <div className="flex h-64 items-center justify-center">
+        <div className="text-center">
+          <svg className="mx-auto h-8 w-8 animate-spin text-maroon" fill="none" viewBox="0 0 24 24">
+            <circle className="opacity-25" cx="12" cy="12" r="10" stroke="currentColor" strokeWidth="4" />
+            <path className="opacity-75" fill="currentColor" d="M4 12a8 8 0 018-8V0C5.373 0 0 5.373 0 12h4zm2 5.291A7.962 7.962 0 014 12H0c0 3.042 1.135 5.824 3 7.938l3-2.647z" />
+          </svg>
+          <p className="mt-3 text-sm text-gray">Loading pipeline...</p>
+        </div>
+      </div>
+    );
+  }
+
   return (
     <div className="space-y-6">
       <div className="flex items-center justify-between">
         <div>
           <h1 className="font-display text-2xl font-bold text-navy">Applicant Pipeline</h1>
           <p className="mt-1 text-sm text-gray">
-            Manage and review applicant submissions.
+            {pipeline?.total || 0} total applicants
           </p>
         </div>
       </div>
+
+      {error && (
+        <Alert variant="error" dismissible>
+          {error}
+        </Alert>
+      )}
 
       <Card padding="none">
         <div className="border-b border-border p-4">
@@ -122,6 +176,11 @@ export function PipelinePage() {
                   }`}
                 >
                   {f.label}
+                  {f.value !== 'all' && (
+                    <span className="ml-1 text-gray-light">
+                      ({pipeline?.stages.find(s => s.status === f.value)?.count || 0})
+                    </span>
+                  )}
                 </button>
               ))}
             </div>
@@ -135,32 +194,30 @@ export function PipelinePage() {
                 <th className="cursor-pointer px-4 py-3 text-left text-xs font-medium uppercase text-gray" onClick={() => toggleSort('name')}>
                   Applicant <SortIcon field="name" />
                 </th>
-                <th className="cursor-pointer px-4 py-3 text-left text-xs font-medium uppercase text-gray" onClick={() => toggleSort('position')}>
-                  Position <SortIcon field="position" />
-                </th>
                 <th className="px-4 py-3 text-left text-xs font-medium uppercase text-gray">Status</th>
                 <th className="cursor-pointer px-4 py-3 text-left text-xs font-medium uppercase text-gray" onClick={() => toggleSort('progress')}>
                   Progress <SortIcon field="progress" />
                 </th>
-                <th className="cursor-pointer px-4 py-3 text-left text-xs font-medium uppercase text-gray" onClick={() => toggleSort('created_at')}>
-                  Applied <SortIcon field="created_at" />
+                <th className="cursor-pointer px-4 py-3 text-left text-xs font-medium uppercase text-gray" onClick={() => toggleSort('updated_at')}>
+                  Last Updated <SortIcon field="updated_at" />
                 </th>
                 <th className="px-4 py-3 text-right text-xs font-medium uppercase text-gray">Actions</th>
               </tr>
             </thead>
             <tbody>
               {filtered.map((applicant) => (
-                <tr key={applicant.id} className="border-b border-border last:border-0 hover:bg-gray-50/50">
+                <tr key={applicant.application_id} className="border-b border-border last:border-0 hover:bg-gray-50/50">
                   <td className="px-4 py-3">
                     <div>
-                      <p className="text-sm font-medium text-slate">{applicant.name}</p>
+                      <p className="text-sm font-medium text-slate">
+                        {applicant.first_name} {applicant.last_name}
+                      </p>
                       <p className="text-xs text-gray">{applicant.email}</p>
                     </div>
                   </td>
-                  <td className="px-4 py-3 text-sm text-slate">{applicant.position}</td>
                   <td className="px-4 py-3">
-                    <Badge variant={statusBadgeVariant[applicant.status]}>
-                      {applicant.status.replace(/_/g, ' ')}
+                    <Badge variant={statusBadgeVariant[applicant.status || 'in_progress']}>
+                      {(applicant.status || 'in_progress').replace(/_/g, ' ')}
                     </Badge>
                   </td>
                   <td className="px-4 py-3">
@@ -168,15 +225,15 @@ export function PipelinePage() {
                       <div className="h-1.5 w-16 rounded-full bg-gray-100">
                         <div
                           className="h-1.5 rounded-full bg-maroon"
-                          style={{ width: `${applicant.progress}%` }}
+                          style={{ width: `${(applicant.completed_steps / 22) * 100}%` }}
                         />
                       </div>
-                      <span className="text-xs text-gray">{applicant.progress}%</span>
+                      <span className="text-xs text-gray">{applicant.completed_steps}/22</span>
                     </div>
                   </td>
-                  <td className="px-4 py-3 text-sm text-gray">{formatDate(applicant.created_at)}</td>
+                  <td className="px-4 py-3 text-sm text-gray">{formatDate(applicant.updated_at)}</td>
                   <td className="px-4 py-3 text-right">
-                    <Link to={`/admin/applicant/${applicant.id}`}>
+                    <Link to={`/admin/applicant/${applicant.application_id}`}>
                       <Button variant="ghost" size="sm">
                         View
                       </Button>
@@ -186,7 +243,7 @@ export function PipelinePage() {
               ))}
               {filtered.length === 0 && (
                 <tr>
-                  <td colSpan={6} className="px-4 py-8 text-center text-sm text-gray">
+                  <td colSpan={5} className="px-4 py-8 text-center text-sm text-gray">
                     No applicants found matching your criteria.
                   </td>
                 </tr>
