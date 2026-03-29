@@ -1,5 +1,6 @@
 import { useState, useCallback, useEffect, useRef } from 'react';
 import { api } from '../lib/api';
+import { supabase } from '../lib/supabase';
 import type { ApplicationStep, ApplicationStatus } from '../types';
 
 interface StepState {
@@ -17,6 +18,20 @@ interface ApplicationState {
   error: string | null;
   hasUnsavedChanges: boolean;
 }
+
+// Map step numbers to readable folder names for storage organization
+const STEP_FOLDER_NAMES: Record<number, string> = {
+  11: 'work-authorization',
+  12: 'id-front',
+  13: 'id-back',
+  14: 'ssn-card',
+  15: 'credentials',
+  16: 'cpr-certification',
+  17: 'tb-test',
+};
+
+// Steps that involve file uploads
+const UPLOAD_STEPS = [11, 12, 13, 14, 15, 16, 17];
 
 export function useApplication() {
   const [state, setState] = useState<ApplicationState>({
@@ -101,6 +116,44 @@ export function useApplication() {
     }));
   }, []);
 
+  /**
+   * Upload a file to Supabase Storage
+   * Returns the storage path and signed URL
+   */
+  const uploadFile = useCallback(async (
+    file: File,
+    stepNumber: number,
+    userId: string
+  ): Promise<{ path: string; url: string }> => {
+    const folderName = STEP_FOLDER_NAMES[stepNumber] || `step-${stepNumber}`;
+    const timestamp = Date.now();
+    const sanitizedFileName = file.name.replace(/[^a-zA-Z0-9.-]/g, '_');
+    const filePath = `${userId}/${folderName}/${timestamp}_${sanitizedFileName}`;
+
+    // Upload to Supabase Storage
+    const { data, error: uploadError } = await supabase.storage
+      .from('documents')
+      .upload(filePath, file, {
+        cacheControl: '3600',
+        upsert: true,
+      });
+
+    if (uploadError) {
+      console.error('Storage upload error:', uploadError);
+      throw new Error(`Failed to upload file: ${uploadError.message}`);
+    }
+
+    // Get signed URL (1 year expiry)
+    const { data: urlData } = await supabase.storage
+      .from('documents')
+      .createSignedUrl(data.path, 60 * 60 * 24 * 365);
+
+    return {
+      path: data.path,
+      url: urlData?.signedUrl || '',
+    };
+  }, []);
+
   const saveStep = useCallback(
     async (stepNumber: number, data: Record<string, unknown>, completed: boolean = false) => {
       if (!state.applicationId) {
@@ -109,25 +162,59 @@ export function useApplication() {
       }
 
       setState((prev) => ({ ...prev, saving: true, error: null }));
+      
       try {
+        // Check if this step has a file that needs uploading
+        let processedData = { ...data };
+        
+        if (UPLOAD_STEPS.includes(stepNumber) && data.file instanceof File) {
+          // Get current user ID
+          const { data: { user } } = await supabase.auth.getUser();
+          if (!user) {
+            throw new Error('User not authenticated');
+          }
+
+          // Upload file to storage
+          const { path, url } = await uploadFile(data.file as File, stepNumber, user.id);
+          
+          // Replace file object with storage metadata
+          const file = data.file as File;
+          processedData = {
+            ...data,
+            file: undefined, // Remove the File object
+            file_name: file.name,
+            file_size: file.size,
+            file_type: file.type,
+            storage_path: path,
+            storage_url: url,
+            uploaded_at: new Date().toISOString(),
+          };
+        }
+
+        // Remove any File objects from data (can't serialize to JSON)
+        const cleanData = Object.fromEntries(
+          Object.entries(processedData).filter(([_, v]) => !(v instanceof File))
+        );
+
         await api.post(`/applications/${state.applicationId}/steps`, {
           step_number: stepNumber,
-          data,
+          data: cleanData,
           status: completed ? 'completed' : 'in_progress',
         });
 
-        initialDataRef.current = data;
+        initialDataRef.current = cleanData;
 
         setState((prev) => ({
           ...prev,
           steps: {
             ...prev.steps,
-            [stepNumber]: { data, status: completed ? 'completed' : 'in_progress' },
+            [stepNumber]: { data: cleanData, status: completed ? 'completed' : 'in_progress' },
           },
           saving: false,
           hasUnsavedChanges: false,
         }));
       } catch (err) {
+        console.error('Save step error:', err);
         setState((prev) => ({
           ...prev,
           saving: false,
@@ -135,7 +222,7 @@ export function useApplication() {
         }));
       }
     },
-    [state.applicationId]
+    [state.applicationId, uploadFile]
   );
 
   const submitApplication = useCallback(async () => {
