@@ -55,20 +55,7 @@ class PDFService:
         reader = PdfReader(i9_path)
         fields = []
         
-        for page in reader.pages:
-            if '/Annots' in page:
-                for annot in page['/Annots']:
-                    obj = annot.get_object()
-                    if obj.get('/FT') == '/Tx':  # Text field
-                        field_name = obj.get('/T')
-                        if field_name:
-                            fields.append(str(field_name))
-                    elif obj.get('/FT') == '/Btn':  # Checkbox/Radio
-                        field_name = obj.get('/T')
-                        if field_name:
-                            fields.append(str(field_name))
-        
-        # Also try getting fields from the form
+        # Get fields from the form
         if reader.get_fields():
             for field_name in reader.get_fields().keys():
                 if field_name not in fields:
@@ -133,15 +120,12 @@ class PDFService:
         # Clone the PDF
         writer.clone_document_from_reader(reader)
         
-        # Get available field names for mapping
-        available_fields = self.get_i9_field_names()
+        # Get our field values mapped to exact I-9 field names
+        field_values = self._map_data_to_i9_fields(application_data, ssn)
         
-        # Get our field values
-        field_values = self._map_data_to_i9_fields(application_data, ssn, available_fields)
-        
-        # Fill in the form fields on page 1 (Section 1 and 2)
-        if len(writer.pages) > 0:
-            writer.update_page_form_field_values(writer.pages[0], field_values)
+        # Fill in the form fields on all pages
+        for page_num, page in enumerate(writer.pages):
+            writer.update_page_form_field_values(page, field_values)
         
         # Write to bytes
         output = io.BytesIO()
@@ -280,177 +264,92 @@ class PDFService:
         
         return flat
     
-    def _map_data_to_i9_fields(
-        self, 
-        application_data: dict, 
-        ssn: Optional[str],
-        available_fields: List[str]
-    ) -> Dict[str, str]:
+    def _map_data_to_i9_fields(self, application_data: dict, ssn: Optional[str] = None) -> Dict[str, str]:
         """
-        Map application data to I-9 form field names.
+        Map application data to exact I-9 form field names.
         
-        The I-9 form has specific field names that vary by version.
-        This method attempts to match common field name patterns.
+        Based on the actual USCIS I-9 PDF field names.
         
         Args:
             application_data: Full application data with steps
             ssn: Decrypted SSN
-            available_fields: List of actual field names in the PDF
             
         Returns:
-            Dictionary mapping I-9 field names to values
+            Dictionary mapping exact I-9 field names to values
         """
         flat = self._flatten_application_data(application_data)
         today = datetime.now().strftime('%m/%d/%Y')
         
-        # Define our data with multiple possible field name variations
-        # The I-9 form field names can vary between versions
-        field_mappings = {
-            # Last Name variations
-            'last_name': [
-                'Last Name (Family Name)',
-                'Last Name',
-                'lastName',
-                'family_name',
-                'Last Name Family Name',
-                'Employee Last Name',
-            ],
-            'first_name': [
-                'First Name (Given Name)',
-                'First Name',
-                'firstName',
-                'given_name',
-                'First Name Given Name',
-                'Employee First Name',
-            ],
-            'middle_initial': [
-                'Middle Initial',
-                'MI',
-                'middleInitial',
-                'Middle',
-            ],
-            'other_names': [
-                'Other Last Names Used (if any)',
-                'Other Names Used',
-                'otherNames',
-                'Other Last Names Used if any',
-                'Maiden Name',
-            ],
-            'address': [
-                'Address (Street Number and Name)',
-                'Address',
-                'Street Address',
-                'address',
-                'Address Street Number and Name',
-            ],
-            'apt': [
-                'Apt. Number',
-                'Apt Number',
-                'Apartment',
-                'apt',
-                'Apt',
-            ],
-            'city': [
-                'City or Town',
-                'City',
-                'city',
-            ],
-            'state': [
-                'State',
-                'state',
-            ],
-            'zip': [
-                'ZIP Code',
-                'Zip Code',
-                'zip',
-                'Zip',
-                'ZIP',
-            ],
-            'dob': [
-                'Date of Birth (mm/dd/yyyy)',
-                'Date of Birth',
-                'DOB',
-                'dateOfBirth',
-                'Birth Date',
-            ],
-            'ssn': [
-                'U.S. Social Security Number',
-                'Social Security Number',
-                'SSN',
-                'ssn',
-            ],
-            'email': [
-                "Employee's E-mail Address",
-                "Employee E-mail Address",
-                'E-mail Address',
-                'Email',
-                'email',
-            ],
-            'phone': [
-                "Employee's Telephone Number",
-                "Employee Telephone Number",
-                'Telephone Number',
-                'Phone',
-                'phone',
-            ],
-            'employee_signature': [
-                'Employee Signature',
-                'Signature of Employee',
-                'employeeSignature',
-            ],
-            'employee_sign_date': [
-                "Today's Date (mm/dd/yyyy)",
-                "Today's Date",
-                'Date',
-                'Signature Date',
-            ],
-        }
+        # Build field values using EXACT field names from the I-9 PDF
+        fields = {}
         
-        # Our data values
-        data_values = {
-            'last_name': flat.get('last_name', ''),
-            'first_name': flat.get('first_name', ''),
-            'middle_initial': (flat.get('middle_name', '') or '')[:1],
-            'other_names': flat.get('other_last_names', '') or 'N/A',
-            'address': flat.get('address_line1', ''),
-            'apt': flat.get('address_line2', ''),
-            'city': flat.get('city', ''),
-            'state': flat.get('state', ''),
-            'zip': flat.get('zip', ''),
-            'dob': self._format_date(flat.get('date_of_birth', '')),
-            'ssn': ssn or '',
-            'email': flat.get('email', ''),
-            'phone': flat.get('phone', ''),
-            'employee_signature': flat.get('signature_name', ''),
-            'employee_sign_date': today,
-        }
+        # ===== SECTION 1: Employee Information (Page 1) =====
         
-        # Build the final field values dict
-        result = {}
+        # Name fields
+        fields['Last Name (Family Name)'] = flat.get('last_name', '')
+        fields['First Name Given Name'] = flat.get('first_name', '')
+        fields['Employee Middle Initial (if any)'] = (flat.get('middle_name', '') or '')[:1]
+        fields['Employee Other Last Names Used (if any)'] = flat.get('other_last_names', '') or 'N/A'
         
-        # For each data field, find a matching PDF field name
-        for data_key, possible_names in field_mappings.items():
-            value = data_values.get(data_key, '')
-            if not value:
-                continue
-                
-            # Try to find a matching field name in the PDF
-            for possible_name in possible_names:
-                # Check exact match
-                if possible_name in available_fields:
-                    result[possible_name] = value
-                    break
-                # Check case-insensitive match
-                for avail_field in available_fields:
-                    if avail_field.lower() == possible_name.lower():
-                        result[avail_field] = value
-                        break
-                    # Check partial match
-                    if possible_name.lower() in avail_field.lower():
-                        result[avail_field] = value
-                        break
+        # Address fields
+        fields['Address Street Number and Name'] = flat.get('address_line1', '')
+        fields['Apt Number (if any)'] = flat.get('address_line2', '')
+        fields['City or Town'] = flat.get('city', '')
+        fields['State'] = flat.get('state', '')
+        fields['ZIP Code'] = flat.get('zip', '')
         
-        return result
+        # Personal info
+        fields['Date of Birth mmddyyyy'] = self._format_date(flat.get('date_of_birth', ''))
+        fields['US Social Security Number'] = self._format_ssn(ssn) if ssn else ''
+        fields['Employees E-mail Address'] = flat.get('email', '')
+        fields['Telephone Number'] = flat.get('phone', '')
+        
+        # Citizenship status checkboxes
+        # CB_1 = US Citizen, CB_2 = Noncitizen National, CB_3 = Lawful Permanent Resident, CB_4 = Alien
+        # Since we only accept birth certificates, they are US Citizens
+        citizenship = flat.get('citizenship_status', '')
+        if citizenship == 'us_citizen' or citizenship == 'A citizen of the United States':
+            fields['CB_1'] = 'Yes'
+        elif citizenship == 'noncitizen_national':
+            fields['CB_2'] = 'Yes'
+        elif citizenship == 'lawful_permanent_resident':
+            fields['CB_3'] = 'Yes'
+        elif citizenship == 'alien_authorized':
+            fields['CB_4'] = 'Yes'
+        else:
+            # Default to US Citizen for birth certificate holders
+            fields['CB_1'] = 'Yes'
+        
+        # Employee signature
+        fields['Signature of Employee'] = flat.get('signature_name', '')
+        fields["Today's Date mmddyyyy"] = self._format_date(flat.get('signature_date', '')) or today
+        
+        # ===== SECTION 2: Employer Review (Page 1) =====
+        # This section is filled by employer after examining documents
+        
+        # List B - Identity Document (Driver's License / State ID)
+        fields['List B Document 1 Title'] = self._get_id_document_title(flat.get('id_type', ''))
+        fields['List B Issuing Authority 1'] = flat.get('id_issuing_state', '')
+        fields['List B Document Number 1'] = flat.get('id_number', '')
+        fields['List B Expiration Date 1'] = self._format_date(flat.get('id_expiration', ''))
+        
+        # List C - Employment Authorization (Birth Certificate)
+        fields['List C Document Title 1'] = 'U.S. Birth Certificate'
+        fields['List C Issuing Authority 1'] = flat.get('work_auth_issuing_authority', '') or 'United States'
+        fields['List C Document Number 1'] = flat.get('work_auth_doc_number', '') or 'N/A'
+        fields['List C Expiration Date 1'] = 'N/A'  # Birth certificates don't expire
+        
+        # Employer info (pre-fill company name)
+        fields['Employers Business or Org Name'] = 'Eveready HomeCare'
+        
+        # Leave these blank for employer to fill:
+        # - FirstDayEmployed mmddyyyy
+        # - Last Name First Name and Title of Employer or Authorized Rep
+        # - Signature of Employer or AR
+        # - S2 Todays Date mmddyyyy
+        # - Employers Business or Org Address
+        
+        return fields
     
     def _get_id_document_title(self, id_type: str) -> str:
         """Convert our ID type to I-9 document title."""
@@ -459,10 +358,10 @@ class PDFService:
             'state_id': 'State ID Card',
             'passport': 'U.S. Passport',
         }
-        return mapping.get(id_type, id_type)
+        return mapping.get(id_type, id_type or "Driver's License")
     
     def _format_date(self, date_str: str) -> str:
-        """Convert YYYY-MM-DD to MM/DD/YYYY format."""
+        """Convert YYYY-MM-DD to MM/DD/YYYY format for I-9."""
         if not date_str:
             return ''
         try:
@@ -470,6 +369,16 @@ class PDFService:
             return dt.strftime('%m/%d/%Y')
         except ValueError:
             return date_str
+    
+    def _format_ssn(self, ssn: str) -> str:
+        """Format SSN as XXX-XX-XXXX."""
+        if not ssn:
+            return ''
+        # Remove any existing formatting
+        digits = ''.join(c for c in ssn if c.isdigit())
+        if len(digits) == 9:
+            return f"{digits[:3]}-{digits[3:5]}-{digits[5:]}"
+        return ssn
 
 
 # Singleton instance
