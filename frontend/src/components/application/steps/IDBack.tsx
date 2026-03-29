@@ -5,37 +5,39 @@ import { Alert } from '../../ui/Alert';
 interface StepProps {
   data: Record<string, unknown>;
   onSave: (data: Record<string, unknown>, completed?: boolean) => void;
+  onChange?: () => void;
   saving: boolean;
 }
 
-export function IDBack({ data, onSave }: StepProps) {
-  const [file, setFile] = useState<File | null>(null);
+export function IDBack({ data, onSave, onChange }: StepProps) {
+  const [fileName, setFileName] = useState((data.file_name as string) || '');
 
-  const handleFileSelect = (selectedFile: File) => {
-    setFile(selectedFile);
-    onSave({ file_name: selectedFile.name, file_size: selectedFile.size, file: selectedFile });
+  const handleFileSelect = (file: File) => {
+    setFileName(file.name);
+    onChange?.();
+    onSave({ file_name: file.name, file_size: file.size, file });
   };
 
   return (
     <div className="space-y-6">
       <p className="text-sm text-gray">
-        Upload the back of your government-issued photo ID.
+        Now upload the back of your ID. This helps us verify the barcode and additional information.
       </p>
 
-      <Alert variant="info" title="Tips">
+      <Alert variant="info" title="Back of ID Tips">
         <ul className="mt-1 list-disc pl-4 space-y-1">
-          <li>Ensure the barcode and text are clearly visible</li>
-          <li>The image should not be blurry or cut off</li>
-          <li>If using a passport, you may skip this step</li>
+          <li>Make sure the barcode is clearly visible</li>
+          <li>Avoid glare on laminated cards</li>
+          <li>Include all edges of the card</li>
         </ul>
       </Alert>
 
       <FileUpload
-        label="ID Back"
+        label="Back of ID"
         onFileSelect={handleFileSelect}
         accept=".pdf,.jpg,.jpeg,.png"
         maxSize={10 * 1024 * 1024}
-        currentFile={data.file_name ? { name: data.file_name as string } : null}
+        currentFile={fileName ? { name: fileName } : null}
         helperText="Upload a clear photo or scan of the back of your ID"
       />
     </div>
