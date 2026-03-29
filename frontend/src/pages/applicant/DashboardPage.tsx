@@ -28,16 +28,16 @@ interface ApplicationStep {
 }
 
 const DOCUMENT_STEPS: Record<number, { name: string; category: string; required: boolean }> = {
-  11: { name: 'Work Authorization', category: 'identification', required: true },
-  12: { name: 'Photo ID (Front)', category: 'identification', required: true },
-  13: { name: 'Photo ID (Back)', category: 'identification', required: true },
-  14: { name: 'Social Security Card', category: 'identification', required: true },
-  15: { name: 'Professional Credentials', category: 'certification', required: false },
-  16: { name: 'CPR Certification', category: 'certification', required: false },
-  17: { name: 'TB Test Results', category: 'health', required: false },
+  11: { name: 'Work Authorization', category: 'Identification', required: true },
+  12: { name: 'Photo ID (Front)', category: 'Identification', required: true },
+  13: { name: 'Photo ID (Back)', category: 'Identification', required: true },
+  14: { name: 'Social Security Card', category: 'Identification', required: true },
+  15: { name: 'Professional Credentials', category: 'Certification', required: true },
+  16: { name: 'CPR Certification', category: 'Certification', required: true },
+  17: { name: 'TB Test Results', category: 'Health', required: true },
 };
 
-type DocStatus = 'uploaded' | 'needed' | 'optional' | 'expired';
+type DocStatus = 'uploaded' | 'needed' | 'expired';
 
 interface DocItem {
   stepNumber: number;
@@ -49,17 +49,15 @@ interface DocItem {
   data?: Record<string, unknown>;
 }
 
-const statusVariant: Record<DocStatus, 'success' | 'warning' | 'error' | 'neutral'> = {
+const statusVariant: Record<DocStatus, 'success' | 'warning' | 'error'> = {
   uploaded: 'success',
   needed: 'warning',
-  optional: 'neutral',
   expired: 'error',
 };
 
 const statusLabel: Record<DocStatus, string> = {
   uploaded: 'Uploaded',
   needed: 'Needed',
-  optional: 'Optional',
   expired: 'Expired',
 };
 
@@ -126,12 +124,9 @@ export function ApplicantDashboardPage() {
           status = 'expired';
         }
       }
-    } else if (doc.required) {
-      // Required but not uploaded
-      status = 'needed';
     } else {
-      // Optional and not uploaded
-      status = 'optional';
+      // Not uploaded - all docs are required
+      status = 'needed';
     }
 
     return {
@@ -151,7 +146,7 @@ export function ApplicantDashboardPage() {
   const currentStep = application?.current_step || 1;
   const hasApplication = application !== null;
 
-  // Only count required docs that are missing
+  // Count required docs that are missing
   const requiredMissing = documents.filter(d => d.required && d.status === 'needed');
   const expiredDocs = documents.filter(d => d.status === 'expired');
   const expiringDocs = documents.filter(d => 
@@ -353,10 +348,10 @@ export function ApplicantDashboardPage() {
             <span className="col-span-2">Action</span>
           </div>
           {documents.map((doc) => {
-            // Yellow highlight only for required docs that are needed or expired
-            const needsAttention = doc.required && (doc.status === 'needed' || doc.status === 'expired');
+            // Yellow highlight for docs that need attention
+            const needsAttention = doc.status === 'needed' || doc.status === 'expired';
             const canUpload = !isRejected;
-            const showUploadButton = doc.status === 'needed' || doc.status === 'optional' || doc.status === 'expired';
+            const showUploadButton = doc.status === 'needed' || doc.status === 'expired';
             
             return (
               <div
@@ -367,11 +362,9 @@ export function ApplicantDashboardPage() {
               >
                 <div className="col-span-4 flex items-center gap-2">
                   <span className="text-sm font-medium text-slate">{doc.name}</span>
-                  {doc.required && (
-                    <span className="text-xs text-maroon">*</span>
-                  )}
+                  <span className="text-xs text-maroon">*</span>
                 </div>
-                <span className="col-span-2 text-sm capitalize text-gray">{doc.category}</span>
+                <span className="col-span-2 text-sm text-gray">{doc.category}</span>
                 <div className="col-span-2">
                   <Badge variant={statusVariant[doc.status]}>
                     {statusLabel[doc.status]}
@@ -385,14 +378,14 @@ export function ApplicantDashboardPage() {
                     isSubmitted ? (
                       <Button 
                         size="sm" 
-                        variant={needsAttention ? 'primary' : 'secondary'}
+                        variant="primary"
                         onClick={() => handleUploadClick(doc)}
                       >
                         Upload
                       </Button>
                     ) : (
                       <Link to={`/applicant/application?step=${doc.stepNumber}`}>
-                        <Button size="sm" variant={needsAttention ? 'primary' : 'secondary'}>
+                        <Button size="sm" variant="primary">
                           Upload
                         </Button>
                       </Link>
@@ -421,7 +414,7 @@ export function ApplicantDashboardPage() {
           })}
         </div>
         <p className="mt-4 text-xs text-gray">
-          <span className="text-maroon">*</span> Required documents must be uploaded before you can be hired.
+          <span className="text-maroon">*</span> All documents are required and must be uploaded before you can be hired.
         </p>
       </Card>
 
