@@ -25,7 +25,9 @@ class InvitationResponse(BaseModel):
     id: str
     email: str
     role: str
+    agency_id: str
     agency_name: str
+    location_id: Optional[str] = None
     location_name: Optional[str] = None
     expires_at: str
     used: bool
@@ -44,28 +46,52 @@ class AcceptInvitationRequest(BaseModel):
     password: str
 
 
+def get_user_agency_id(supabase: Client, user_id: str) -> Optional[str]:
+    """Get the agency_id for a user."""
+    result = (
+        supabase.table("profiles")
+        .select("agency_id")
+        .eq("id", user_id)
+        .single()
+        .execute()
+    )
+    return result.data.get("agency_id") if result.data else None
+
+
 @router.get("", response_model=InvitationsListResponse)
 async def list_invitations(
     admin: UserProfile = Depends(require_admin),
     supabase: Client = Depends(get_supabase),
 ):
-    """List all pending invitations."""
+    """List all pending invitations for the admin's agency."""
+    agency_id = get_user_agency_id(supabase, admin.id)
+    
+    if not agency_id:
+        return InvitationsListResponse(invitations=[], total=0)
+    
+    # Get invitations with agency and location names
     result = (
         supabase.table("invitations")
-        .select("*")
+        .select("*, agencies(name), locations(name)")
+        .eq("agency_id", agency_id)
         .order("created_at", desc=True)
         .execute()
     )
     
     invitations = []
     for inv in result.data or []:
+        agency_data = inv.get("agencies", {}) or {}
+        location_data = inv.get("locations", {}) or {}
+        
         invitations.append(
             InvitationResponse(
                 id=inv["id"],
                 email=inv["email"],
                 role=inv["role"],
-                agency_name="Eveready HomeCare",  # TODO: Get from agency table
-                location_name=inv.get("location_name"),
+                agency_id=inv["agency_id"],
+                agency_name=agency_data.get("name", "Unknown Agency"),
+                location_id=inv.get("location_id"),
+                location_name=location_data.get("name"),
                 expires_at=inv["expires_at"],
                 used=inv["used"],
                 created_at=inv["created_at"],
@@ -82,7 +108,7 @@ async def create_invitation(
     supabase: Client = Depends(get_supabase),
 ):
     """
-    Create a new staff invitation.
+    Create a new staff invitation for the admin's agency.
     
     Generates a unique token and creates an invitation record.
     The invite URL can be shared with the recipient.
@@ -100,6 +126,25 @@ async def create_invitation(
             status_code=status.HTTP_403_FORBIDDEN,
             detail="Only superadmins can invite admin users",
         )
+    
+    # Get admin's agency
+    agency_id = get_user_agency_id(supabase, admin.id)
+    if not agency_id:
+        raise HTTPException(
+            status_code=status.HTTP_400_BAD_REQUEST,
+            detail="You must be associated with an agency to send invitations",
+        )
+    
+    # Get agency name
+    agency_result = (
+        supabase.table("agencies")
+        .select("name, slug")
+        .eq("id", agency_id)
+        .single()
+        .execute()
+    )
+    agency_name = agency_result.data.get("name", "Unknown") if agency_result.data else "Unknown"
+    agency_slug = agency_result.data.get("slug", "") if agency_result.data else ""
     
     # Check if email already has an account
     existing = (
@@ -128,24 +173,35 @@ async def create_invitation(
             detail="An invitation for this email is already pending",
         )
     
+    # Validate location belongs to agency if provided
+    location_name = None
+    if request.location_id:
+        loc_result = (
+            supabase.table("locations")
+            .select("name, agency_id")
+            .eq("id", request.location_id)
+            .single()
+            .execute()
+        )
+        if not loc_result.data or loc_result.data.get("agency_id") != agency_id:
+            raise HTTPException(
+                status_code=status.HTTP_400_BAD_REQUEST,
+                detail="Invalid location for this agency",
+            )
+        location_name = loc_result.data.get("name")
+    
     # Generate secure token
     token = secrets.token_urlsafe(32)
     now = datetime.now(timezone.utc)
     expires_at = now + timedelta(days=7)  # Invitation valid for 7 days
     
-    # Get location name if provided
-    location_name = None
-    if request.location_id:
-        # TODO: Look up from locations table
-        pass
-    
     # Create invitation
     inv_data = {
         "email": request.email,
         "role": request.role,
-        "token": token,
+        "agency_id": agency_id,
         "location_id": request.location_id,
-        "location_name": location_name,
+        "token": token,
         "invited_by": admin.id,
         "expires_at": expires_at.isoformat(),
         "used": False,
@@ -155,16 +211,18 @@ async def create_invitation(
     result = supabase.table("invitations").insert(inv_data).execute()
     inv = result.data[0]
     
-    # TODO: Send invitation email with the link
-    # For now, return the invite URL in the response
-    invite_url = f"https://medivault.app/invite/{token}"  # TODO: Use actual domain
+    # Build invite URL - use agency slug in URL
+    # TODO: Use actual domain from config
+    invite_url = f"https://medivault.app/invite/{token}"
     
     return InvitationResponse(
         id=inv["id"],
         email=inv["email"],
         role=inv["role"],
-        agency_name="Eveready HomeCare",
-        location_name=inv.get("location_name"),
+        agency_id=inv["agency_id"],
+        agency_name=agency_name,
+        location_id=inv.get("location_id"),
+        location_name=location_name,
         expires_at=inv["expires_at"],
         used=inv["used"],
         created_at=inv["created_at"],
@@ -184,7 +242,7 @@ async def get_invitation(
     """
     result = (
         supabase.table("invitations")
-        .select("*")
+        .select("*, agencies(name), locations(name)")
         .eq("token", token)
         .single()
         .execute()
@@ -197,12 +255,17 @@ async def get_invitation(
         )
     
     inv = result.data
+    agency_data = inv.get("agencies", {}) or {}
+    location_data = inv.get("locations", {}) or {}
+    
     return InvitationResponse(
         id=inv["id"],
         email=inv["email"],
         role=inv["role"],
-        agency_name="Eveready HomeCare",
-        location_name=inv.get("location_name"),
+        agency_id=inv["agency_id"],
+        agency_name=agency_data.get("name", "Unknown Agency"),
+        location_id=inv.get("location_id"),
+        location_name=location_data.get("name"),
         expires_at=inv["expires_at"],
         used=inv["used"],
         created_at=inv["created_at"],
@@ -218,7 +281,7 @@ async def accept_invitation(
     """
     Accept an invitation and create a staff account.
     
-    This creates the user in Supabase Auth and sets their role.
+    This creates the user in Supabase Auth and sets their role and agency.
     """
     # Get invitation
     inv_result = (
@@ -245,7 +308,14 @@ async def accept_invitation(
         )
     
     # Check if expired
-    if datetime.fromisoformat(inv["expires_at"].replace("Z", "+00:00")) < datetime.now(timezone.utc):
+    expires_at = inv["expires_at"]
+    if isinstance(expires_at, str):
+        expires_at = expires_at.replace("Z", "+00:00")
+        expires_dt = datetime.fromisoformat(expires_at)
+    else:
+        expires_dt = expires_at
+        
+    if expires_dt < datetime.now(timezone.utc):
         raise HTTPException(
             status_code=status.HTTP_400_BAD_REQUEST,
             detail="This invitation has expired",
@@ -273,13 +343,14 @@ async def accept_invitation(
         user_id = auth_response.user.id
         now = datetime.now(timezone.utc).isoformat()
         
-        # Create/update profile with the correct role
+        # Create/update profile with the correct role AND agency
         supabase.table("profiles").upsert({
             "id": user_id,
             "email": inv["email"],
             "first_name": request.first_name,
             "last_name": request.last_name,
             "role": inv["role"],
+            "agency_id": inv["agency_id"],  # Link to agency!
             "created_at": now,
             "updated_at": now,
         }).execute()
@@ -293,7 +364,7 @@ async def accept_invitation(
         
         return SuccessResponse(
             message="Account created successfully",
-            data={"user_id": user_id, "role": inv["role"]},
+            data={"user_id": user_id, "role": inv["role"], "agency_id": inv["agency_id"]},
         )
         
     except Exception as e:
@@ -316,10 +387,12 @@ async def revoke_invitation(
     supabase: Client = Depends(get_supabase),
 ):
     """Revoke a pending invitation."""
-    # Check invitation exists and is not used
+    agency_id = get_user_agency_id(supabase, admin.id)
+    
+    # Check invitation exists, belongs to agency, and is not used
     inv_result = (
         supabase.table("invitations")
-        .select("id, used")
+        .select("id, used, agency_id")
         .eq("id", invitation_id)
         .single()
         .execute()
@@ -329,6 +402,12 @@ async def revoke_invitation(
         raise HTTPException(
             status_code=status.HTTP_404_NOT_FOUND,
             detail="Invitation not found",
+        )
+    
+    if inv_result.data.get("agency_id") != agency_id:
+        raise HTTPException(
+            status_code=status.HTTP_403_FORBIDDEN,
+            detail="You can only revoke invitations for your agency",
         )
     
     if inv_result.data["used"]:
@@ -350,6 +429,8 @@ async def resend_invitation(
     supabase: Client = Depends(get_supabase),
 ):
     """Resend an invitation email and extend expiration."""
+    agency_id = get_user_agency_id(supabase, admin.id)
+    
     # Get invitation
     inv_result = (
         supabase.table("invitations")
@@ -366,6 +447,12 @@ async def resend_invitation(
         )
     
     inv = inv_result.data
+    
+    if inv.get("agency_id") != agency_id:
+        raise HTTPException(
+            status_code=status.HTTP_403_FORBIDDEN,
+            detail="You can only resend invitations for your agency",
+        )
     
     if inv["used"]:
         raise HTTPException(
