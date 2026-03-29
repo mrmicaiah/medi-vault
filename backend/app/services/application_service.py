@@ -91,6 +91,7 @@ class ApplicationService:
             user_id=user_id,
             status=ApplicationStatus.IN_PROGRESS,
             current_step=1,
+            completed_steps=0,
             total_steps=22,
             created_at=app_data.get("created_at"),
             updated_at=app_data.get("updated_at"),
@@ -112,11 +113,22 @@ class ApplicationService:
 
         data = result.data
 
+        # Count completed steps
+        completed_result = (
+            self.supabase.table("application_steps")
+            .select("id", count="exact")
+            .eq("application_id", app_id)
+            .eq("is_completed", True)
+            .execute()
+        )
+        completed_count = completed_result.count or 0
+
         return ApplicationResponse(
             id=data["id"],
             user_id=data["user_id"],
             status=ApplicationStatus(data["status"]),
             current_step=data.get("current_step", 1),
+            completed_steps=completed_count,
             total_steps=data.get("total_steps", 22),
             submitted_at=data.get("submitted_at"),
             reviewed_at=data.get("reviewed_at"),
@@ -135,20 +147,33 @@ class ApplicationService:
             .execute()
         )
 
-        return [
-            ApplicationResponse(
-                id=d["id"],
-                user_id=d["user_id"],
-                status=ApplicationStatus(d["status"]),
-                current_step=d.get("current_step", 1),
-                total_steps=d.get("total_steps", 22),
-                submitted_at=d.get("submitted_at"),
-                reviewed_at=d.get("reviewed_at"),
-                created_at=d.get("created_at"),
-                updated_at=d.get("updated_at"),
+        applications = []
+        for d in (result.data or []):
+            # Count completed steps for each application
+            completed_result = (
+                self.supabase.table("application_steps")
+                .select("id", count="exact")
+                .eq("application_id", d["id"])
+                .eq("is_completed", True)
+                .execute()
             )
-            for d in (result.data or [])
-        ]
+            completed_count = completed_result.count or 0
+
+            applications.append(
+                ApplicationResponse(
+                    id=d["id"],
+                    user_id=d["user_id"],
+                    status=ApplicationStatus(d["status"]),
+                    current_step=d.get("current_step", 1),
+                    completed_steps=completed_count,
+                    total_steps=d.get("total_steps", 22),
+                    submitted_at=d.get("submitted_at"),
+                    reviewed_at=d.get("reviewed_at"),
+                    created_at=d.get("created_at"),
+                    updated_at=d.get("updated_at"),
+                )
+            )
+        return applications
 
     def save_step(
         self, app_id: str, step_number: int, data: dict, step_status: str, user_id: str
