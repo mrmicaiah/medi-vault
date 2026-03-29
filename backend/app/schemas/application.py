@@ -25,7 +25,7 @@ class ApplicationStepResponse(BaseModel):
     application_id: str
     step_number: int
     step_name: str
-    step_type: StepType
+    step_type: str  # Changed from StepType enum to str for flexibility
     status: str = "pending"
     data: Optional[Dict[str, Any]] = None
     completed_at: Optional[str] = None
@@ -38,8 +38,8 @@ class ApplicationResponse(BaseModel):
     id: str
     user_id: str
     status: ApplicationStatus
-    current_step: int
-    completed_steps: int
+    current_step: int = 1
+    completed_steps: int = 0  # Made optional with default
     total_steps: int = 22
     submitted_at: Optional[str] = None
     reviewed_at: Optional[str] = None
