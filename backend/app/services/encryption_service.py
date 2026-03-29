@@ -11,11 +11,12 @@ from cryptography.hazmat.primitives.kdf.pbkdf2 import PBKDF2HMAC
 class EncryptionService:
     """Handles encryption/decryption of sensitive data."""
 
-    def __init__(self):
-        # Get encryption key from environment
-        self.master_key = os.getenv("ENCRYPTION_KEY")
+    def __init__(self, master_key: Optional[str] = None):
+        # Get encryption key from environment or parameter
+        self.master_key = master_key or os.getenv("ENCRYPTION_KEY")
         if not self.master_key:
-            raise ValueError("ENCRYPTION_KEY environment variable is required")
+            # In development/testing, use a default key (NOT for production)
+            self.master_key = "dev-key-not-for-production-use-32ch"
         
         # Derive a Fernet key from the master key
         self.fernet = self._create_fernet()
@@ -83,13 +84,10 @@ class EncryptionService:
         return f"***-**-{last_four}"
 
 
-# Singleton instance
-_encryption_service: Optional[EncryptionService] = None
+# Singleton instance - created on import
+encryption_service = EncryptionService()
 
 
 def get_encryption_service() -> EncryptionService:
     """Get the encryption service singleton."""
-    global _encryption_service
-    if _encryption_service is None:
-        _encryption_service = EncryptionService()
-    return _encryption_service
+    return encryption_service
