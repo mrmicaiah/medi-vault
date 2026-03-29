@@ -1,6 +1,7 @@
 import React from 'react';
 import { Routes, Route, Navigate } from 'react-router-dom';
 import { useAuth } from '../hooks/useAuth';
+import type { UserRole } from '../types';
 
 import { AuthLayout } from '../components/layout/AuthLayout';
 import { AppLayout } from '../components/layout/AppLayout';
@@ -24,6 +25,12 @@ import { EmployeeDetailPage } from '../pages/admin/EmployeeDetailPage';
 import { CompliancePage } from '../pages/admin/CompliancePage';
 import { HirePage } from '../pages/admin/HirePage';
 import { UsersPage } from '../pages/admin/UsersPage';
+
+const STAFF_ROLES: UserRole[] = ['admin', 'superadmin', 'manager'];
+
+function isStaffRole(role: UserRole | null): boolean {
+  return role !== null && STAFF_ROLES.includes(role);
+}
 
 function ProtectedRoute({ children }: { children: React.ReactNode }) {
   const { user, loading, initialized } = useAuth();
@@ -54,7 +61,7 @@ function AdminRoute({ children }: { children: React.ReactNode }) {
 
   if (!initialized || loading) return null;
 
-  if (role !== 'admin' && role !== 'superadmin' && role !== 'manager') {
+  if (!isStaffRole(role)) {
     return <Navigate to="/applicant" replace />;
   }
 
@@ -63,7 +70,8 @@ function AdminRoute({ children }: { children: React.ReactNode }) {
 
 function RootRedirect() {
   const { role } = useAuth();
-  if (role === 'admin' || role === 'superadmin' || role === 'manager') {
+  
+  if (isStaffRole(role)) {
     return <Navigate to="/admin" replace />;
   }
   return <Navigate to="/applicant" replace />;

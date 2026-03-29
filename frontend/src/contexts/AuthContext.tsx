@@ -82,7 +82,7 @@ export function AuthProvider({ children }: { children: React.ReactNode }) {
         user: session.user,
         session,
         profile,
-        role: profile?.role || null,
+        role: (profile?.role as UserRole) || null,
         loading: false,
         initialized: true,
       });

@@ -2,6 +2,7 @@ import React from 'react';
 import { NavLink } from 'react-router-dom';
 import { useAuth } from '../../hooks/useAuth';
 import { cn } from '../../lib/utils';
+import type { UserRole } from '../../types';
 
 interface NavItem {
   label: string;
@@ -23,10 +24,13 @@ const adminNav: NavItem[] = [
   { label: 'Users', path: '/admin/users', icon: 'M17 20h5v-2a3 3 0 00-5.356-1.857M17 20H7m10 0v-2c0-.656-.126-1.283-.356-1.857M7 20H2v-2a3 3 0 015.356-1.857M7 20v-2c0-.656.126-1.283.356-1.857m0 0a5.002 5.002 0 019.288 0M15 7a3 3 0 11-6 0 3 3 0 016 0zm6 3a2 2 0 11-4 0 2 2 0 014 0zM7 10a2 2 0 11-4 0 2 2 0 014 0z', adminOnly: true },
 ];
 
+const STAFF_ROLES: UserRole[] = ['admin', 'superadmin', 'manager'];
+const ADMIN_ROLES: UserRole[] = ['admin', 'superadmin'];
+
 export function Sidebar() {
   const { role } = useAuth();
-  const isAdminOrManager = role === 'admin' || role === 'superadmin' || role === 'manager';
-  const isAdmin = role === 'admin' || role === 'superadmin';
+  const isAdminOrManager = role !== null && STAFF_ROLES.includes(role);
+  const isAdmin = role !== null && ADMIN_ROLES.includes(role);
   
   // Filter nav items based on role
   const navItems = isAdminOrManager 
@@ -60,7 +64,7 @@ export function Sidebar() {
 
       <div className="border-t border-border p-4">
         <p className="text-xs text-gray-light">MediVault v1.0</p>
-        {isAdminOrManager && (
+        {isAdminOrManager && role && (
           <p className="text-xs text-maroon capitalize mt-1">{role}</p>
         )}
       </div>
