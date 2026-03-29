@@ -1,5 +1,4 @@
 import React from 'react';
-import { useNavigate } from 'react-router-dom';
 import { Button } from '../ui/Button';
 import { ProgressBar } from '../ui/ProgressBar';
 import { StepRenderer } from './StepRenderer';
@@ -18,9 +17,7 @@ interface WizardShellProps {
   onNext: () => void;
   onPrev: () => void;
   onSave: (data: Record<string, unknown>, completed?: boolean) => void;
-  onSkip: () => void;
   onSaveAndExit: () => void;
-  onExit?: () => void;
   onChange?: () => void;
   onReturnToDashboard: () => void;
 }
@@ -34,24 +31,19 @@ export function WizardShell({
   onNext,
   onPrev,
   onSave,
-  onSkip,
   onSaveAndExit,
-  onExit,
   onChange,
   onReturnToDashboard,
 }: WizardShellProps) {
-  const navigate = useNavigate();
   const stepName = STEP_NAMES[currentStep] || `Step ${currentStep}`;
   const isFirst = currentStep === 1;
   const isLast = currentStep === TOTAL_STEPS;
   
-  // Check if any upload steps were skipped
   const hasSkippedUploads = UPLOAD_STEPS.some(stepNum => {
     const step = allStepsData[stepNum];
     return step?.data?.skip === true;
   });
 
-  // Count skipped uploads
   const skippedUploadCount = UPLOAD_STEPS.filter(stepNum => {
     const step = allStepsData[stepNum];
     return step?.data?.skip === true;
