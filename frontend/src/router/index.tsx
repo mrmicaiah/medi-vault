@@ -11,6 +11,7 @@ import { ResetPasswordPage } from '../pages/auth/ResetPasswordPage';
 
 import { ApplicantDashboardPage } from '../pages/applicant/DashboardPage';
 import { ApplicationPage } from '../pages/applicant/ApplicationPage';
+import { DocumentsPage } from '../pages/applicant/DocumentsPage';
 
 import { AdminDashboardPage } from '../pages/admin/DashboardPage';
 import { PipelinePage } from '../pages/admin/PipelinePage';
@@ -84,6 +85,7 @@ export function RouterConfig() {
       >
         <Route path="/applicant" element={<ApplicantDashboardPage />} />
         <Route path="/applicant/application" element={<ApplicationPage />} />
+        <Route path="/applicant/documents" element={<DocumentsPage />} />
       </Route>
 
       {/* Protected admin routes */}
