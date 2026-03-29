@@ -43,11 +43,18 @@ export function AuthProvider({ children }: { children: React.ReactNode }) {
     setState((prev) => ({ ...prev, error: null }));
   }, []);
 
-  const clearStaleSession = useCallback(async () => {
+  const clearSession = useCallback(async () => {
     try {
+      // Clear local storage directly as backup
+      const keys = Object.keys(localStorage);
+      keys.forEach(key => {
+        if (key.startsWith('sb-')) {
+          localStorage.removeItem(key);
+        }
+      });
       await supabase.auth.signOut({ scope: 'local' });
-    } catch {
-      // Ignore errors when clearing
+    } catch (e) {
+      console.warn('Error clearing session:', e);
     }
   }, []);
 
@@ -60,16 +67,7 @@ export function AuthProvider({ children }: { children: React.ReactNode }) {
         .single();
 
       if (error) {
-        if (error.code === 'PGRST116') {
-          console.warn('Profile not found for user:', userId);
-          return null;
-        }
-        if (error.message?.includes('JWT')) {
-          console.warn('Session invalid, clearing');
-          await clearStaleSession();
-          return null;
-        }
-        console.error('Error fetching profile:', error);
+        console.error('Profile fetch error:', error.code, error.message);
         return null;
       }
 
@@ -78,7 +76,7 @@ export function AuthProvider({ children }: { children: React.ReactNode }) {
       console.error('Exception fetching profile:', err);
       return null;
     }
-  }, [clearStaleSession]);
+  }, []);
 
   const refreshProfile = useCallback(async () => {
     if (!state.user) return;
@@ -92,8 +90,22 @@ export function AuthProvider({ children }: { children: React.ReactNode }) {
 
   useEffect(() => {
     let mounted = true;
+    let timeoutId: NodeJS.Timeout;
 
     const initAuth = async () => {
+      // Set a timeout to prevent infinite spinning
+      timeoutId = setTimeout(() => {
+        if (mounted && state.loading) {
+          console.warn('Auth init timed out, clearing session');
+          clearSession();
+          setState({
+            ...emptyState,
+            loading: false,
+            initialized: true,
+          });
+        }
+      }, 5000); // 5 second timeout
+
       try {
         const { data: { session }, error: sessionError } = await supabase.auth.getSession();
         
@@ -101,7 +113,7 @@ export function AuthProvider({ children }: { children: React.ReactNode }) {
 
         if (sessionError) {
           console.error('Session error:', sessionError);
-          await clearStaleSession();
+          await clearSession();
           setState({
             ...emptyState,
             loading: false,
@@ -110,6 +122,7 @@ export function AuthProvider({ children }: { children: React.ReactNode }) {
           return;
         }
 
+        // No session = not logged in
         if (!session) {
           setState({
             ...emptyState,
@@ -119,13 +132,15 @@ export function AuthProvider({ children }: { children: React.ReactNode }) {
           return;
         }
 
+        // Try to fetch profile
         const profile = await fetchProfile(session.user.id);
         
         if (!mounted) return;
 
+        // If no profile, clear session and let user log in fresh
         if (!profile) {
-          console.warn('Session exists but no profile found, clearing session');
-          await clearStaleSession();
+          console.warn('No profile found for session, clearing');
+          await clearSession();
           setState({
             ...emptyState,
             loading: false,
@@ -134,6 +149,7 @@ export function AuthProvider({ children }: { children: React.ReactNode }) {
           return;
         }
 
+        // Success!
         setState({
           user: session.user,
           session,
@@ -147,7 +163,7 @@ export function AuthProvider({ children }: { children: React.ReactNode }) {
       } catch (err) {
         console.error('Auth init error:', err);
         if (mounted) {
-          await clearStaleSession();
+          await clearSession();
           setState({
             ...emptyState,
             loading: false,
@@ -162,8 +178,6 @@ export function AuthProvider({ children }: { children: React.ReactNode }) {
     const { data: { subscription } } = supabase.auth.onAuthStateChange(async (event, session) => {
       if (!mounted) return;
 
-      console.log('Auth event:', event);
-
       if (event === 'SIGNED_OUT') {
         setState({
           ...emptyState,
@@ -173,48 +187,48 @@ export function AuthProvider({ children }: { children: React.ReactNode }) {
         return;
       }
 
-      if (event === 'TOKEN_REFRESHED') {
-        if (session) {
-          setState(prev => ({
-            ...prev,
-            session,
-            user: session.user,
-          }));
-        }
+      if (event === 'TOKEN_REFRESHED' && session) {
+        setState(prev => ({
+          ...prev,
+          session,
+          user: session.user,
+        }));
         return;
       }
 
-      if (event === 'SIGNED_IN' || event === 'INITIAL_SESSION') {
-        if (!session) {
-          setState({
-            ...emptyState,
-            loading: false,
-            initialized: true,
-          });
-          return;
-        }
-
+      if ((event === 'SIGNED_IN' || event === 'INITIAL_SESSION') && session) {
         const profile = await fetchProfile(session.user.id);
         
         if (mounted) {
-          setState({
-            user: session.user,
-            session,
-            profile,
-            role: profile?.role || null,
-            loading: false,
-            initialized: true,
-            error: null,
-          });
+          if (profile) {
+            setState({
+              user: session.user,
+              session,
+              profile,
+              role: profile.role || null,
+              loading: false,
+              initialized: true,
+              error: null,
+            });
+          } else {
+            // No profile, clear and show login
+            await clearSession();
+            setState({
+              ...emptyState,
+              loading: false,
+              initialized: true,
+            });
+          }
         }
       }
     });
 
     return () => {
       mounted = false;
+      clearTimeout(timeoutId);
       subscription.unsubscribe();
     };
-  }, [fetchProfile, clearStaleSession]);
+  }, [fetchProfile, clearSession]);
 
   const signIn = async (email: string, password: string) => {
     setState((prev) => ({ ...prev, loading: true, error: null }));
@@ -253,7 +267,7 @@ export function AuthProvider({ children }: { children: React.ReactNode }) {
 
   const signOut = async () => {
     setState((prev) => ({ ...prev, loading: true }));
-    await supabase.auth.signOut();
+    await clearSession();
     setState({
       ...emptyState,
       loading: false,
