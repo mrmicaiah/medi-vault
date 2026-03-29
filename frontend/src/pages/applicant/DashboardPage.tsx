@@ -70,7 +70,6 @@ export function ApplicantDashboardPage() {
   const [application, setApplication] = useState<Application | null>(null);
   const [steps, setSteps] = useState<ApplicationStep[]>([]);
   
-  // Modal state
   const [uploadModal, setUploadModal] = useState<{
     isOpen: boolean;
     stepNumber: number;
@@ -108,8 +107,8 @@ export function ApplicantDashboardPage() {
   const isSubmitted = ['submitted', 'under_review', 'approved'].includes(application?.status || '');
   const isApproved = application?.status === 'approved';
   const isRejected = application?.status === 'rejected';
+  const isInProgress = application?.status === 'in_progress';
 
-  // Build documents list from steps
   const documents: DocItem[] = Object.entries(DOCUMENT_STEPS).map(([stepNum, doc]) => {
     const step = steps.find(s => s.step_number === parseInt(stepNum));
     const data = step?.data || {};
@@ -172,7 +171,36 @@ export function ApplicantDashboardPage() {
   };
 
   const handleUploadSuccess = () => {
-    loadApplication(); // Reload to show updated data
+    loadApplication();
+  };
+
+  // Determine what button to show
+  const getApplicationButton = () => {
+    if (!hasApplication || completedSteps === 0) {
+      return (
+        <Link to="/applicant/application">
+          <Button>Start Application</Button>
+        </Link>
+      );
+    }
+    
+    if (isInProgress) {
+      return (
+        <Link to="/applicant/application">
+          <Button>Continue Application</Button>
+        </Link>
+      );
+    }
+    
+    if (isSubmitted || isApproved) {
+      return (
+        <Link to="/applicant/application">
+          <Button variant="secondary">View Application</Button>
+        </Link>
+      );
+    }
+    
+    return null;
   };
 
   if (loading) {
@@ -256,28 +284,24 @@ export function ApplicantDashboardPage() {
                   <p className="text-sm text-gray">
                     {completedSteps} of {TOTAL_STEPS} steps completed
                   </p>
-                  {hasApplication && !isSubmitted && completedSteps > 0 && completedSteps < TOTAL_STEPS && (
+                  {hasApplication && isInProgress && completedSteps > 0 && completedSteps < TOTAL_STEPS && (
                     <p className="text-xs text-gray mt-1">
                       Currently on step {currentStep}
                     </p>
                   )}
                 </div>
-                {!isSubmitted && !isRejected && (
-                  <Link to="/applicant/application">
-                    <Button size="sm">
-                      {!hasApplication || completedSteps === 0 ? 'Start Application' : 'Continue Application'}
-                    </Button>
-                  </Link>
-                )}
-                {isSubmitted && !isApproved && (
-                  <Badge variant="warning">Under Review</Badge>
-                )}
-                {isApproved && (
-                  <Badge variant="success">Approved</Badge>
-                )}
-                {isRejected && (
-                  <Badge variant="error">Not Approved</Badge>
-                )}
+                <div className="flex items-center gap-3">
+                  {isSubmitted && !isApproved && (
+                    <Badge variant="warning">Under Review</Badge>
+                  )}
+                  {isApproved && (
+                    <Badge variant="success">Approved</Badge>
+                  )}
+                  {isRejected && (
+                    <Badge variant="error">Not Approved</Badge>
+                  )}
+                  {!isRejected && getApplicationButton()}
+                </div>
               </div>
             </div>
           </Card>
@@ -329,7 +353,7 @@ export function ApplicantDashboardPage() {
           {documents.map((doc) => {
             const isSkippedRequired = doc.required && doc.status === 'skipped';
             const needsAttention = isSkippedRequired || doc.status === 'expired';
-            const canUpload = isSubmitted || !isRejected;
+            const canUpload = !isRejected;
             
             return (
               <div
@@ -356,7 +380,6 @@ export function ApplicantDashboardPage() {
                 <div className="col-span-2">
                   {canUpload && (doc.status === 'skipped' || doc.status === 'missing' || doc.status === 'expired') && (
                     isSubmitted ? (
-                      // Use modal for submitted applications
                       <Button 
                         size="sm" 
                         variant={needsAttention ? 'primary' : 'secondary'}
@@ -365,7 +388,6 @@ export function ApplicantDashboardPage() {
                         Upload
                       </Button>
                     ) : (
-                      // Use wizard for in-progress applications
                       <Link to={`/applicant/application?step=${doc.stepNumber}`}>
                         <Button size="sm" variant={needsAttention ? 'primary' : 'secondary'}>
                           Upload
@@ -393,13 +415,13 @@ export function ApplicantDashboardPage() {
                 </div>
               </div>
             );
-          })}n        </div>
+          })}
+        </div>
         <p className="mt-4 text-xs text-gray">
           <span className="text-maroon">*</span> Required documents must be uploaded before you can be hired.
         </p>
       </Card>
 
-      {/* Document Upload Modal */}
       {application && (
         <DocumentUploadModal
           isOpen={uploadModal.isOpen}
