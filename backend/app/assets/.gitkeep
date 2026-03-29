@@ -1,0 +1,7 @@
+# This directory holds static assets like PDF templates
+# 
+# Required files:
+# - i-9.pdf: The official USCIS I-9 fillable form
+#   Download from: https://www.uscis.gov/i-9
+#
+# The I-9 form should be the fillable PDF version.
