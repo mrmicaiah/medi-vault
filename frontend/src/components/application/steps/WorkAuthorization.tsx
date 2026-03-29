@@ -1,4 +1,4 @@
-import React, { useState } from 'react';
+import React, { useState, useEffect } from 'react';
 import { FileUpload } from '../../ui/FileUpload';
 import { Input, Select } from '../../ui/Input';
 import { Alert } from '../../ui/Alert';
@@ -6,6 +6,8 @@ import { Alert } from '../../ui/Alert';
 interface StepProps {
   data: Record<string, unknown>;
   onSave: (data: Record<string, unknown>, completed?: boolean) => void;
+  onFileSelect?: (file: File | null) => void;
+  pendingFile?: File | null;
   onChange?: () => void;
   saving: boolean;
 }
@@ -17,34 +19,41 @@ const DOCUMENT_TYPES = [
   { value: 'work_authorization', label: 'Work Authorization Card' },
 ];
 
-export function WorkAuthorization({ data, onSave, onChange }: StepProps) {
+export function WorkAuthorization({ data, onSave, onFileSelect, pendingFile, onChange }: StepProps) {
   const [form, setForm] = useState({
     skip: (data.skip as boolean) || false,
     worker_type: (data.worker_type as string) || '',
     document_type: (data.document_type as string) || '',
     issuing_authority: (data.issuing_authority as string) || 'United States',
     document_number: (data.document_number as string) || '',
-    file_name: (data.file_name as string) || '',
   });
+
+  // Track displayed file name (from pending file or saved data)
+  const displayFileName = pendingFile?.name || (data.file_name as string) || '';
 
   const handleChange = (field: string, value: string) => {
     const updated = { ...form, [field]: value };
     setForm(updated);
     onChange?.();
+    // Only save form data, not file
     onSave(updated);
   };
 
   const handleFileSelect = (file: File) => {
-    const updated = { ...form, file_name: file.name, file_size: file.size };
-    setForm({ ...form, file_name: file.name });
     onChange?.();
-    onSave({ ...updated, file });
+    // Store file in parent state - will be uploaded on "Next"
+    onFileSelect?.(file);
   };
 
   const handleSkip = (checked: boolean) => {
-    setForm({ ...form, skip: checked });
+    const updated = { ...form, skip: checked };
+    setForm(updated);
     onChange?.();
-    onSave({ ...form, skip: checked });
+    // Clear pending file if skipping
+    if (checked) {
+      onFileSelect?.(null);
+    }
+    onSave(updated);
   };
 
   return (
@@ -117,9 +126,15 @@ export function WorkAuthorization({ data, onSave, onChange }: StepProps) {
             onFileSelect={handleFileSelect}
             accept=".pdf,.jpg,.jpeg,.png"
             maxSize={10 * 1024 * 1024}
-            currentFile={form.file_name ? { name: form.file_name } : null}
+            currentFile={displayFileName ? { name: displayFileName } : null}
             helperText="Upload a clear photo or scan of your work authorization document"
           />
+
+          {pendingFile && (
+            <p className="text-xs text-gray-500">
+              File will be uploaded when you click "Next"
+            </p>
+          )}
         </>
       )}
 

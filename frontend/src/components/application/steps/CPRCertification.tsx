@@ -6,19 +6,22 @@ import { Alert } from '../../ui/Alert';
 interface StepProps {
   data: Record<string, unknown>;
   onSave: (data: Record<string, unknown>, completed?: boolean) => void;
+  onFileSelect?: (file: File | null) => void;
+  pendingFile?: File | null;
   onChange?: () => void;
   saving: boolean;
 }
 
-export function CPRCertification({ data, onSave, onChange }: StepProps) {
+export function CPRCertification({ data, onSave, onFileSelect, pendingFile, onChange }: StepProps) {
   const [form, setForm] = useState({
     skip: (data.skip as boolean) || false,
+    issuing_org: (data.issuing_org as string) || '',
     expiration_date: (data.expiration_date as string) || '',
-    issuing_organization: (data.issuing_organization as string) || '',
-    file_name: (data.file_name as string) || '',
   });
 
-  const handleChange = (field: string, value: string | boolean) => {
+  const displayFileName = pendingFile?.name || (data.file_name as string) || '';
+
+  const handleChange = (field: string, value: string) => {
     const updated = { ...form, [field]: value };
     setForm(updated);
     onChange?.();
@@ -26,22 +29,25 @@ export function CPRCertification({ data, onSave, onChange }: StepProps) {
   };
 
   const handleFileSelect = (file: File) => {
-    const updated = { ...form, file_name: file.name, file_size: file.size };
-    setForm({ ...form, file_name: file.name });
     onChange?.();
-    onSave({ ...updated, file });
+    onFileSelect?.(file);
   };
 
   const handleSkip = (checked: boolean) => {
-    setForm({ ...form, skip: checked });
+    const updated = { ...form, skip: checked };
+    setForm(updated);
     onChange?.();
-    onSave({ ...form, skip: checked });
+    if (checked) {
+      onFileSelect?.(null);
+    }
+    onSave(updated);
   };
 
   return (
     <div className="space-y-6">
       <p className="text-sm text-gray">
-        Upload your CPR certification card or certificate.
+        If you have a current CPR certification, upload it here.
+        This step is optional but may be required for certain positions.
       </p>
 
       <div className="flex items-center gap-3 rounded-lg border border-border bg-gray-50 p-4">
@@ -53,7 +59,7 @@ export function CPRCertification({ data, onSave, onChange }: StepProps) {
           className="h-4 w-4 rounded border-gray-300 text-maroon focus:ring-maroon"
         />
         <label htmlFor="skip_cpr" className="text-sm text-slate">
-          I don't have my CPR certification yet (I'll upload it later)
+          I don't have CPR certification / I'll upload later
         </label>
       </div>
 
@@ -64,22 +70,20 @@ export function CPRCertification({ data, onSave, onChange }: StepProps) {
               <li>American Heart Association (AHA)</li>
               <li>American Red Cross</li>
               <li>National Safety Council</li>
-              <li>Other accredited providers</li>
+              <li>Other accredited organizations</li>
             </ul>
           </Alert>
 
           <Input
             label="Issuing Organization"
-            required
-            value={form.issuing_organization}
-            onChange={(e) => handleChange('issuing_organization', e.target.value)}
+            value={form.issuing_org}
+            onChange={(e) => handleChange('issuing_org', e.target.value)}
             placeholder="e.g., American Heart Association"
           />
 
           <Input
             label="Expiration Date"
             type="date"
-            required
             value={form.expiration_date}
             onChange={(e) => handleChange('expiration_date', e.target.value)}
           />
@@ -89,17 +93,16 @@ export function CPRCertification({ data, onSave, onChange }: StepProps) {
             onFileSelect={handleFileSelect}
             accept=".pdf,.jpg,.jpeg,.png"
             maxSize={10 * 1024 * 1024}
-            currentFile={form.file_name ? { name: form.file_name } : null}
+            currentFile={displayFileName ? { name: displayFileName } : null}
             helperText="Upload a clear photo or scan of your CPR card or certificate"
           />
-        </>
-      )}
 
-      {form.skip && (
-        <Alert variant="warning" title="Action Required">
-          CPR certification is required before you can be assigned to clients.
-          You can upload it from your dashboard at any time.
-        </Alert>
+          {pendingFile && (
+            <p className="text-xs text-gray-500">
+              File will be uploaded when you click "Next"
+            </p>
+          )}
+        </>
       )}
     </div>
   );

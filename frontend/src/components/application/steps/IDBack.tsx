@@ -5,26 +5,32 @@ import { Alert } from '../../ui/Alert';
 interface StepProps {
   data: Record<string, unknown>;
   onSave: (data: Record<string, unknown>, completed?: boolean) => void;
+  onFileSelect?: (file: File | null) => void;
+  pendingFile?: File | null;
   onChange?: () => void;
   saving: boolean;
 }
 
-export function IDBack({ data, onSave, onChange }: StepProps) {
+export function IDBack({ data, onSave, onFileSelect, pendingFile, onChange }: StepProps) {
   const [form, setForm] = useState({
     skip: (data.skip as boolean) || false,
-    file_name: (data.file_name as string) || '',
   });
 
+  const displayFileName = pendingFile?.name || (data.file_name as string) || '';
+
   const handleFileSelect = (file: File) => {
-    setForm({ ...form, file_name: file.name });
     onChange?.();
-    onSave({ ...form, file_name: file.name, file_size: file.size, file });
+    onFileSelect?.(file);
   };
 
   const handleSkip = (checked: boolean) => {
-    setForm({ ...form, skip: checked });
+    const updated = { ...form, skip: checked };
+    setForm(updated);
     onChange?.();
-    onSave({ ...form, skip: checked });
+    if (checked) {
+      onFileSelect?.(null);
+    }
+    onSave(updated);
   };
 
   return (
@@ -61,9 +67,15 @@ export function IDBack({ data, onSave, onChange }: StepProps) {
             onFileSelect={handleFileSelect}
             accept=".pdf,.jpg,.jpeg,.png"
             maxSize={10 * 1024 * 1024}
-            currentFile={form.file_name ? { name: form.file_name } : null}
+            currentFile={displayFileName ? { name: displayFileName } : null}
             helperText="Upload a clear photo or scan of the back of your ID"
           />
+
+          {pendingFile && (
+            <p className="text-xs text-gray-500">
+              File will be uploaded when you click "Next"
+            </p>
+          )}
         </>
       )}
 

@@ -6,6 +6,8 @@ import { Alert } from '../../ui/Alert';
 interface StepProps {
   data: Record<string, unknown>;
   onSave: (data: Record<string, unknown>, completed?: boolean) => void;
+  onFileSelect?: (file: File | null) => void;
+  pendingFile?: File | null;
   onChange?: () => void;
   saving: boolean;
 }
@@ -30,15 +32,16 @@ const US_STATES = [
   { value: 'WI', label: 'Wisconsin' }, { value: 'WY', label: 'Wyoming' }, { value: 'DC', label: 'District of Columbia' },
 ];
 
-export function IDFront({ data, onSave, onChange }: StepProps) {
+export function IDFront({ data, onSave, onFileSelect, pendingFile, onChange }: StepProps) {
   const [form, setForm] = useState({
     skip: (data.skip as boolean) || false,
     id_type: (data.id_type as string) || '',
     id_number: (data.id_number as string) || '',
     issuing_state: (data.issuing_state as string) || '',
     expiration_date: (data.expiration_date as string) || '',
-    file_name: (data.file_name as string) || '',
   });
+
+  const displayFileName = pendingFile?.name || (data.file_name as string) || '';
 
   const handleChange = (field: string, value: string) => {
     const updated = { ...form, [field]: value };
@@ -48,16 +51,18 @@ export function IDFront({ data, onSave, onChange }: StepProps) {
   };
 
   const handleFileSelect = (file: File) => {
-    const updated = { ...form, file_name: file.name, file_size: file.size };
-    setForm({ ...form, file_name: file.name });
     onChange?.();
-    onSave({ ...updated, file });
+    onFileSelect?.(file);
   };
 
   const handleSkip = (checked: boolean) => {
-    setForm({ ...form, skip: checked });
+    const updated = { ...form, skip: checked };
+    setForm(updated);
     onChange?.();
-    onSave({ ...form, skip: checked });
+    if (checked) {
+      onFileSelect?.(null);
+    }
+    onSave(updated);
   };
 
   return (
@@ -133,9 +138,15 @@ export function IDFront({ data, onSave, onChange }: StepProps) {
             onFileSelect={handleFileSelect}
             accept=".pdf,.jpg,.jpeg,.png"
             maxSize={10 * 1024 * 1024}
-            currentFile={form.file_name ? { name: form.file_name } : null}
+            currentFile={displayFileName ? { name: displayFileName } : null}
             helperText="Upload a clear photo or scan of the front of your ID"
           />
+
+          {pendingFile && (
+            <p className="text-xs text-gray-500">
+              File will be uploaded when you click "Next"
+            </p>
+          )}
         </>
       )}
 
