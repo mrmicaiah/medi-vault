@@ -15,6 +15,8 @@ interface WizardShellProps {
   onSave: (data: Record<string, unknown>, completed?: boolean) => void;
   onSkip: () => void;
   onSaveAndExit: () => void;
+  onExit?: () => void;
+  onChange?: () => void;
 }
 
 export function WizardShell({
@@ -27,6 +29,8 @@ export function WizardShell({
   onSave,
   onSkip,
   onSaveAndExit,
+  onExit,
+  onChange,
 }: WizardShellProps) {
   const navigate = useNavigate();
   const stepName = STEP_NAMES[currentStep] || `Step ${currentStep}`;
@@ -87,6 +91,7 @@ export function WizardShell({
           data={stepData}
           onSave={onSave}
           saving={saving}
+          onChange={onChange}
         />
       </div>
 

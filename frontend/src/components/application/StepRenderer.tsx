@@ -27,10 +27,11 @@ interface StepRendererProps {
   data: Record<string, unknown>;
   onSave: (data: Record<string, unknown>, completed?: boolean) => void;
   saving: boolean;
+  onChange?: () => void;
 }
 
-export function StepRenderer({ step, data, onSave, saving }: StepRendererProps) {
-  const props = { data, onSave, saving };
+export function StepRenderer({ step, data, onSave, saving, onChange }: StepRendererProps) {
+  const props = { data, onSave, saving, onChange };
 
   switch (step) {
     case 1: return <ApplicationBasics {...props} />;
