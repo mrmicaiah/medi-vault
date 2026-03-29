@@ -22,40 +22,58 @@ import { VACodeDisclosure } from './steps/VACodeDisclosure';
 import { JobDescription } from './steps/JobDescription';
 import { FinalSignature } from './steps/FinalSignature';
 
+// Steps that involve file uploads
+const UPLOAD_STEPS = [11, 12, 13, 14, 15, 16, 17];
+
 interface StepRendererProps {
   step: number;
   data: Record<string, unknown>;
   onSave: (data: Record<string, unknown>, completed?: boolean) => void;
+  onFileSelect?: (file: File | null) => void;
+  pendingFile?: File | null;
   saving: boolean;
   onChange?: () => void;
 }
 
-export function StepRenderer({ step, data, onSave, saving, onChange }: StepRendererProps) {
-  const props = { data, onSave, saving, onChange };
+export function StepRenderer({ 
+  step, 
+  data, 
+  onSave, 
+  onFileSelect,
+  pendingFile,
+  saving, 
+  onChange 
+}: StepRendererProps) {
+  const baseProps = { data, onSave, saving, onChange };
+  
+  // Add file props for upload steps
+  const uploadProps = UPLOAD_STEPS.includes(step) 
+    ? { ...baseProps, onFileSelect, pendingFile }
+    : baseProps;
 
   switch (step) {
-    case 1: return <ApplicationBasics {...props} />;
-    case 2: return <PersonalInfo {...props} />;
-    case 3: return <EmergencyContact {...props} />;
-    case 4: return <Education {...props} />;
-    case 5: return <Reference1 {...props} />;
-    case 6: return <Reference2 {...props} />;
-    case 7: return <EmploymentHistory {...props} />;
-    case 8: return <WorkPreferences {...props} />;
-    case 9: return <ConfidentialityAgreement {...props} />;
-    case 10: return <ESignatureAgreement {...props} />;
-    case 11: return <WorkAuthorization {...props} />;
-    case 12: return <IDFront {...props} />;
-    case 13: return <IDBack {...props} />;
-    case 14: return <SocialSecurityCard {...props} />;
-    case 15: return <Credentials {...props} />;
-    case 16: return <CPRCertification {...props} />;
-    case 17: return <TBTest {...props} />;
-    case 18: return <OrientationTraining {...props} />;
-    case 19: return <CriminalBackground {...props} />;
-    case 20: return <VACodeDisclosure {...props} />;
-    case 21: return <JobDescription {...props} />;
-    case 22: return <FinalSignature {...props} />;
+    case 1: return <ApplicationBasics {...baseProps} />;
+    case 2: return <PersonalInfo {...baseProps} />;
+    case 3: return <EmergencyContact {...baseProps} />;
+    case 4: return <Education {...baseProps} />;
+    case 5: return <Reference1 {...baseProps} />;
+    case 6: return <Reference2 {...baseProps} />;
+    case 7: return <EmploymentHistory {...baseProps} />;
+    case 8: return <WorkPreferences {...baseProps} />;
+    case 9: return <ConfidentialityAgreement {...baseProps} />;
+    case 10: return <ESignatureAgreement {...baseProps} />;
+    case 11: return <WorkAuthorization {...uploadProps} />;
+    case 12: return <IDFront {...uploadProps} />;
+    case 13: return <IDBack {...uploadProps} />;
+    case 14: return <SocialSecurityCard {...uploadProps} />;
+    case 15: return <Credentials {...uploadProps} />;
+    case 16: return <CPRCertification {...uploadProps} />;
+    case 17: return <TBTest {...uploadProps} />;
+    case 18: return <OrientationTraining {...baseProps} />;
+    case 19: return <CriminalBackground {...baseProps} />;
+    case 20: return <VACodeDisclosure {...baseProps} />;
+    case 21: return <JobDescription {...baseProps} />;
+    case 22: return <FinalSignature {...baseProps} />;
     default: return <div className="text-center text-gray">Unknown step</div>;
   }
 }

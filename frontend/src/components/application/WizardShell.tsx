@@ -9,11 +9,12 @@ import { Alert } from '../ui/Alert';
 const UPLOAD_STEPS = [11, 12, 13, 14, 15, 16, 17];
 
 // Required fields for each upload step (when not skipped)
+// Note: file_name is now derived from pendingFile or existing data
 const UPLOAD_STEP_REQUIRED_FIELDS: Record<number, string[]> = {
-  11: ['worker_type', 'document_type', 'file_name'], // Work Auth
-  12: ['id_type', 'id_number', 'issuing_state', 'expiration_date', 'file_name'], // ID Front
-  13: ['file_name'], // ID Back
-  14: ['file_name'], // SSN Card
+  11: ['worker_type', 'document_type'], // Work Auth - file checked separately
+  12: ['id_type', 'id_number', 'issuing_state', 'expiration_date'], // ID Front
+  13: [], // ID Back - file only
+  14: [], // SSN Card - file only
   15: [], // Credentials - optional
   16: [], // CPR - optional
   17: [], // TB Test - optional
@@ -25,9 +26,11 @@ interface WizardShellProps {
   saving: boolean;
   stepData: Record<string, unknown>;
   allStepsData: Record<number, { data: Record<string, unknown>; status: string }>;
+  pendingFile: File | null;
   onNext: () => void;
   onPrev: () => void;
   onSave: (data: Record<string, unknown>, completed?: boolean) => void;
+  onFileSelect: (file: File | null) => void;
   onSaveAndExit: () => void;
   onChange?: () => void;
   onReturnToDashboard: () => void;
@@ -40,9 +43,11 @@ export function WizardShell({
   saving,
   stepData,
   allStepsData,
+  pendingFile,
   onNext,
   onPrev,
   onSave,
+  onFileSelect,
   onSaveAndExit,
   onChange,
   onReturnToDashboard,
@@ -54,18 +59,29 @@ export function WizardShell({
   const isUploadStep = UPLOAD_STEPS.includes(currentStep);
   const currentStepSkipped = stepData.skip === true;
 
+  // Check if file is available (either pending or already uploaded)
+  const hasFile = pendingFile !== null || Boolean(stepData.file_name);
+
   // Check if current step can proceed
   const canProceed = (): boolean => {
     if (isUploadStep) {
       if (currentStepSkipped) return true;
       
       const requiredFields = UPLOAD_STEP_REQUIRED_FIELDS[currentStep] || [];
-      if (requiredFields.length === 0) return true;
       
-      return requiredFields.every(field => {
+      // Check required form fields
+      const formFieldsComplete = requiredFields.every(field => {
         const value = stepData[field];
         return value !== undefined && value !== null && value !== '';
       });
+
+      // For required upload steps (11-14), also need a file
+      const needsFile = [11, 12, 13, 14].includes(currentStep);
+      if (needsFile && !hasFile) {
+        return false;
+      }
+      
+      return formFieldsComplete;
     }
     return true;
   };
@@ -86,17 +102,22 @@ export function WizardShell({
     return step?.data?.skip === true;
   }).length;
 
-  const getMissingFields = (): string[] => {
-    if (!isUploadStep || currentStepSkipped) return [];
+  const getMissingItems = (): { fields: string[]; needsFile: boolean } => {
+    if (!isUploadStep || currentStepSkipped) return { fields: [], needsFile: false };
+    
     const requiredFields = UPLOAD_STEP_REQUIRED_FIELDS[currentStep] || [];
-    return requiredFields.filter(field => {
+    const missingFields = requiredFields.filter(field => {
       const value = stepData[field];
       return value === undefined || value === null || value === '';
     });
+
+    const needsFile = [11, 12, 13, 14].includes(currentStep) && !hasFile;
+    
+    return { fields: missingFields, needsFile };
   };
 
-  const missingFields = getMissingFields();
-  const showValidationError = isUploadStep && !currentStepSkipped && missingFields.length > 0;
+  const { fields: missingFields, needsFile: missingFile } = getMissingItems();
+  const showValidationError = isUploadStep && !currentStepSkipped && (missingFields.length > 0 || missingFile);
 
   return (
     <div className="mx-auto max-w-3xl">
@@ -156,14 +177,20 @@ export function WizardShell({
           step={currentStep}
           data={stepData}
           onSave={onSave}
+          onFileSelect={onFileSelect}
+          pendingFile={pendingFile}
           saving={saving}
           onChange={onChange}
         />
 
         {showValidationError && (
           <Alert variant="error" className="mt-4" title="Required Fields Missing">
-            Please {missingFields.includes('file_name') ? 'upload the document' : 'fill in all required fields'}, 
-            or check "I'll upload this later" to continue.
+            {missingFile && missingFields.length === 0 
+              ? 'Please upload the document, or check "I\'ll upload this later" to continue.'
+              : missingFile
+                ? 'Please fill in all required fields and upload the document, or check "I\'ll upload this later" to continue.'
+                : 'Please fill in all required fields, or check "I\'ll upload this later" to continue.'
+            }
           </Alert>
         )}
       </div>

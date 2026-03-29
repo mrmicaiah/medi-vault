@@ -1,11 +1,9 @@
 import React, { useEffect } from 'react';
-import { useNavigate, Link } from 'react-router-dom';
+import { useNavigate } from 'react-router-dom';
 import { WizardShell } from '../../components/application/WizardShell';
 import { ReadOnlyApplication } from '../../components/application/ReadOnlyApplication';
 import { useApplication } from '../../hooks/useApplication';
 import { Alert } from '../../components/ui/Alert';
-import { Button } from '../../components/ui/Button';
-import { Card } from '../../components/ui/Card';
 
 export function ApplicationPage() {
   const navigate = useNavigate();
@@ -26,6 +24,8 @@ export function ApplicationPage() {
     prevStep,
     getStepData,
     markDirty,
+    setPendingFile,
+    getPendingFile,
   } = useApplication();
 
   useEffect(() => {
@@ -33,6 +33,8 @@ export function ApplicationPage() {
   }, [loadApplication]);
 
   const handleSave = (data: Record<string, unknown>, completed?: boolean) => {
+    // For regular saves (form field changes), just update local state
+    // The actual save happens on Next/Save & Exit
     saveStep(currentStep, data, completed);
   };
 
@@ -40,7 +42,12 @@ export function ApplicationPage() {
     markDirty();
   };
 
+  const handleFileSelect = (file: File | null) => {
+    setPendingFile(currentStep, file);
+  };
+
   const handleNext = async () => {
+    // Save current step (this will upload any pending file)
     await saveStep(currentStep, getStepData(currentStep), true);
     nextStep();
   };
@@ -52,6 +59,7 @@ export function ApplicationPage() {
   };
 
   const handleSaveAndExit = async () => {
+    // Save current step (uploads pending file if any)
     await saveStep(currentStep, getStepData(currentStep), false);
     navigate('/applicant');
   };
@@ -86,6 +94,9 @@ export function ApplicationPage() {
     );
   }
 
+  // Get pending file for current step
+  const pendingFile = getPendingFile(currentStep);
+
   return (
     <div>
       {error && (
@@ -94,9 +105,12 @@ export function ApplicationPage() {
         </Alert>
       )}
 
-      {hasUnsavedChanges && (
+      {(hasUnsavedChanges || pendingFile) && (
         <div className="mb-4 rounded-lg border border-warning bg-warning-bg px-4 py-2 text-sm text-warning">
-          You have unsaved changes
+          {pendingFile 
+            ? `File "${pendingFile.name}" selected - click Next to upload`
+            : 'You have unsaved changes'
+          }
         </div>
       )}
 
@@ -106,9 +120,11 @@ export function ApplicationPage() {
         saving={saving}
         stepData={getStepData(currentStep)}
         allStepsData={steps}
+        pendingFile={pendingFile}
         onNext={handleNext}
         onPrev={prevStep}
         onSave={handleSave}
+        onFileSelect={handleFileSelect}
         onSaveAndExit={handleSaveAndExit}
         onChange={handleChange}
         onReturnToDashboard={handleReturnToDashboard}
