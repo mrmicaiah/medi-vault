@@ -8,7 +8,7 @@ Endpoints for generating PDF documents:
 
 import io
 from datetime import datetime
-from typing import Optional
+from typing import Optional, List
 from fastapi import APIRouter, Depends, HTTPException, Response
 from pydantic import BaseModel
 
@@ -30,6 +30,34 @@ class PDFResponse(BaseModel):
     message: str
     storage_path: Optional[str] = None
     storage_url: Optional[str] = None
+
+
+class I9FieldsResponse(BaseModel):
+    """Response with I-9 form field names."""
+    fields: List[str]
+    count: int
+
+
+@router.get("/i9/fields", response_model=I9FieldsResponse)
+async def get_i9_field_names(
+    user = Depends(get_current_user)
+):
+    """
+    Get the fillable field names from the I-9 PDF template.
+    
+    Useful for debugging field mapping issues.
+    Only accessible to authenticated users.
+    """
+    try:
+        fields = pdf_service.get_i9_field_names()
+        return I9FieldsResponse(
+            fields=fields,
+            count=len(fields)
+        )
+    except FileNotFoundError as e:
+        raise HTTPException(status_code=500, detail=str(e))
+    except Exception as e:
+        raise HTTPException(status_code=500, detail=f"Failed to read I-9 fields: {str(e)}")
 
 
 @router.post("/generate/application", response_model=PDFResponse)
