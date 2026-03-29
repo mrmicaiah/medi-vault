@@ -8,6 +8,7 @@ import { Alert } from '../../components/ui/Alert';
 import { STEP_NAMES, TOTAL_STEPS } from '../../types';
 import { formatDate } from '../../lib/utils';
 import { api } from '../../lib/api';
+import { useAuth } from '../../hooks/useAuth';
 
 interface ApplicantDetail {
   user_id: string;
@@ -57,6 +58,7 @@ const DOCUMENT_STEP_NAMES: Record<number, string> = {
 export function ApplicantDetailPage() {
   const { id } = useParams();
   const navigate = useNavigate();
+  const { role } = useAuth();
   
   const [applicant, setApplicant] = useState<ApplicantDetail | null>(null);
   const [loading, setLoading] = useState(true);
@@ -66,6 +68,9 @@ export function ApplicantDetailPage() {
   const [showApproveModal, setShowApproveModal] = useState(false);
   const [showRejectModal, setShowRejectModal] = useState(false);
   const [notes, setNotes] = useState('');
+
+  // Only admins/superadmins can approve/reject, managers can only view
+  const isAdmin = role === 'admin' || role === 'superadmin';
 
   useEffect(() => {
     const loadApplicant = async () => {
@@ -184,8 +189,8 @@ export function ApplicantDetailPage() {
     );
   }
 
-  const canReview = ['submitted', 'under_review'].includes(applicant.status);
-  const canHire = applicant.status === 'approved';
+  const canReview = ['submitted', 'under_review'].includes(applicant.status) && isAdmin;
+  const canHire = applicant.status === 'approved' && isAdmin;
   const progress = Math.round((applicant.completed_steps / applicant.total_steps) * 100);
 
   // Get personal info from step 2
@@ -231,6 +236,9 @@ export function ApplicantDetailPage() {
                 Hire
               </Button>
             </Link>
+          )}
+          {!isAdmin && ['submitted', 'under_review'].includes(applicant.status) && (
+            <Badge variant="info">Admin approval required</Badge>
           )}
         </div>
       </div>
