@@ -4,12 +4,13 @@ PDF Generation Service for MediVault
 Generates:
 1. Employment Application PDF - Professional document from form data
 2. I-9 Form PDF - Fills the official USCIS I-9 fillable form
+
 """
 
 import io
 import os
 from datetime import datetime
-from typing import Optional
+from typing import Optional, Dict, List
 from jinja2 import Environment, FileSystemLoader
 from weasyprint import HTML, CSS
 from pypdf import PdfReader, PdfWriter
@@ -30,6 +31,51 @@ class PDFService:
             loader=FileSystemLoader(TEMPLATES_DIR),
             autoescape=True
         )
+        self._i9_field_cache: Optional[List[str]] = None
+    
+    def get_i9_field_names(self) -> List[str]:
+        """
+        Get all fillable field names from the I-9 PDF.
+        
+        Useful for debugging and mapping data to the correct fields.
+        
+        Returns:
+            List of field names in the I-9 form
+        """
+        i9_path = os.path.join(ASSETS_DIR, 'i-9.pdf')
+        
+        if not os.path.exists(i9_path):
+            raise FileNotFoundError(
+                "I-9 form template not found. Please add i-9.pdf to backend/app/assets/"
+            )
+        
+        if self._i9_field_cache is not None:
+            return self._i9_field_cache
+        
+        reader = PdfReader(i9_path)
+        fields = []
+        
+        for page in reader.pages:
+            if '/Annots' in page:
+                for annot in page['/Annots']:
+                    obj = annot.get_object()
+                    if obj.get('/FT') == '/Tx':  # Text field
+                        field_name = obj.get('/T')
+                        if field_name:
+                            fields.append(str(field_name))
+                    elif obj.get('/FT') == '/Btn':  # Checkbox/Radio
+                        field_name = obj.get('/T')
+                        if field_name:
+                            fields.append(str(field_name))
+        
+        # Also try getting fields from the form
+        if reader.get_fields():
+            for field_name in reader.get_fields().keys():
+                if field_name not in fields:
+                    fields.append(field_name)
+        
+        self._i9_field_cache = fields
+        return fields
     
     def generate_employment_application(self, application_data: dict) -> bytes:
         """
@@ -50,10 +96,14 @@ class PDFService:
         
         html_content = template.render(**flat_data)
         
+        # Load CSS
+        css_path = os.path.join(TEMPLATES_DIR, 'application_styles.css')
+        stylesheets = []
+        if os.path.exists(css_path):
+            stylesheets.append(CSS(filename=css_path))
+        
         # Convert HTML to PDF
-        pdf_bytes = HTML(string=html_content).write_pdf(
-            stylesheets=[CSS(os.path.join(TEMPLATES_DIR, 'application_styles.css'))]
-        )
+        pdf_bytes = HTML(string=html_content).write_pdf(stylesheets=stylesheets)
         
         return pdf_bytes
     
@@ -80,15 +130,18 @@ class PDFService:
         reader = PdfReader(i9_path)
         writer = PdfWriter()
         
-        # Copy all pages
-        for page in reader.pages:
-            writer.add_page(page)
+        # Clone the PDF
+        writer.clone_document_from_reader(reader)
         
-        # Get field mappings
-        field_values = self._map_data_to_i9_fields(application_data, ssn)
+        # Get available field names for mapping
+        available_fields = self.get_i9_field_names()
         
-        # Fill in the form fields
-        writer.update_page_form_field_values(writer.pages[0], field_values)
+        # Get our field values
+        field_values = self._map_data_to_i9_fields(application_data, ssn, available_fields)
+        
+        # Fill in the form fields on page 1 (Section 1 and 2)
+        if len(writer.pages) > 0:
+            writer.update_page_form_field_values(writer.pages[0], field_values)
         
         # Write to bytes
         output = io.BytesIO()
@@ -227,31 +280,22 @@ class PDFService:
         
         return flat
     
-    def _map_data_to_i9_fields(self, application_data: dict, ssn: Optional[str] = None) -> dict:
+    def _map_data_to_i9_fields(
+        self, 
+        application_data: dict, 
+        ssn: Optional[str],
+        available_fields: List[str]
+    ) -> Dict[str, str]:
         """
         Map application data to I-9 form field names.
         
-        The I-9 form has specific field names. This maps our data to those fields.
-        Field names may vary slightly between I-9 versions.
-        
-        Section 1 (Employee fills out):
-        - Last name, first name, middle initial
-        - Other last names used
-        - Address (street, apt, city, state, zip)
-        - Date of birth
-        - SSN
-        - Email, phone
-        - Citizenship status checkbox
-        - Signature and date
-        
-        Section 2 (Employer fills out after examining documents):
-        - List B document info (ID)
-        - List C document info (Birth Certificate)
-        - Employer signature
+        The I-9 form has specific field names that vary by version.
+        This method attempts to match common field name patterns.
         
         Args:
             application_data: Full application data with steps
             ssn: Decrypted SSN
+            available_fields: List of actual field names in the PDF
             
         Returns:
             Dictionary mapping I-9 field names to values
@@ -259,60 +303,154 @@ class PDFService:
         flat = self._flatten_application_data(application_data)
         today = datetime.now().strftime('%m/%d/%Y')
         
-        # Common I-9 field names (may need adjustment based on actual form version)
-        # These are typical field names found in USCIS I-9 fillable PDFs
-        fields = {
-            # Section 1 - Employee Information
-            'Last Name (Family Name)': flat.get('last_name', ''),
-            'First Name (Given Name)': flat.get('first_name', ''),
-            'Middle Initial': flat.get('middle_name', '')[:1] if flat.get('middle_name') else '',
-            'Other Last Names Used (if any)': flat.get('other_last_names', '') or 'N/A',
-            'Address (Street Number and Name)': flat.get('address_line1', ''),
-            'Apt. Number': flat.get('address_line2', ''),
-            'City or Town': flat.get('city', ''),
-            'State': flat.get('state', ''),
-            'ZIP Code': flat.get('zip', ''),
-            'Date of Birth (mm/dd/yyyy)': self._format_date(flat.get('date_of_birth', '')),
-            'Employee\'s E-mail Address': flat.get('email', ''),
-            'Employee\'s Telephone Number': flat.get('phone', ''),
-            
-            # SSN fields (often split into 3 parts)
-            'U.S. Social Security Number': ssn if ssn else '',
-            
-            # Citizenship status - typically checkboxes
-            # For birth certificate holders, they are US Citizens
-            'I attest, under penalty of perjury, that I am (check one of the following boxes):': '',
-            'Citizen': 'Yes',  # Checkbox for US Citizen
-            
-            # Section 1 signature
-            'Employee Signature': flat.get('signature_name', ''),
-            'Today\'s Date (mm/dd/yyyy)': today,
-            
-            # Section 2 - Employer fills out
-            # List B - Identity Document (Driver's License/State ID)
-            'List B - Document Title': self._get_id_document_title(flat.get('id_type', '')),
-            'List B - Issuing Authority': flat.get('id_issuing_state', ''),
-            'List B - Document Number': flat.get('id_number', ''),
-            'List B - Expiration Date (if any) (mm/dd/yyyy)': self._format_date(flat.get('id_expiration', '')),
-            
-            # List C - Employment Authorization (Birth Certificate)
-            'List C - Document Title': 'Birth Certificate',
-            'List C - Issuing Authority': flat.get('work_auth_issuing_authority', 'United States'),
-            'List C - Document Number': flat.get('work_auth_doc_number', '') or 'N/A',
-            'List C - Expiration Date (if any) (mm/dd/yyyy)': 'N/A',  # Birth certs don't expire
-            
-            # Employer certification
-            'First Day of Employment (mm/dd/yyyy)': '',  # To be filled by employer
-            'Employer or Authorized Representative Signature': '',
-            'Title of Employer or Authorized Representative': '',
-            'Employer\'s Business or Organization Name': 'Eveready HomeCare',
-            'Employer\'s Business or Organization Address (Street Number and Name)': '',
-            'City or Town 2': '',
-            'State 2': 'VA',
-            'ZIP Code 2': '',
+        # Define our data with multiple possible field name variations
+        # The I-9 form field names can vary between versions
+        field_mappings = {
+            # Last Name variations
+            'last_name': [
+                'Last Name (Family Name)',
+                'Last Name',
+                'lastName',
+                'family_name',
+                'Last Name Family Name',
+                'Employee Last Name',
+            ],
+            'first_name': [
+                'First Name (Given Name)',
+                'First Name',
+                'firstName',
+                'given_name',
+                'First Name Given Name',
+                'Employee First Name',
+            ],
+            'middle_initial': [
+                'Middle Initial',
+                'MI',
+                'middleInitial',
+                'Middle',
+            ],
+            'other_names': [
+                'Other Last Names Used (if any)',
+                'Other Names Used',
+                'otherNames',
+                'Other Last Names Used if any',
+                'Maiden Name',
+            ],
+            'address': [
+                'Address (Street Number and Name)',
+                'Address',
+                'Street Address',
+                'address',
+                'Address Street Number and Name',
+            ],
+            'apt': [
+                'Apt. Number',
+                'Apt Number',
+                'Apartment',
+                'apt',
+                'Apt',
+            ],
+            'city': [
+                'City or Town',
+                'City',
+                'city',
+            ],
+            'state': [
+                'State',
+                'state',
+            ],
+            'zip': [
+                'ZIP Code',
+                'Zip Code',
+                'zip',
+                'Zip',
+                'ZIP',
+            ],
+            'dob': [
+                'Date of Birth (mm/dd/yyyy)',
+                'Date of Birth',
+                'DOB',
+                'dateOfBirth',
+                'Birth Date',
+            ],
+            'ssn': [
+                'U.S. Social Security Number',
+                'Social Security Number',
+                'SSN',
+                'ssn',
+            ],
+            'email': [
+                "Employee's E-mail Address",
+                "Employee E-mail Address",
+                'E-mail Address',
+                'Email',
+                'email',
+            ],
+            'phone': [
+                "Employee's Telephone Number",
+                "Employee Telephone Number",
+                'Telephone Number',
+                'Phone',
+                'phone',
+            ],
+            'employee_signature': [
+                'Employee Signature',
+                'Signature of Employee',
+                'employeeSignature',
+            ],
+            'employee_sign_date': [
+                "Today's Date (mm/dd/yyyy)",
+                "Today's Date",
+                'Date',
+                'Signature Date',
+            ],
         }
         
-        return fields
+        # Our data values
+        data_values = {
+            'last_name': flat.get('last_name', ''),
+            'first_name': flat.get('first_name', ''),
+            'middle_initial': (flat.get('middle_name', '') or '')[:1],
+            'other_names': flat.get('other_last_names', '') or 'N/A',
+            'address': flat.get('address_line1', ''),
+            'apt': flat.get('address_line2', ''),
+            'city': flat.get('city', ''),
+            'state': flat.get('state', ''),
+            'zip': flat.get('zip', ''),
+            'dob': self._format_date(flat.get('date_of_birth', '')),
+            'ssn': ssn or '',
+            'email': flat.get('email', ''),
+            'phone': flat.get('phone', ''),
+            'employee_signature': flat.get('signature_name', ''),
+            'employee_sign_date': today,
+        }
+        
+        # Build the final field values dict
+        result = {}
+        
+        # For each data field, find a matching PDF field name
+        for data_key, possible_names in field_mappings.items():
+            value = data_values.get(data_key, '')
+            if not value:
+                continue
+                
+            # Try to find a matching field name in the PDF
+            for possible_name in possible_names:
+                # Check exact match
+                if possible_name in available_fields:
+                    result[possible_name] = value
+                    break
+                # Check case-insensitive match
+                for avail_field in available_fields:
+                    if avail_field.lower() == possible_name.lower():
+                        result[avail_field] = value
+                        break
+                    # Check partial match
+                    if possible_name.lower() in avail_field.lower():
+                        result[avail_field] = value
+                        break
+        
+        return result
     
     def _get_id_document_title(self, id_type: str) -> str:
         """Convert our ID type to I-9 document title."""
