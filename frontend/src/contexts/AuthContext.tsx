@@ -10,6 +10,7 @@ interface AuthState {
   role: UserRole | null;
   loading: boolean;
   initialized: boolean;
+  error: string | null;
 }
 
 interface AuthContextType extends AuthState {
@@ -18,6 +19,7 @@ interface AuthContextType extends AuthState {
   signOut: () => Promise<void>;
   resetPassword: (email: string) => Promise<void>;
   refreshProfile: () => Promise<void>;
+  clearError: () => void;
 }
 
 export const AuthContext = createContext<AuthContextType | undefined>(undefined);
@@ -30,7 +32,12 @@ export function AuthProvider({ children }: { children: React.ReactNode }) {
     role: null,
     loading: true,
     initialized: false,
+    error: null,
   });
+
+  const clearError = useCallback(() => {
+    setState((prev) => ({ ...prev, error: null }));
+  }, []);
 
   const fetchProfile = useCallback(async (userId: string): Promise<Profile | null> => {
     // Retry logic - profile might not exist immediately after signup
@@ -67,46 +74,131 @@ export function AuthProvider({ children }: { children: React.ReactNode }) {
   }, [state.user, fetchProfile]);
 
   useEffect(() => {
-    supabase.auth.getSession().then(async ({ data: { session } }) => {
-      let profile: Profile | null = null;
-      if (session?.user) {
-        profile = await fetchProfile(session.user.id);
+    let mounted = true;
+
+    const initAuth = async () => {
+      try {
+        const { data: { session }, error } = await supabase.auth.getSession();
+        
+        if (!mounted) return;
+
+        if (error) {
+          console.error('Session error:', error);
+          // Clear any stale session data
+          await supabase.auth.signOut();
+          setState({
+            user: null,
+            session: null,
+            profile: null,
+            role: null,
+            loading: false,
+            initialized: true,
+            error: null,
+          });
+          return;
+        }
+
+        let profile: Profile | null = null;
+        if (session?.user) {
+          profile = await fetchProfile(session.user.id);
+          
+          // If we have a session but no profile, the session might be invalid
+          if (!profile) {
+            console.warn('Session exists but no profile found, signing out');
+            await supabase.auth.signOut();
+            setState({
+              user: null,
+              session: null,
+              profile: null,
+              role: null,
+              loading: false,
+              initialized: true,
+              error: null,
+            });
+            return;
+          }
+        }
+
+        if (mounted) {
+          setState({
+            user: session?.user || null,
+            session,
+            profile,
+            role: profile?.role || null,
+            loading: false,
+            initialized: true,
+            error: null,
+          });
+        }
+      } catch (err) {
+        console.error('Auth init error:', err);
+        if (mounted) {
+          // On any error, clear state and let user log in fresh
+          await supabase.auth.signOut();
+          setState({
+            user: null,
+            session: null,
+            profile: null,
+            role: null,
+            loading: false,
+            initialized: true,
+            error: 'Session expired. Please log in again.',
+          });
+        }
       }
-      setState({
-        user: session?.user || null,
-        session,
-        profile,
-        role: profile?.role || null,
-        loading: false,
-        initialized: true,
-      });
-    });
+    };
+
+    initAuth();
 
     const {
       data: { subscription },
-    } = supabase.auth.onAuthStateChange(async (_event, session) => {
+    } = supabase.auth.onAuthStateChange(async (event, session) => {
+      if (!mounted) return;
+
+      // Handle sign out event
+      if (event === 'SIGNED_OUT' || !session) {
+        setState({
+          user: null,
+          session: null,
+          profile: null,
+          role: null,
+          loading: false,
+          initialized: true,
+          error: null,
+        });
+        return;
+      }
+
+      // Handle sign in / token refresh
       let profile: Profile | null = null;
       if (session?.user) {
         profile = await fetchProfile(session.user.id);
       }
-      setState({
-        user: session?.user || null,
-        session,
-        profile,
-        role: profile?.role || null,
-        loading: false,
-        initialized: true,
-      });
+
+      if (mounted) {
+        setState({
+          user: session?.user || null,
+          session,
+          profile,
+          role: profile?.role || null,
+          loading: false,
+          initialized: true,
+          error: null,
+        });
+      }
     });
 
-    return () => subscription.unsubscribe();
+    return () => {
+      mounted = false;
+      subscription.unsubscribe();
+    };
   }, [fetchProfile]);
 
   const signIn = async (email: string, password: string) => {
-    setState((prev) => ({ ...prev, loading: true }));
+    setState((prev) => ({ ...prev, loading: true, error: null }));
     const { error } = await supabase.auth.signInWithPassword({ email, password });
     if (error) {
-      setState((prev) => ({ ...prev, loading: false }));
+      setState((prev) => ({ ...prev, loading: false, error: error.message }));
       throw error;
     }
   };
@@ -117,7 +209,7 @@ export function AuthProvider({ children }: { children: React.ReactNode }) {
     firstName: string,
     lastName: string
   ) => {
-    setState((prev) => ({ ...prev, loading: true }));
+    setState((prev) => ({ ...prev, loading: true, error: null }));
     const { error } = await supabase.auth.signUp({
       email,
       password,
@@ -126,11 +218,10 @@ export function AuthProvider({ children }: { children: React.ReactNode }) {
       },
     });
     if (error) {
-      setState((prev) => ({ ...prev, loading: false }));
+      setState((prev) => ({ ...prev, loading: false, error: error.message }));
       throw error;
     }
-    // Profile is created automatically by the database trigger (handle_new_user)
-    // The onAuthStateChange listener will fetch the profile
+    setState((prev) => ({ ...prev, loading: false }));
   };
 
   const signOut = async () => {
@@ -142,6 +233,7 @@ export function AuthProvider({ children }: { children: React.ReactNode }) {
       role: null,
       loading: false,
       initialized: true,
+      error: null,
     });
   };
 
@@ -154,7 +246,7 @@ export function AuthProvider({ children }: { children: React.ReactNode }) {
 
   return (
     <AuthContext.Provider
-      value={{ ...state, signIn, signUp, signOut, resetPassword, refreshProfile }}
+      value={{ ...state, signIn, signUp, signOut, resetPassword, refreshProfile, clearError }}
     >
       {children}
     </AuthContext.Provider>

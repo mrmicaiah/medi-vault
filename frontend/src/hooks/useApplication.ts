@@ -1,6 +1,6 @@
-import { useState, useCallback } from 'react';
+import { useState, useCallback, useEffect, useRef } from 'react';
 import { api } from '../lib/api';
-import type { ApplicationStep, TOTAL_STEPS } from '../types';
+import type { ApplicationStep } from '../types';
 
 interface ApplicationState {
   applicationId: string | null;
@@ -9,6 +9,7 @@ interface ApplicationState {
   loading: boolean;
   saving: boolean;
   error: string | null;
+  hasUnsavedChanges: boolean;
 }
 
 export function useApplication() {
@@ -19,7 +20,24 @@ export function useApplication() {
     loading: false,
     saving: false,
     error: null,
+    hasUnsavedChanges: false,
   });
+
+  const initialDataRef = useRef<Record<string, unknown>>({});
+
+  // Warn before leaving with unsaved changes
+  useEffect(() => {
+    const handleBeforeUnload = (e: BeforeUnloadEvent) => {
+      if (state.hasUnsavedChanges) {
+        e.preventDefault();
+        e.returnValue = 'You have unsaved changes. Are you sure you want to leave?';
+        return e.returnValue;
+      }
+    };
+
+    window.addEventListener('beforeunload', handleBeforeUnload);
+    return () => window.removeEventListener('beforeunload', handleBeforeUnload);
+  }, [state.hasUnsavedChanges]);
 
   const loadApplication = useCallback(async () => {
     setState((prev) => ({ ...prev, loading: true, error: null }));
@@ -31,8 +49,11 @@ export function useApplication() {
 
       const stepsMap: Record<number, { data: Record<string, unknown>; status: string }> = {};
       res.steps.forEach((step) => {
-        stepsMap[step.step_number] = { data: step.data, status: step.status };
+        stepsMap[step.step_number] = { data: step.data || {}, status: step.status };
       });
+
+      // Store initial data for change detection
+      initialDataRef.current = stepsMap[res.application.current_step]?.data || {};
 
       setState((prev) => ({
         ...prev,
@@ -40,18 +61,29 @@ export function useApplication() {
         currentStep: res.application.current_step,
         steps: stepsMap,
         loading: false,
+        hasUnsavedChanges: false,
       }));
     } catch (err) {
+      const errorMessage = err instanceof Error ? err.message : 'Failed to load application';
       setState((prev) => ({
         ...prev,
         loading: false,
-        error: err instanceof Error ? err.message : 'Failed to load application',
+        error: errorMessage,
       }));
     }
   }, []);
 
+  const markDirty = useCallback(() => {
+    setState((prev) => ({ ...prev, hasUnsavedChanges: true }));
+  }, []);
+
   const saveStep = useCallback(
     async (stepNumber: number, data: Record<string, unknown>, completed: boolean = false) => {
+      if (!state.applicationId) {
+        setState((prev) => ({ ...prev, error: 'No application found' }));
+        return;
+      }
+
       setState((prev) => ({ ...prev, saving: true, error: null }));
       try {
         await api.post(`/applications/${state.applicationId}/steps`, {
@@ -60,6 +92,9 @@ export function useApplication() {
           status: completed ? 'completed' : 'in_progress',
         });
 
+        // Update initial data ref after successful save
+        initialDataRef.current = data;
+
         setState((prev) => ({
           ...prev,
           steps: {
@@ -67,6 +102,7 @@ export function useApplication() {
             [stepNumber]: { data, status: completed ? 'completed' : 'in_progress' },
           },
           saving: false,
+          hasUnsavedChanges: false,
         }));
       } catch (err) {
         setState((prev) => ({
@@ -81,6 +117,11 @@ export function useApplication() {
 
   const skipStep = useCallback(
     async (stepNumber: number) => {
+      if (!state.applicationId) {
+        setState((prev) => ({ ...prev, error: 'No application found' }));
+        return;
+      }
+
       setState((prev) => ({ ...prev, saving: true, error: null }));
       try {
         await api.post(`/applications/${state.applicationId}/steps`, {
@@ -96,6 +137,7 @@ export function useApplication() {
             [stepNumber]: { data: {}, status: 'skipped' },
           },
           saving: false,
+          hasUnsavedChanges: false,
         }));
       } catch (err) {
         setState((prev) => ({
@@ -116,6 +158,7 @@ export function useApplication() {
     setState((prev) => ({
       ...prev,
       currentStep: Math.min(prev.currentStep + 1, 22),
+      hasUnsavedChanges: false,
     }));
   }, []);
 
@@ -145,6 +188,13 @@ export function useApplication() {
     (s) => s.status === 'completed' || s.status === 'skipped'
   ).length;
 
+  const confirmLeave = useCallback((): boolean => {
+    if (state.hasUnsavedChanges) {
+      return window.confirm('You have unsaved changes. Are you sure you want to leave?');
+    }
+    return true;
+  }, [state.hasUnsavedChanges]);
+
   return {
     ...state,
     completedCount,
@@ -156,5 +206,7 @@ export function useApplication() {
     prevStep,
     getStepData,
     isStepCompleted,
+    markDirty,
+    confirmLeave,
   };
 }

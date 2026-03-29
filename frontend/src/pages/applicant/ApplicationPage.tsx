@@ -12,12 +12,15 @@ export function ApplicationPage() {
     saving,
     loading,
     error,
+    hasUnsavedChanges,
     loadApplication,
     saveStep,
     skipStep,
     nextStep,
     prevStep,
     getStepData,
+    markDirty,
+    confirmLeave,
   } = useApplication();
 
   useEffect(() => {
@@ -28,22 +31,29 @@ export function ApplicationPage() {
     saveStep(currentStep, data, completed);
   };
 
-  const handleNext = () => {
-    saveStep(currentStep, getStepData(currentStep), true).then(() => {
-      nextStep();
-    });
+  const handleChange = () => {
+    markDirty();
   };
 
-  const handleSkip = () => {
-    skipStep(currentStep).then(() => {
-      nextStep();
-    });
+  const handleNext = async () => {
+    await saveStep(currentStep, getStepData(currentStep), true);
+    nextStep();
   };
 
-  const handleSaveAndExit = () => {
-    saveStep(currentStep, getStepData(currentStep), false).then(() => {
+  const handleSkip = async () => {
+    await skipStep(currentStep);
+    nextStep();
+  };
+
+  const handleSaveAndExit = async () => {
+    await saveStep(currentStep, getStepData(currentStep), false);
+    navigate('/applicant');
+  };
+
+  const handleExit = () => {
+    if (confirmLeave()) {
       navigate('/applicant');
-    });
+    }
   };
 
   if (loading) {
@@ -68,6 +78,12 @@ export function ApplicationPage() {
         </Alert>
       )}
 
+      {hasUnsavedChanges && (
+        <div className="mb-4 rounded-lg border border-warning bg-warning-bg px-4 py-2 text-sm text-warning">
+          You have unsaved changes
+        </div>
+      )}
+
       <WizardShell
         currentStep={currentStep}
         completedCount={completedCount}
@@ -78,6 +94,8 @@ export function ApplicationPage() {
         onSave={handleSave}
         onSkip={handleSkip}
         onSaveAndExit={handleSaveAndExit}
+        onExit={handleExit}
+        onChange={handleChange}
       />
     </div>
   );
