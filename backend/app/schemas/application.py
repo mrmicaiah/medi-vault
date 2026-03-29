@@ -9,7 +9,8 @@ from app.models.application import ApplicationStatus, StepType
 
 class ApplicationCreate(BaseModel):
     """Request to create a new application."""
-    pass  # No fields needed; user_id comes from auth
+    agency_id: Optional[str] = None
+    location_id: Optional[str] = None
 
 
 class StepData(BaseModel):
@@ -39,8 +40,13 @@ class ApplicationResponse(BaseModel):
     user_id: str
     status: ApplicationStatus
     current_step: int = 1
-    completed_steps: int = 0  # Made optional with default
+    completed_steps: int = 0
     total_steps: int = 22
+    
+    # Multi-tenant fields
+    agency_id: Optional[str] = None
+    location_id: Optional[str] = None
+    
     submitted_at: Optional[str] = None
     reviewed_at: Optional[str] = None
     reviewed_by: Optional[str] = None
