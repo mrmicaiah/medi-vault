@@ -16,6 +16,7 @@ export function PersonalInfo({ data, onSave, onChange }: StepProps) {
     first_name: (data.first_name as string) || '',
     middle_name: (data.middle_name as string) || '',
     last_name: (data.last_name as string) || '',
+    other_last_names: (data.other_last_names as string) || '',
     date_of_birth: (data.date_of_birth as string) || '',
     gender: (data.gender as string) || '',
     address_line1: (data.address_line1 as string) || '',
@@ -99,6 +100,14 @@ export function PersonalInfo({ data, onSave, onChange }: StepProps) {
         <Input label="Middle Name" value={form.middle_name} onChange={(e) => handleChange('middle_name', e.target.value)} />
         <Input label="Last Name" required value={form.last_name} onChange={(e) => handleChange('last_name', e.target.value)} />
       </div>
+
+      <Input 
+        label="Other Last Names Used" 
+        value={form.other_last_names} 
+        onChange={(e) => handleChange('other_last_names', e.target.value)} 
+        placeholder="Maiden name or other names (if applicable)"
+        helperText="Include maiden name or any other last names you have used"
+      />
 
       <div className="grid grid-cols-1 gap-4 sm:grid-cols-3">
         <Input label="Date of Birth" type="date" required value={form.date_of_birth} onChange={(e) => handleChange('date_of_birth', e.target.value)} />
