@@ -28,7 +28,12 @@ class ApplicationService:
     def __init__(self, supabase: Client):
         self.supabase = supabase
 
-    def create_application(self, user_id: str) -> ApplicationResponse:
+    def create_application(
+        self, 
+        user_id: str, 
+        agency_id: Optional[str] = None,
+        location_id: Optional[str] = None
+    ) -> ApplicationResponse:
         """Create a new application for a user."""
         # Check if user already has an active application
         existing = (
@@ -44,21 +49,37 @@ class ApplicationService:
                 detail="User already has an active application",
             )
 
+        # If no agency_id provided, try to get from user metadata
+        if not agency_id:
+            user_result = self.supabase.auth.admin.get_user_by_id(user_id)
+            if user_result and user_result.user:
+                user_meta = user_result.user.user_metadata or {}
+                agency_id = user_meta.get("agency_id")
+                if not location_id:
+                    location_id = user_meta.get("location_id")
+
         now = datetime.now(timezone.utc).isoformat()
+
+        # Build application data
+        app_data = {
+            "user_id": user_id,
+            "status": ApplicationStatus.IN_PROGRESS.value,
+            "current_step": 1,
+            "total_steps": 22,
+            "created_at": now,
+            "updated_at": now,
+        }
+        
+        # Add agency and location if available
+        if agency_id:
+            app_data["agency_id"] = agency_id
+        if location_id:
+            app_data["location_id"] = location_id
 
         # Create the application
         app_result = (
             self.supabase.table("applications")
-            .insert(
-                {
-                    "user_id": user_id,
-                    "status": ApplicationStatus.IN_PROGRESS.value,
-                    "current_step": 1,
-                    "total_steps": 22,
-                    "created_at": now,
-                    "updated_at": now,
-                }
-            )
+            .insert(app_data)
             .execute()
         )
 
@@ -68,8 +89,8 @@ class ApplicationService:
                 detail="Failed to create application",
             )
 
-        app_data = app_result.data[0]
-        app_id = app_data["id"]
+        result_data = app_result.data[0]
+        app_id = result_data["id"]
 
         # Create all 22 steps
         steps_to_insert = []
@@ -96,8 +117,10 @@ class ApplicationService:
             current_step=1,
             completed_steps=0,
             total_steps=22,
-            created_at=app_data.get("created_at"),
-            updated_at=app_data.get("updated_at"),
+            agency_id=result_data.get("agency_id"),
+            location_id=result_data.get("location_id"),
+            created_at=result_data.get("created_at"),
+            updated_at=result_data.get("updated_at"),
         )
 
     def get_application(self, app_id: str, user_id: Optional[str] = None) -> ApplicationResponse:
@@ -133,6 +156,8 @@ class ApplicationService:
             current_step=data.get("current_step", 1),
             completed_steps=completed_count,
             total_steps=data.get("total_steps", 22),
+            agency_id=data.get("agency_id"),
+            location_id=data.get("location_id"),
             submitted_at=data.get("submitted_at"),
             reviewed_at=data.get("reviewed_at"),
             reviewed_by=data.get("reviewed_by"),
@@ -170,6 +195,8 @@ class ApplicationService:
                     current_step=d.get("current_step", 1),
                     completed_steps=completed_count,
                     total_steps=d.get("total_steps", 22),
+                    agency_id=d.get("agency_id"),
+                    location_id=d.get("location_id"),
                     submitted_at=d.get("submitted_at"),
                     reviewed_at=d.get("reviewed_at"),
                     created_at=d.get("created_at"),
