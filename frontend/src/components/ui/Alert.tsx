@@ -1,11 +1,12 @@
 import React, { useState } from 'react';
 import { cn } from '../../lib/utils';
 
-interface AlertProps {
+export interface AlertProps {
   variant?: 'success' | 'warning' | 'error' | 'info';
   title?: string;
   children: React.ReactNode;
   dismissible?: boolean;
+  onDismiss?: () => void;
   className?: string;
 }
 
@@ -21,12 +22,18 @@ export function Alert({
   title,
   children,
   dismissible = false,
+  onDismiss,
   className,
 }: AlertProps) {
   const [dismissed, setDismissed] = useState(false);
   if (dismissed) return null;
 
   const config = variantConfig[variant];
+
+  const handleDismiss = () => {
+    setDismissed(true);
+    onDismiss?.();
+  };
 
   return (
     <div
@@ -47,7 +54,7 @@ export function Alert({
       </div>
       {dismissible && (
         <button
-          onClick={() => setDismissed(true)}
+          onClick={handleDismiss}
           className={cn('flex-shrink-0 rounded p-0.5 hover:opacity-70', config.text)}
         >
           <svg className="h-4 w-4" fill="none" viewBox="0 0 24 24" stroke="currentColor">

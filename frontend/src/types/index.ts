@@ -1,4 +1,4 @@
-export type UserRole = 'applicant' | 'admin' | 'superadmin';
+export type UserRole = 'applicant' | 'employee' | 'manager' | 'admin' | 'superadmin';
 
 export type ApplicationStatus =
   | 'not_started'
@@ -37,6 +37,7 @@ export interface Profile {
   email: string;
   phone: string;
   role: UserRole;
+  agency_id?: string;
   avatar_url?: string;
   created_at: string;
   updated_at: string;
@@ -48,6 +49,8 @@ export interface Application {
   status: ApplicationStatus;
   current_step: number;
   total_steps: number;
+  agency_id?: string;
+  location_id?: string;
   data: Record<string, unknown>;
   submitted_at?: string;
   reviewed_at?: string;
@@ -137,15 +140,36 @@ export interface EmployeeClientAssignment {
   created_at: string;
 }
 
-export interface Location {
+export interface Agency {
   id: string;
   name: string;
-  address: string;
+  slug: string;
+  tagline?: string;
+  logo_url?: string;
+  primary_color?: string;
+  secondary_color?: string;
+  website?: string;
+  phone?: string;
+  email?: string;
+  is_active: boolean;
+  created_at: string;
+  updated_at: string;
+}
+
+export interface Location {
+  id: string;
+  agency_id: string;
+  name: string;
+  slug: string;
+  address_line1?: string;
+  address_line2?: string;
   city: string;
   state: string;
-  zip: string;
-  phone: string;
+  zip?: string;
+  phone?: string;
+  email?: string;
   is_active: boolean;
+  is_hiring: boolean;
   created_at: string;
   updated_at: string;
 }
