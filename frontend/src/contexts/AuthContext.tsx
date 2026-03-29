@@ -32,19 +32,28 @@ export function AuthProvider({ children }: { children: React.ReactNode }) {
     initialized: false,
   });
 
-  const fetchProfile = useCallback(async (userId: string) => {
-    try {
-      const { data, error } = await supabase
-        .from('profiles')
-        .select('*')
-        .eq('id', userId)
-        .single();
+  const fetchProfile = useCallback(async (userId: string): Promise<Profile | null> => {
+    // Retry logic - profile might not exist immediately after signup
+    for (let i = 0; i < 3; i++) {
+      try {
+        const { data, error } = await supabase
+          .from('profiles')
+          .select('*')
+          .eq('id', userId)
+          .single();
 
-      if (error) throw error;
-      return data as Profile;
-    } catch {
-      return null;
+        if (data) return data as Profile;
+        if (error && error.code !== 'PGRST116') {
+          // PGRST116 = no rows returned, which is expected if trigger hasn't run yet
+          console.error('Error fetching profile:', error);
+        }
+      } catch (err) {
+        console.error('Exception fetching profile:', err);
+      }
+      // Wait 500ms before retry
+      if (i < 2) await new Promise(r => setTimeout(r, 500));
     }
+    return null;
   }, []);
 
   const refreshProfile = useCallback(async () => {
@@ -109,7 +118,7 @@ export function AuthProvider({ children }: { children: React.ReactNode }) {
     lastName: string
   ) => {
     setState((prev) => ({ ...prev, loading: true }));
-    const { data, error } = await supabase.auth.signUp({
+    const { error } = await supabase.auth.signUp({
       email,
       password,
       options: {
@@ -120,20 +129,8 @@ export function AuthProvider({ children }: { children: React.ReactNode }) {
       setState((prev) => ({ ...prev, loading: false }));
       throw error;
     }
-    // The handle_new_user() trigger should create the profile automatically
-    // But if it doesn't exist yet, create it manually
-    if (data.user) {
-      const { error: profileError } = await supabase.from('profiles').upsert({
-        id: data.user.id,
-        first_name: firstName,
-        last_name: lastName,
-        email,
-        role: 'applicant',
-      });
-      if (profileError) {
-        console.error('Error creating profile:', profileError);
-      }
-    }
+    // Profile is created automatically by the database trigger (handle_new_user)
+    // The onAuthStateChange listener will fetch the profile
   };
 
   const signOut = async () => {
