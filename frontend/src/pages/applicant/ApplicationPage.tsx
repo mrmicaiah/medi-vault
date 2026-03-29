@@ -16,12 +16,10 @@ export function ApplicationPage() {
     steps,
     loadApplication,
     saveStep,
-    skipStep,
     nextStep,
     prevStep,
     getStepData,
     markDirty,
-    confirmLeave,
   } = useApplication();
 
   useEffect(() => {
@@ -41,24 +39,12 @@ export function ApplicationPage() {
     nextStep();
   };
 
-  const handleSkip = async () => {
-    await skipStep(currentStep);
-    nextStep();
-  };
-
   const handleSaveAndExit = async () => {
     await saveStep(currentStep, getStepData(currentStep), false);
     navigate('/applicant');
   };
 
-  const handleExit = () => {
-    if (confirmLeave()) {
-      navigate('/applicant');
-    }
-  };
-
   const handleReturnToDashboard = async () => {
-    // Save current step and return to dashboard
     await saveStep(currentStep, getStepData(currentStep), true);
     navigate('/applicant');
   };
@@ -100,9 +86,7 @@ export function ApplicationPage() {
         onNext={handleNext}
         onPrev={prevStep}
         onSave={handleSave}
-        onSkip={handleSkip}
         onSaveAndExit={handleSaveAndExit}
-        onExit={handleExit}
         onChange={handleChange}
         onReturnToDashboard={handleReturnToDashboard}
       />
