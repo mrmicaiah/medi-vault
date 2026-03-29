@@ -128,12 +128,14 @@ ENCRYPTION_KEY=<generated-fernet-key>
    - Progress tracking, step navigation, save & exit
 
 3. **File Uploads to Supabase Storage** ✅ (Implemented March 29, 2026)
-   - `useApplication.ts` hook now uploads files to Supabase Storage bucket `documents`
-   - `DocumentUploadModal.tsx` uploads files when user uploads from dashboard
+   - **Upload happens on "Next" click** - not on file selection
+   - Files stored in local React state (`pendingFiles`) until user commits
+   - `useApplication.ts` hook handles upload when `saveStep()` is called
    - Files organized by: `{user_id}/{step_folder}/{timestamp}_{filename}`
    - Step folders: work-authorization, id-front, id-back, ssn-card, credentials, cpr-certification, tb-test
    - Saves metadata: file_name, file_size, file_type, storage_path, storage_url, uploaded_at
    - Signed URLs generated with 1-year expiry
+   - No orphaned files - upload only happens when user explicitly proceeds
 
 4. **Application Lifecycle**
    - `in_progress` → Wizard is editable
@@ -171,6 +173,51 @@ ENCRYPTION_KEY=<generated-fernet-key>
 3. **Admin Panel**
    - Pages exist but are mostly placeholders
    - Pipeline, employee management, compliance views need work
+
+---
+
+## File Upload Architecture
+
+### Flow (Wizard Steps 11-17)
+```
+1. User selects file
+   └─> File stored in pendingFiles[stepNumber] (React state)
+   └─> UI shows: "File will be uploaded when you click Next"
+
+2. User clicks "Next" (or "Save & Exit")
+   └─> ApplicationPage.handleNext() calls saveStep()
+   └─> useApplication.saveStep() detects pending file
+   └─> Upload to Supabase Storage: documents/{userId}/{folder}/{timestamp}_{filename}
+   └─> Get signed URL (1-year expiry)
+   └─> Save step data with file metadata to API
+   └─> Clear pendingFile for that step
+   └─> Move to next step
+
+3. User changes mind before clicking Next
+   └─> Select different file → replaces pendingFile (no upload wasted)
+   └─> Check "I'll upload later" → clears pendingFile
+```
+
+### Flow (Dashboard Upload Modal - after submission)
+```
+1. User clicks "Upload" on dashboard
+   └─> DocumentUploadModal opens
+
+2. User selects file and fills form
+   └─> File stored in local state
+
+3. User clicks "Upload Document"
+   └─> Upload to Supabase Storage
+   └─> Save step data with metadata
+   └─> Close modal, refresh dashboard
+```
+
+### Key Files
+- `useApplication.ts` - `pendingFiles` state, `setPendingFile()`, `saveStep()` with upload logic
+- `ApplicationPage.tsx` - `handleFileSelect()` calls `setPendingFile(currentStep, file)`
+- `StepRenderer.tsx` - Passes `onFileSelect` and `pendingFile` to upload step components
+- `WizardShell.tsx` - Displays pending file indicator, validates file presence
+- `steps/*.tsx` (11-17) - Use `onFileSelect` prop, show "will upload on Next" message
 
 ---
 
@@ -258,49 +305,33 @@ updated_at TIMESTAMPTZ
 
 ---
 
-## Key Files to Know
-
-### Frontend
-- `frontend/src/contexts/AuthContext.tsx` - Auth state, login/logout, profile fetching
-- `frontend/src/hooks/useApplication.ts` - Application wizard state + file upload to Supabase
-- `frontend/src/pages/applicant/DashboardPage.tsx` - Main applicant dashboard
-- `frontend/src/pages/applicant/ApplicationPage.tsx` - Wizard or read-only view
-- `frontend/src/components/application/WizardShell.tsx` - Wizard UI wrapper
-- `frontend/src/components/application/StepRenderer.tsx` - Renders correct step component
-- `frontend/src/components/application/steps/*.tsx` - Individual step components
-- `frontend/src/components/applicant/DocumentUploadModal.tsx` - Upload modal for dashboard
-
-### Backend
-- `backend/app/main.py` - FastAPI app setup
-- `backend/app/routers/applications.py` - Application endpoints
-- `backend/app/services/application_service.py` - Business logic
-
-### Database
-- `supabase/migrations/006_storage.sql` - Storage bucket creation + RLS policies
-- `supabase/migrations/009_fix_rls_recursion.sql` - MUST BE RUN to fix auth issues
-
----
-
 ## Recent Changes (March 29, 2026)
 
-### File Upload Implementation
-1. **`DocumentUploadModal.tsx`** - Now actually uploads files to Supabase Storage
-   - Uses `supabase.storage.from('documents').upload()` 
-   - Generates signed URLs for access
-   - Saves complete metadata to application step data
+### File Upload Implementation - Proper "Upload on Next" Flow
+1. **`useApplication.ts`** - Added `pendingFiles` state
+   - `setPendingFile(stepNumber, file)` - Store file locally
+   - `getPendingFile(stepNumber)` - Get pending file for display
+   - `saveStep()` - Uploads pending file before saving step data
 
-2. **`useApplication.ts`** - Added file upload capability
-   - Detects File objects in step data
-   - Uploads to Supabase Storage before saving step
-   - Cleans data to remove File objects before API call
-   - Stores: file_name, file_size, file_type, storage_path, storage_url, uploaded_at
+2. **Upload step components** (WorkAuthorization, IDFront, IDBack, etc.)
+   - Now accept `onFileSelect` and `pendingFile` props
+   - Call `onFileSelect(file)` when user picks a file (no immediate upload)
+   - Show "File will be uploaded when you click Next" message
+
+3. **`WizardShell.tsx`** - Updated validation
+   - Checks for either `pendingFile` OR existing `file_name` in step data
+   - Shows pending file indicator in UI
+
+4. **`ApplicationPage.tsx`** - Wires everything together
+   - Passes `setPendingFile` as `onFileSelect` to wizard
+   - Shows "File selected - click Next to upload" indicator
 
 ---
 
 ## Immediate TODOs for Next Session
 
 1. **Verify RLS Fix** - Confirm migration 009 was run and auth works on hard refresh
-2. ~~**Implement File Uploads**~~ ✅ Done - Files now upload to Supabase Storage
+2. ~~**Implement File Uploads**~~ ✅ Done - Files upload on "Next" click
 3. **Test Full Flow** - Create account → Complete 22 steps → Submit → Upload missing docs
 4. **Fix Any Build Errors** - Check Cloudflare/Render logs after deploy
 5. **Admin Panel** - View uploaded documents, review applications
