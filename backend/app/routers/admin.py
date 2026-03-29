@@ -20,32 +20,48 @@ from app.schemas.common import SuccessResponse
 router = APIRouter(prefix="/admin", tags=["Admin"])
 
 
+def get_user_agency_id(supabase: Client, user_id: str) -> str | None:
+    """Get the agency_id for a user."""
+    result = (
+        supabase.table("profiles")
+        .select("agency_id")
+        .eq("id", user_id)
+        .single()
+        .execute()
+    )
+    return result.data.get("agency_id") if result.data else None
+
+
 @router.get("/dashboard", response_model=DashboardStats)
 async def get_dashboard(
     staff: UserProfile = Depends(require_staff),
     supabase: Client = Depends(get_supabase),
 ):
-    """Get admin dashboard statistics. Available to admins and managers."""
-    # Count applications by status
+    """Get admin dashboard statistics for the user's agency."""
+    agency_id = get_user_agency_id(supabase, staff.id)
+    
+    # Count applications by status (filtered by agency)
     statuses = ["in_progress", "submitted", "under_review", "approved", "rejected", "hired"]
     counts = {}
+    
     for s in statuses:
-        result = (
+        query = (
             supabase.table("applications")
             .select("id", count="exact")
             .eq("status", s)
-            .execute()
         )
+        if agency_id:
+            query = query.eq("agency_id", agency_id)
+        result = query.execute()
         counts[s] = result.count or 0
 
-    # Total applicants (unique users with applications)
-    total_apps = (
-        supabase.table("applications")
-        .select("user_id", count="exact")
-        .execute()
-    )
+    # Total applicants
+    query = supabase.table("applications").select("user_id", count="exact")
+    if agency_id:
+        query = query.eq("agency_id", agency_id)
+    total_apps = query.execute()
 
-    # Employee counts
+    # Employee counts (TODO: add agency_id to employees table)
     total_emp = (
         supabase.table("employees")
         .select("id", count="exact")
@@ -101,7 +117,9 @@ async def get_pipeline(
     staff: UserProfile = Depends(require_staff),
     supabase: Client = Depends(get_supabase),
 ):
-    """Get the full applicant pipeline with applicants at each stage. Available to admins and managers."""
+    """Get the full applicant pipeline for the user's agency."""
+    agency_id = get_user_agency_id(supabase, staff.id)
+    
     pipeline_statuses = [
         "in_progress",
         "submitted",
@@ -115,17 +133,23 @@ async def get_pipeline(
     total = 0
 
     for s in pipeline_statuses:
-        result = (
+        query = (
             supabase.table("applications")
-            .select("*, profiles(first_name, last_name, email)")
+            .select("*, profiles(first_name, last_name, email), locations(name)")
             .eq("status", s)
             .order("updated_at", desc=True)
-            .execute()
         )
+        
+        if agency_id:
+            query = query.eq("agency_id", agency_id)
+        
+        result = query.execute()
 
         applicants = []
         for app in result.data or []:
             profile = app.get("profiles", {}) or {}
+            location = app.get("locations", {}) or {}
+            
             applicants.append(
                 {
                     "application_id": app["id"],
@@ -137,6 +161,7 @@ async def get_pipeline(
                     "completed_steps": app.get("completed_steps", 0),
                     "submitted_at": app.get("submitted_at"),
                     "updated_at": app.get("updated_at"),
+                    "location_name": location.get("name"),
                 }
             )
 
@@ -152,15 +177,21 @@ async def get_applicant_detail(
     staff: UserProfile = Depends(require_staff),
     supabase: Client = Depends(get_supabase),
 ):
-    """Get detailed view of an applicant for review. Available to admins and managers."""
+    """Get detailed view of an applicant for review."""
+    agency_id = get_user_agency_id(supabase, staff.id)
+    
     # Get application with profile
-    app_result = (
+    query = (
         supabase.table("applications")
-        .select("*, profiles(first_name, last_name, email, phone)")
+        .select("*, profiles(first_name, last_name, email, phone), locations(name)")
         .eq("id", app_id)
-        .single()
-        .execute()
     )
+    
+    # Only filter by agency if user has one (superadmins might not)
+    if agency_id:
+        query = query.eq("agency_id", agency_id)
+    
+    app_result = query.single().execute()
 
     if not app_result.data:
         raise HTTPException(
@@ -170,6 +201,7 @@ async def get_applicant_detail(
 
     app = app_result.data
     profile = app.get("profiles", {}) or {}
+    location = app.get("locations", {}) or {}
     user_id = app["user_id"]
 
     # Get steps
@@ -210,6 +242,7 @@ async def get_applicant_detail(
         completed_steps=app.get("completed_steps", 0),
         total_steps=app.get("total_steps", 22),
         submitted_at=app.get("submitted_at"),
+        location_name=location.get("name"),
         steps=steps_result.data or [],
         documents=docs_result.data or [],
         agreements=agreements_result.data or [],
@@ -224,14 +257,18 @@ async def approve_applicant(
     supabase: Client = Depends(get_supabase),
 ):
     """Approve an applicant's application. Admins only."""
-    # Verify application is in reviewable state
-    app_result = (
+    agency_id = get_user_agency_id(supabase, admin.id)
+    
+    # Verify application is in reviewable state and belongs to agency
+    query = (
         supabase.table("applications")
-        .select("id, status")
+        .select("id, status, agency_id")
         .eq("id", app_id)
-        .single()
-        .execute()
     )
+    if agency_id:
+        query = query.eq("agency_id", agency_id)
+    
+    app_result = query.single().execute()
 
     if not app_result.data:
         raise HTTPException(
@@ -267,13 +304,17 @@ async def reject_applicant(
     supabase: Client = Depends(get_supabase),
 ):
     """Reject an applicant's application. Admins only."""
-    app_result = (
+    agency_id = get_user_agency_id(supabase, admin.id)
+    
+    query = (
         supabase.table("applications")
-        .select("id, status")
+        .select("id, status, agency_id")
         .eq("id", app_id)
-        .single()
-        .execute()
     )
+    if agency_id:
+        query = query.eq("agency_id", agency_id)
+    
+    app_result = query.single().execute()
 
     if not app_result.data:
         raise HTTPException(
