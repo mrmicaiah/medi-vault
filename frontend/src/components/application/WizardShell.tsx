@@ -8,6 +8,17 @@ import { Alert } from '../ui/Alert';
 // Upload steps that can be skipped
 const UPLOAD_STEPS = [11, 12, 13, 14, 15, 16, 17];
 
+// Required fields for each upload step (when not skipped)
+const UPLOAD_STEP_REQUIRED_FIELDS: Record<number, string[]> = {
+  11: ['worker_type', 'document_type', 'file_name'], // Work Auth
+  12: ['id_type', 'id_number', 'issuing_state', 'expiration_date', 'file_name'], // ID Front
+  13: ['file_name'], // ID Back
+  14: ['file_name'], // SSN Card
+  15: [], // Credentials - optional
+  16: [], // CPR - optional
+  17: [], // TB Test - optional
+};
+
 interface WizardShellProps {
   currentStep: number;
   completedCount: number;
@@ -38,6 +49,36 @@ export function WizardShell({
   const stepName = STEP_NAMES[currentStep] || `Step ${currentStep}`;
   const isFirst = currentStep === 1;
   const isLast = currentStep === TOTAL_STEPS;
+  const isUploadStep = UPLOAD_STEPS.includes(currentStep);
+  const currentStepSkipped = stepData.skip === true;
+
+  // Check if current step can proceed
+  const canProceed = (): boolean => {
+    // If it's an upload step
+    if (isUploadStep) {
+      // If skipped, always allow
+      if (currentStepSkipped) return true;
+      
+      // Check required fields for this step
+      const requiredFields = UPLOAD_STEP_REQUIRED_FIELDS[currentStep] || [];
+      if (requiredFields.length === 0) return true; // Optional steps
+      
+      // Check all required fields are filled
+      return requiredFields.every(field => {
+        const value = stepData[field];
+        return value !== undefined && value !== null && value !== '';
+      });
+    }
+    
+    // Non-upload steps - let them proceed (validation handled in step components)
+    return true;
+  };
+
+  const handleNextClick = () => {
+    if (canProceed()) {
+      onNext();
+    }
+  };
   
   const hasSkippedUploads = UPLOAD_STEPS.some(stepNum => {
     const step = allStepsData[stepNum];
@@ -48,6 +89,19 @@ export function WizardShell({
     const step = allStepsData[stepNum];
     return step?.data?.skip === true;
   }).length;
+
+  // Get missing required fields for current step
+  const getMissingFields = (): string[] => {
+    if (!isUploadStep || currentStepSkipped) return [];
+    const requiredFields = UPLOAD_STEP_REQUIRED_FIELDS[currentStep] || [];
+    return requiredFields.filter(field => {
+      const value = stepData[field];
+      return value === undefined || value === null || value === '';
+    });
+  };
+
+  const missingFields = getMissingFields();
+  const showValidationError = isUploadStep && !currentStepSkipped && missingFields.length > 0;
 
   return (
     <div className="mx-auto max-w-3xl">
@@ -110,6 +164,14 @@ export function WizardShell({
           saving={saving}
           onChange={onChange}
         />
+
+        {/* Validation message for upload steps */}
+        {showValidationError && (
+          <Alert variant="error" className="mt-4" title="Required Fields Missing">
+            Please {missingFields.includes('file_name') ? 'upload the document' : 'fill in all required fields'}, 
+            or check "I'll upload this later" to continue.
+          </Alert>
+        )}
       </div>
 
       <div className="mt-6 flex items-center justify-between">
@@ -136,12 +198,16 @@ export function WizardShell({
                 </p>
               </div>
             ) : (
-              <Button onClick={onNext} loading={saving}>
+              <Button onClick={handleNextClick} loading={saving}>
                 Submit Application
               </Button>
             )
           ) : (
-            <Button onClick={onNext} loading={saving}>
+            <Button 
+              onClick={handleNextClick} 
+              loading={saving}
+              disabled={showValidationError}
+            >
               Next
               <svg className="h-4 w-4" fill="none" viewBox="0 0 24 24" stroke="currentColor">
                 <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M9 5l7 7-7 7" />
