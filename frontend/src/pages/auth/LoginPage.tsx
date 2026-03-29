@@ -6,8 +6,8 @@ import { Button } from '../../components/ui/Button';
 import { Alert } from '../../components/ui/Alert';
 
 export function LoginPage() {
-  const navigate = useNavigate();
   const { signIn } = useAuth();
+  const navigate = useNavigate();
   const [email, setEmail] = useState('');
   const [password, setPassword] = useState('');
   const [error, setError] = useState('');
@@ -31,10 +31,10 @@ export function LoginPage() {
   return (
     <div>
       <h2 className="mb-1 font-display text-xl font-semibold text-navy">Welcome Back</h2>
-      <p className="mb-6 text-sm text-gray">Sign in to your MediVault account</p>
+      <p className="mb-6 text-sm text-gray">Sign in to continue your application or manage your account</p>
 
       {error && (
-        <Alert variant="error" className="mb-4" dismissible>
+        <Alert variant="error" className="mb-4" dismissible onDismiss={() => setError('')}>
           {error}
         </Alert>
       )}
@@ -48,20 +48,22 @@ export function LoginPage() {
           onChange={(e) => setEmail(e.target.value)}
           placeholder="you@example.com"
         />
+
         <Input
           label="Password"
           type="password"
           required
           value={password}
           onChange={(e) => setPassword(e.target.value)}
-          placeholder="Enter your password"
+          placeholder="Your password"
         />
 
-        <div className="flex items-center justify-end">
-          <Link
-            to="/auth/reset-password"
-            className="text-sm text-maroon hover:text-maroon-light"
-          >
+        <div className="flex items-center justify-between">
+          <label className="flex items-center gap-2">
+            <input type="checkbox" className="h-4 w-4 rounded border-border text-maroon focus:ring-maroon" />
+            <span className="text-sm text-gray">Remember me</span>
+          </label>
+          <Link to="/auth/reset-password" className="text-sm font-medium text-maroon hover:text-maroon-light">
             Forgot password?
           </Link>
         </div>
@@ -71,12 +73,16 @@ export function LoginPage() {
         </Button>
       </form>
 
-      <p className="mt-6 text-center text-sm text-gray">
-        Don't have an account?{' '}
-        <Link to="/auth/signup" className="font-medium text-maroon hover:text-maroon-light">
-          Create Account
+      <div className="mt-6 pt-6 border-t border-border">
+        <p className="text-center text-sm text-gray mb-4">
+          Looking to apply for a position?
+        </p>
+        <Link to="/apply">
+          <Button variant="secondary" className="w-full">
+            Start Your Application
+          </Button>
         </Link>
-      </p>
+      </div>
     </div>
   );
 }
