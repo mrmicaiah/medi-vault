@@ -1,7 +1,8 @@
 -- Multi-tenant architecture: Agencies and Locations
+-- Run this migration in Supabase SQL Editor
 
 -- ============================================
--- AGENCIES TABLE
+-- STEP 1: CREATE AGENCIES TABLE
 -- ============================================
 CREATE TABLE IF NOT EXISTS agencies (
     id UUID PRIMARY KEY DEFAULT gen_random_uuid(),
@@ -33,7 +34,7 @@ CREATE TABLE IF NOT EXISTS agencies (
 CREATE UNIQUE INDEX IF NOT EXISTS idx_agencies_slug ON agencies(slug);
 
 -- ============================================
--- LOCATIONS TABLE
+-- STEP 2: CREATE LOCATIONS TABLE
 -- ============================================
 CREATE TABLE IF NOT EXISTS locations (
     id UUID PRIMARY KEY DEFAULT gen_random_uuid(),
@@ -70,18 +71,39 @@ CREATE TABLE IF NOT EXISTS locations (
 CREATE INDEX IF NOT EXISTS idx_locations_agency ON locations(agency_id);
 
 -- ============================================
--- UPDATE PROFILES TABLE
+-- STEP 3: SEED EVEREADY HOMECARE
 -- ============================================
--- Add agency association for staff
+INSERT INTO agencies (id, name, slug, tagline, website, phone, email)
+VALUES (
+    'a0000000-0000-0000-0000-000000000001',
+    'Eveready HomeCare',
+    'eveready-homecare',
+    'Always Ready to Meet Your Needs',
+    'https://evereadyhomecare.com',
+    '(703) 555-1234',
+    'info@evereadyhomecare.com'
+) ON CONFLICT (slug) DO NOTHING;
+
+-- Seed locations for Eveready
+INSERT INTO locations (agency_id, name, slug, city, state, address_line1, is_hiring)
+VALUES 
+    ('a0000000-0000-0000-0000-000000000001', 'Dumfries', 'dumfries', 'Dumfries', 'VA', NULL, TRUE),
+    ('a0000000-0000-0000-0000-000000000001', 'Arlington', 'arlington', 'Arlington', 'VA', '2700 S. Quincy Street Suite #220', TRUE),
+    ('a0000000-0000-0000-0000-000000000001', 'Sterling', 'sterling', 'Sterling', 'VA', NULL, TRUE),
+    ('a0000000-0000-0000-0000-000000000001', 'Hampton', 'hampton', 'Hampton', 'VA', NULL, TRUE)
+ON CONFLICT (agency_id, slug) DO NOTHING;
+
+-- ============================================
+-- STEP 4: ADD AGENCY COLUMNS TO EXISTING TABLES
+-- ============================================
+
+-- Add agency_id to profiles (for staff members)
 ALTER TABLE profiles 
     ADD COLUMN IF NOT EXISTS agency_id UUID REFERENCES agencies(id) ON DELETE SET NULL;
 
 CREATE INDEX IF NOT EXISTS idx_profiles_agency ON profiles(agency_id);
 
--- ============================================
--- UPDATE APPLICATIONS TABLE
--- ============================================
--- Add agency and location association
+-- Add agency_id and location_id to applications
 ALTER TABLE applications 
     ADD COLUMN IF NOT EXISTS agency_id UUID REFERENCES agencies(id) ON DELETE CASCADE,
     ADD COLUMN IF NOT EXISTS location_id UUID REFERENCES locations(id) ON DELETE SET NULL;
@@ -90,7 +112,7 @@ CREATE INDEX IF NOT EXISTS idx_applications_agency ON applications(agency_id);
 CREATE INDEX IF NOT EXISTS idx_applications_location ON applications(location_id);
 
 -- ============================================
--- INVITATIONS TABLE (create fresh with agency support)
+-- STEP 5: CREATE INVITATIONS TABLE
 -- ============================================
 DROP TABLE IF EXISTS invitations;
 
@@ -117,49 +139,27 @@ CREATE TABLE invitations (
     
     created_at TIMESTAMPTZ DEFAULT NOW(),
     
-    CONSTRAINT valid_email CHECK (email ~* '^[A-Za-z0-9._%+-]+@[A-Za-z0-9.-]+\.[A-Za-z]{2,}$')
+    CONSTRAINT valid_email CHECK (email ~* '^[A-Za-z0-9._%+-]+@[A-Za-z0-9.-]+\\.[A-Za-z]{2,}$')
 );
 
 CREATE INDEX IF NOT EXISTS idx_invitations_token ON invitations(token);
 CREATE INDEX IF NOT EXISTS idx_invitations_agency ON invitations(agency_id);
 
 -- ============================================
--- SEED DATA: Eveready HomeCare
--- ============================================
-INSERT INTO agencies (id, name, slug, tagline, website, phone, email)
-VALUES (
-    'a0000000-0000-0000-0000-000000000001',
-    'Eveready HomeCare',
-    'eveready-homecare',
-    'Always Ready to Meet Your Needs',
-    'https://evereadyhomecare.com',
-    '(703) 555-1234',
-    'info@evereadyhomecare.com'
-) ON CONFLICT (slug) DO NOTHING;
-
--- Seed locations for Eveready
-INSERT INTO locations (agency_id, name, slug, city, state, address_line1, is_hiring)
-VALUES 
-    ('a0000000-0000-0000-0000-000000000001', 'Dumfries', 'dumfries', 'Dumfries', 'VA', NULL, TRUE),
-    ('a0000000-0000-0000-0000-000000000001', 'Arlington', 'arlington', 'Arlington', 'VA', '2700 S. Quincy Street Suite #220', TRUE),
-    ('a0000000-0000-0000-0000-000000000001', 'Sterling', 'sterling', 'Sterling', 'VA', NULL, TRUE),
-    ('a0000000-0000-0000-0000-000000000001', 'Hampton', 'hampton', 'Hampton', 'VA', NULL, TRUE)
-ON CONFLICT (agency_id, slug) DO NOTHING;
-
--- ============================================
--- RLS POLICIES
+-- STEP 6: RLS POLICIES
 -- ============================================
 ALTER TABLE agencies ENABLE ROW LEVEL SECURITY;
 ALTER TABLE locations ENABLE ROW LEVEL SECURITY;
+ALTER TABLE invitations ENABLE ROW LEVEL SECURITY;
 
 -- Agencies: Public read for active agencies
+DROP POLICY IF EXISTS "Anyone can view active agencies" ON agencies;
 CREATE POLICY "Anyone can view active agencies"
     ON agencies FOR SELECT
     USING (is_active = TRUE);
 
--- Agencies: Only platform admins can modify (handled by service key)
-
 -- Locations: Public read for active locations at active agencies
+DROP POLICY IF EXISTS "Anyone can view active locations" ON locations;
 CREATE POLICY "Anyone can view active locations"
     ON locations FOR SELECT
     USING (
@@ -172,8 +172,7 @@ CREATE POLICY "Anyone can view active locations"
     );
 
 -- Invitations: Staff at same agency can view
-ALTER TABLE invitations ENABLE ROW LEVEL SECURITY;
-
+DROP POLICY IF EXISTS "Staff can view agency invitations" ON invitations;
 CREATE POLICY "Staff can view agency invitations"
     ON invitations FOR SELECT
     TO authenticated
@@ -185,3 +184,16 @@ CREATE POLICY "Staff can view agency invitations"
             AND (profiles.agency_id = invitations.agency_id OR profiles.role = 'superadmin')
         )
     );
+
+-- ============================================
+-- STEP 7: UPDATE EXISTING APPLICATIONS (optional)
+-- Set all existing applications to Eveready HomeCare
+-- ============================================
+UPDATE applications 
+SET agency_id = 'a0000000-0000-0000-0000-000000000001'
+WHERE agency_id IS NULL;
+
+-- ============================================
+-- DONE! 
+-- ============================================
+SELECT 'Migration complete!' AS status;
