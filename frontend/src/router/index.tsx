@@ -72,8 +72,9 @@ function RootRedirect() {
 export function RouterConfig() {
   return (
     <Routes>
-      {/* Public application page - no auth required */}
+      {/* Public application pages - supports agency slug */}
       <Route path="/apply" element={<ApplyPage />} />
+      <Route path="/apply/:agencySlug" element={<ApplyPage />} />
       
       {/* Staff invitation page - no auth required */}
       <Route path="/invite/:token" element={<InvitePage />} />
