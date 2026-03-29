@@ -1,0 +1,174 @@
+/* Employment Application PDF Styles */
+
+@page {
+    size: letter;
+    margin: 0.75in;
+}
+
+body {
+    font-family: 'Helvetica Neue', Helvetica, Arial, sans-serif;
+    font-size: 10pt;
+    line-height: 1.4;
+    color: #1a1a2e;
+}
+
+.application {
+    max-width: 100%;
+}
+
+/* Header */
+.header {
+    display: flex;
+    justify-content: space-between;
+    align-items: center;
+    border-bottom: 3px solid #722F37;
+    padding-bottom: 15px;
+    margin-bottom: 20px;
+}
+
+.logo-placeholder {
+    text-align: left;
+}
+
+.company-name {
+    font-size: 18pt;
+    font-weight: bold;
+    color: #1a1a2e;
+    letter-spacing: 1px;
+}
+
+.tagline {
+    font-size: 8pt;
+    color: #722F37;
+    font-style: italic;
+    margin-top: 2px;
+}
+
+.document-title h1 {
+    font-size: 16pt;
+    color: #1a1a2e;
+    margin: 0;
+    text-align: right;
+}
+
+.generated-date {
+    font-size: 8pt;
+    color: #666;
+    text-align: right;
+    margin-top: 3px;
+}
+
+/* Sections */
+.section {
+    margin-bottom: 15px;
+    page-break-inside: avoid;
+}
+
+.section h2 {
+    font-size: 11pt;
+    color: #fff;
+    background-color: #1a1a2e;
+    padding: 5px 10px;
+    margin: 0 0 10px 0;
+    border-left: 4px solid #722F37;
+}
+
+.section h3 {
+    font-size: 10pt;
+    color: #1a1a2e;
+    border-bottom: 1px solid #ddd;
+    padding-bottom: 3px;
+    margin: 10px 0 8px 0;
+}
+
+/* Tables */
+.info-table {
+    width: 100%;
+    border-collapse: collapse;
+    margin-bottom: 10px;
+}
+
+.info-table td, .info-table th {
+    padding: 5px 8px;
+    border: 1px solid #ddd;
+    vertical-align: top;
+}
+
+.info-table th {
+    background-color: #f5f5f5;
+    font-weight: 600;
+    text-align: left;
+}
+
+.info-table .label {
+    background-color: #f9f9f9;
+    font-weight: 600;
+    width: 20%;
+    color: #444;
+}
+
+/* Signature Section */
+.signature-section {
+    margin-top: 30px;
+}
+
+.certification-text {
+    font-size: 9pt;
+    color: #333;
+    margin-bottom: 10px;
+    text-align: justify;
+}
+
+.signature-line {
+    display: flex;
+    justify-content: space-between;
+    margin-top: 30px;
+    padding-top: 10px;
+}
+
+.signature, .date {
+    width: 45%;
+}
+
+.sig-value {
+    display: block;
+    font-family: 'Brush Script MT', cursive, serif;
+    font-size: 14pt;
+    color: #1a1a2e;
+    border-bottom: 1px solid #1a1a2e;
+    padding-bottom: 5px;
+    min-height: 20px;
+}
+
+.date .sig-value {
+    font-family: 'Helvetica Neue', Helvetica, Arial, sans-serif;
+    font-size: 10pt;
+}
+
+.sig-label {
+    display: block;
+    font-size: 8pt;
+    color: #666;
+    margin-top: 3px;
+}
+
+/* Footer */
+.footer {
+    margin-top: 30px;
+    padding-top: 10px;
+    border-top: 1px solid #ddd;
+    text-align: center;
+    font-size: 8pt;
+    color: #666;
+}
+
+.footer .app-id {
+    font-family: 'Courier New', monospace;
+    font-size: 7pt;
+    margin-top: 5px;
+}
+
+/* Utility */
+em {
+    color: #666;
+}
