@@ -31,37 +31,59 @@ export function AuthProvider({ children }: { children: React.ReactNode }) {
     initialized: false,
   });
   
-  // Prevent double-initialization in React strict mode
   const initRef = useRef(false);
 
-  // Fetch profile from database
   const fetchProfile = useCallback(async (userId: string): Promise<Profile | null> => {
-    const { data, error } = await supabase
-      .from('profiles')
-      .select('*')
-      .eq('id', userId)
-      .maybeSingle(); // Use maybeSingle to avoid errors when no rows found
+    console.log('[Auth] Fetching profile for:', userId);
+    try {
+      const { data, error } = await supabase
+        .from('profiles')
+        .select('*')
+        .eq('id', userId)
+        .maybeSingle();
 
-    if (error) {
-      console.error('Profile fetch error:', error);
+      if (error) {
+        console.error('[Auth] Profile fetch error:', error);
+        return null;
+      }
+      console.log('[Auth] Profile fetched:', data);
+      return data as Profile | null;
+    } catch (err) {
+      console.error('[Auth] Profile fetch exception:', err);
       return null;
     }
-    return data as Profile | null;
   }, []);
 
-  // Initialize auth state on mount
   useEffect(() => {
-    // Prevent double initialization
     if (initRef.current) return;
     initRef.current = true;
 
-    // Get initial session
+    console.log('[Auth] Initializing...');
+
     const initializeAuth = async () => {
       try {
-        const { data: { session } } = await supabase.auth.getSession();
+        console.log('[Auth] Getting session...');
+        const { data: { session }, error } = await supabase.auth.getSession();
+        
+        if (error) {
+          console.error('[Auth] getSession error:', error);
+          setState({
+            user: null,
+            session: null,
+            profile: null,
+            role: null,
+            loading: false,
+            initialized: true,
+          });
+          return;
+        }
+
+        console.log('[Auth] Session:', session ? 'exists' : 'null');
         
         if (session?.user) {
+          console.log('[Auth] User found, fetching profile...');
           const profile = await fetchProfile(session.user.id);
+          console.log('[Auth] Setting state with profile');
           setState({
             user: session.user,
             session,
@@ -71,6 +93,7 @@ export function AuthProvider({ children }: { children: React.ReactNode }) {
             initialized: true,
           });
         } else {
+          console.log('[Auth] No session, setting empty state');
           setState({
             user: null,
             session: null,
@@ -81,7 +104,7 @@ export function AuthProvider({ children }: { children: React.ReactNode }) {
           });
         }
       } catch (error) {
-        console.error('Auth initialization error:', error);
+        console.error('[Auth] Init error:', error);
         setState({
           user: null,
           session: null,
@@ -95,9 +118,10 @@ export function AuthProvider({ children }: { children: React.ReactNode }) {
 
     initializeAuth();
 
-    // Listen for auth changes
     const { data: { subscription } } = supabase.auth.onAuthStateChange(
       async (event, session) => {
+        console.log('[Auth] Auth state change:', event);
+        
         if (session?.user) {
           const profile = await fetchProfile(session.user.id);
           setState({
@@ -127,9 +151,9 @@ export function AuthProvider({ children }: { children: React.ReactNode }) {
   }, [fetchProfile]);
 
   const signIn = async (email: string, password: string) => {
+    console.log('[Auth] Signing in...');
     const { error } = await supabase.auth.signInWithPassword({ email, password });
     if (error) throw error;
-    // onAuthStateChange will handle the state update
   };
 
   const signUp = async (
@@ -138,6 +162,7 @@ export function AuthProvider({ children }: { children: React.ReactNode }) {
     firstName: string,
     lastName: string
   ): Promise<{ needsEmailConfirmation: boolean }> => {
+    console.log('[Auth] Signing up...');
     const { data, error } = await supabase.auth.signUp({
       email,
       password,
@@ -148,17 +173,14 @@ export function AuthProvider({ children }: { children: React.ReactNode }) {
     
     if (error) throw error;
     
-    // Check if email confirmation is required
-    // If user is returned but no session, email confirmation is needed
     const needsEmailConfirmation = !!data.user && !data.session;
-    
     return { needsEmailConfirmation };
   };
 
   const signOut = async () => {
+    console.log('[Auth] Signing out...');
     const { error } = await supabase.auth.signOut();
     if (error) throw error;
-    // onAuthStateChange will handle the state update
   };
 
   const resetPassword = async (email: string) => {
