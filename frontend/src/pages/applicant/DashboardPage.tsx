@@ -21,22 +21,45 @@ interface Application {
 interface ApplicationStep {
   step_number: number;
   step_name: string;
+  step_type: string;
   status: string;
+  data: Record<string, unknown> | null;
 }
+
+// Document step mappings
+const DOCUMENT_STEPS: Record<number, { name: string; category: string; required: boolean }> = {
+  11: { name: 'Work Authorization', category: 'identification', required: true },
+  12: { name: 'Photo ID (Front)', category: 'identification', required: true },
+  13: { name: 'Photo ID (Back)', category: 'identification', required: true },
+  14: { name: 'Social Security Card', category: 'identification', required: true },
+  15: { name: 'Professional Credentials', category: 'certification', required: false },
+  16: { name: 'CPR Certification', category: 'certification', required: false },
+  17: { name: 'TB Test Results', category: 'health', required: false },
+};
+
+type DocStatus = 'uploaded' | 'skipped' | 'missing' | 'expired';
 
 interface DocItem {
-  id: string;
+  stepNumber: number;
   name: string;
   category: string;
-  status: 'approved' | 'pending' | 'expired' | 'missing';
-  expires_at?: string;
+  required: boolean;
+  status: DocStatus;
+  expirationDate?: string;
 }
 
-const statusVariant: Record<string, 'success' | 'warning' | 'error' | 'neutral'> = {
-  approved: 'success',
-  pending: 'warning',
-  expired: 'error',
+const statusVariant: Record<DocStatus, 'success' | 'warning' | 'error' | 'neutral'> = {
+  uploaded: 'success',
+  skipped: 'warning',
   missing: 'neutral',
+  expired: 'error',
+};
+
+const statusLabel: Record<DocStatus, string> = {
+  uploaded: 'Uploaded',
+  skipped: 'Skipped',
+  missing: 'Not Started',
+  expired: 'Expired',
 };
 
 export function ApplicantDashboardPage() {
@@ -45,15 +68,6 @@ export function ApplicantDashboardPage() {
   const [error, setError] = useState<string | null>(null);
   const [application, setApplication] = useState<Application | null>(null);
   const [steps, setSteps] = useState<ApplicationStep[]>([]);
-  const [documents] = useState<DocItem[]>([
-    { id: '1', name: 'Work Authorization', category: 'identification', status: 'missing' },
-    { id: '2', name: 'Photo ID (Front)', category: 'identification', status: 'missing' },
-    { id: '3', name: 'Photo ID (Back)', category: 'identification', status: 'missing' },
-    { id: '4', name: 'Social Security Card', category: 'identification', status: 'missing' },
-    { id: '5', name: 'Professional Credentials', category: 'certification', status: 'missing' },
-    { id: '6', name: 'CPR Certification', category: 'certification', status: 'missing' },
-    { id: '7', name: 'TB Test Results', category: 'health', status: 'missing' },
-  ]);
 
   useEffect(() => {
     const loadApplication = async () => {
@@ -61,7 +75,6 @@ export function ApplicantDashboardPage() {
         setLoading(true);
         setError(null);
         
-        // Try to get existing application
         const res = await api.get<{
           application: Application;
           steps: ApplicationStep[];
@@ -70,7 +83,6 @@ export function ApplicantDashboardPage() {
         setApplication(res.application);
         setSteps(res.steps);
       } catch (err) {
-        // 404 means no application yet — that's fine
         if (err instanceof Error && err.message.includes('404')) {
           setApplication(null);
         } else {
@@ -84,6 +96,40 @@ export function ApplicantDashboardPage() {
     loadApplication();
   }, []);
 
+  // Build documents list from steps
+  const documents: DocItem[] = Object.entries(DOCUMENT_STEPS).map(([stepNum, doc]) => {
+    const step = steps.find(s => s.step_number === parseInt(stepNum));
+    const data = step?.data || {};
+    
+    let status: DocStatus = 'missing';
+    let expirationDate: string | undefined;
+
+    if (step?.status === 'completed') {
+      if (data.skip) {
+        status = 'skipped';
+      } else if (data.file_name) {
+        status = 'uploaded';
+        // Check expiration
+        const expDate = data.expiration_date as string | undefined;
+        if (expDate) {
+          expirationDate = expDate;
+          if (new Date(expDate) < new Date()) {
+            status = 'expired';
+          }
+        }
+      }
+    }
+
+    return {
+      stepNumber: parseInt(stepNum),
+      name: doc.name,
+      category: doc.category,
+      required: doc.required,
+      status,
+      expirationDate,
+    };
+  });
+
   const completedSteps = application?.completed_steps || 
     steps.filter(s => s.status === 'completed').length;
   
@@ -92,16 +138,19 @@ export function ApplicantDashboardPage() {
   const isSubmitted = application?.status === 'submitted';
   const isApproved = application?.status === 'approved';
 
-  const expiringDocs = documents.filter(
-    (d) => d.expires_at && daysUntil(d.expires_at) <= 30 && daysUntil(d.expires_at) > 0
+  // Documents that need attention (skipped required docs)
+  const requiredMissing = documents.filter(d => d.required && (d.status === 'skipped' || d.status === 'missing'));
+  const expiredDocs = documents.filter(d => d.status === 'expired');
+  const expiringDocs = documents.filter(d => 
+    d.expirationDate && d.status === 'uploaded' && 
+    daysUntil(d.expirationDate) <= 30 && daysUntil(d.expirationDate) > 0
   );
 
   // Count documents and agreements from steps
-  const uploadSteps = steps.filter(s => 
-    s.step_number >= 11 && s.step_number <= 17 && s.status === 'completed'
-  );
+  const uploadedDocs = documents.filter(d => d.status === 'uploaded').length;
   const agreementSteps = steps.filter(s =>
-    (s.step_number === 9 || s.step_number === 10 || s.step_number >= 19) && s.status === 'completed'
+    (s.step_number === 9 || s.step_number === 10 || s.step_number >= 18) && 
+    s.status === 'completed'
   );
 
   if (loading) {
@@ -144,6 +193,18 @@ export function ApplicantDashboardPage() {
       {isApproved && (
         <Alert variant="success" title="Application Approved">
           Congratulations! Your application has been approved. Please check your email for next steps.
+        </Alert>
+      )}
+
+      {requiredMissing.length > 0 && !isSubmitted && !isApproved && (
+        <Alert variant="warning" title="Documents Required for Hiring">
+          You have {requiredMissing.length} required document(s) that need to be uploaded before you can be hired.
+        </Alert>
+      )}
+
+      {expiredDocs.length > 0 && (
+        <Alert variant="error" title="Expired Documents">
+          You have {expiredDocs.length} expired document(s) that need to be updated.
         </Alert>
       )}
 
@@ -206,7 +267,7 @@ export function ApplicantDashboardPage() {
             <div className="flex items-center justify-between">
               <span className="text-sm text-gray">Documents Uploaded</span>
               <span className="text-sm font-medium text-navy">
-                {uploadSteps.length} / 7
+                {uploadedDocs} / {Object.keys(DOCUMENT_STEPS).length}
               </span>
             </div>
             <div className="flex items-center justify-between">
@@ -221,26 +282,62 @@ export function ApplicantDashboardPage() {
 
       <Card header="Documents">
         <div className="space-y-1">
-          <div className="grid grid-cols-4 gap-4 border-b border-border pb-2 text-xs font-medium uppercase text-gray">
-            <span>Document</span>
-            <span>Category</span>
-            <span>Status</span>
-            <span>Expires</span>
+          <div className="grid grid-cols-12 gap-4 border-b border-border pb-2 text-xs font-medium uppercase text-gray">
+            <span className="col-span-4">Document</span>
+            <span className="col-span-2">Category</span>
+            <span className="col-span-2">Status</span>
+            <span className="col-span-2">Expires</span>
+            <span className="col-span-2">Action</span>
           </div>
-          {documents.map((doc) => (
-            <div
-              key={doc.id}
-              className="grid grid-cols-4 gap-4 border-b border-border py-3 last:border-0"
-            >
-              <span className="text-sm font-medium text-slate">{doc.name}</span>
-              <span className="text-sm capitalize text-gray">{doc.category}</span>
-              <Badge variant={statusVariant[doc.status]}>{doc.status}</Badge>
-              <span className="text-sm text-gray">
-                {doc.expires_at ? formatDate(doc.expires_at) : '--'}
-              </span>
-            </div>
-          ))}
+          {documents.map((doc) => {
+            const isSkippedRequired = doc.required && doc.status === 'skipped';
+            const needsAttention = isSkippedRequired || doc.status === 'expired';
+            
+            return (
+              <div
+                key={doc.stepNumber}
+                className={`grid grid-cols-12 gap-4 border-b border-border py-3 last:border-0 ${
+                  needsAttention ? 'bg-warning-bg -mx-4 px-4 rounded-lg' : ''
+                }`}
+              >
+                <div className="col-span-4 flex items-center gap-2">
+                  <span className="text-sm font-medium text-slate">{doc.name}</span>
+                  {doc.required && (
+                    <span className="text-xs text-maroon">*</span>
+                  )}
+                </div>
+                <span className="col-span-2 text-sm capitalize text-gray">{doc.category}</span>
+                <div className="col-span-2">
+                  <Badge variant={statusVariant[doc.status]}>
+                    {statusLabel[doc.status]}
+                  </Badge>
+                </div>
+                <span className="col-span-2 text-sm text-gray">
+                  {doc.expirationDate ? formatDate(doc.expirationDate) : '--'}
+                </span>
+                <div className="col-span-2">
+                  {(doc.status === 'skipped' || doc.status === 'missing' || doc.status === 'expired') && (
+                    <Link to={`/applicant/application?step=${doc.stepNumber}`}>
+                      <Button size="sm" variant={needsAttention ? 'primary' : 'secondary'}>
+                        Upload
+                      </Button>
+                    </Link>
+                  )}
+                  {doc.status === 'uploaded' && (
+                    <Link to={`/applicant/application?step=${doc.stepNumber}`}>
+                      <Button size="sm" variant="ghost">
+                        Update
+                      </Button>
+                    </Link>
+                  )}
+                </div>
+              </div>
+            );
+          })}
         </div>
+        <p className="mt-4 text-xs text-gray">
+          <span className="text-maroon">*</span> Required documents must be uploaded before you can be hired.
+        </p>
       </Card>
     </div>
   );
