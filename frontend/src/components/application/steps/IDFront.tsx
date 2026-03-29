@@ -32,6 +32,7 @@ const US_STATES = [
 
 export function IDFront({ data, onSave, onChange }: StepProps) {
   const [form, setForm] = useState({
+    skip: (data.skip as boolean) || false,
     id_type: (data.id_type as string) || '',
     id_number: (data.id_number as string) || '',
     issuing_state: (data.issuing_state as string) || '',
@@ -53,67 +54,97 @@ export function IDFront({ data, onSave, onChange }: StepProps) {
     onSave({ ...updated, file });
   };
 
+  const handleSkip = (checked: boolean) => {
+    setForm({ ...form, skip: checked });
+    onChange?.();
+    onSave({ ...form, skip: checked });
+  };
+
   return (
     <div className="space-y-6">
       <p className="text-sm text-gray">
         Upload the front of your government-issued photo ID.
       </p>
 
-      <Alert variant="info" title="Photo ID Requirements">
-        <ul className="mt-1 list-disc pl-4 space-y-1">
-          <li>Must be a government-issued photo ID</li>
-          <li>ID must not be expired</li>
-          <li>Photo and text must be clearly visible</li>
-          <li>Ensure there is no glare or obstruction</li>
-        </ul>
-      </Alert>
-
-      <Select
-        label="ID Type"
-        required
-        value={form.id_type}
-        onChange={(e) => handleChange('id_type', e.target.value)}
-        options={[
-          { value: 'drivers_license', label: "Driver's License" },
-          { value: 'state_id', label: 'State ID' },
-          { value: 'passport', label: 'US Passport' },
-        ]}
-      />
-
-      <div className="grid grid-cols-1 gap-4 sm:grid-cols-2">
-        <Input
-          label="ID Number"
-          required
-          value={form.id_number}
-          onChange={(e) => handleChange('id_number', e.target.value)}
-          placeholder="Enter your ID number"
+      <div className="flex items-center gap-3 rounded-lg border border-border bg-gray-50 p-4">
+        <input
+          type="checkbox"
+          id="skip_id_front"
+          checked={form.skip}
+          onChange={(e) => handleSkip(e.target.checked)}
+          className="h-4 w-4 rounded border-gray-300 text-maroon focus:ring-maroon"
         />
-
-        <Select
-          label="Issuing State"
-          required
-          value={form.issuing_state}
-          onChange={(e) => handleChange('issuing_state', e.target.value)}
-          options={US_STATES}
-        />
+        <label htmlFor="skip_id_front" className="text-sm text-slate">
+          I'll upload this later from my dashboard
+        </label>
       </div>
 
-      <Input
-        label="Expiration Date"
-        type="date"
-        required
-        value={form.expiration_date}
-        onChange={(e) => handleChange('expiration_date', e.target.value)}
-      />
+      {!form.skip && (
+        <>
+          <Alert variant="info" title="Photo ID Requirements">
+            <ul className="mt-1 list-disc pl-4 space-y-1">
+              <li>Must be a government-issued photo ID</li>
+              <li>ID must not be expired</li>
+              <li>Photo and text must be clearly visible</li>
+              <li>Ensure there is no glare or obstruction</li>
+            </ul>
+          </Alert>
 
-      <FileUpload
-        label="Front of ID"
-        onFileSelect={handleFileSelect}
-        accept=".pdf,.jpg,.jpeg,.png"
-        maxSize={10 * 1024 * 1024}
-        currentFile={form.file_name ? { name: form.file_name } : null}
-        helperText="Upload a clear photo or scan of the front of your ID"
-      />
+          <Select
+            label="ID Type"
+            required
+            value={form.id_type}
+            onChange={(e) => handleChange('id_type', e.target.value)}
+            options={[
+              { value: 'drivers_license', label: "Driver's License" },
+              { value: 'state_id', label: 'State ID' },
+              { value: 'passport', label: 'US Passport' },
+            ]}
+          />
+
+          <div className="grid grid-cols-1 gap-4 sm:grid-cols-2">
+            <Input
+              label="ID Number"
+              required
+              value={form.id_number}
+              onChange={(e) => handleChange('id_number', e.target.value)}
+              placeholder="Enter your ID number"
+            />
+
+            <Select
+              label="Issuing State"
+              required
+              value={form.issuing_state}
+              onChange={(e) => handleChange('issuing_state', e.target.value)}
+              options={US_STATES}
+            />
+          </div>
+
+          <Input
+            label="Expiration Date"
+            type="date"
+            required
+            value={form.expiration_date}
+            onChange={(e) => handleChange('expiration_date', e.target.value)}
+          />
+
+          <FileUpload
+            label="Front of ID"
+            onFileSelect={handleFileSelect}
+            accept=".pdf,.jpg,.jpeg,.png"
+            maxSize={10 * 1024 * 1024}
+            currentFile={form.file_name ? { name: form.file_name } : null}
+            helperText="Upload a clear photo or scan of the front of your ID"
+          />
+        </>
+      )}
+
+      {form.skip && (
+        <Alert variant="warning" title="Required for Hiring">
+          A government-issued photo ID is required before you can be hired.
+          You can upload it from your dashboard at any time.
+        </Alert>
+      )}
     </div>
   );
 }

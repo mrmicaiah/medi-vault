@@ -19,6 +19,7 @@ const DOCUMENT_TYPES = [
 
 export function WorkAuthorization({ data, onSave, onChange }: StepProps) {
   const [form, setForm] = useState({
+    skip: (data.skip as boolean) || false,
     worker_type: (data.worker_type as string) || '',
     document_type: (data.document_type as string) || '',
     issuing_authority: (data.issuing_authority as string) || 'United States',
@@ -40,64 +41,94 @@ export function WorkAuthorization({ data, onSave, onChange }: StepProps) {
     onSave({ ...updated, file });
   };
 
+  const handleSkip = (checked: boolean) => {
+    setForm({ ...form, skip: checked });
+    onChange?.();
+    onSave({ ...form, skip: checked });
+  };
+
   return (
     <div className="space-y-6">
       <p className="text-sm text-gray">
         Upload a document that proves your authorization to work in the United States.
       </p>
 
-      <Alert variant="info" title="Accepted Documents">
-        <ul className="mt-1 list-disc pl-4 space-y-1">
-          <li>Birth Certificate (US)</li>
-          <li>US Passport</li>
-          <li>Certificate of Naturalization</li>
-          <li>Work Authorization Card</li>
-        </ul>
-      </Alert>
+      <div className="flex items-center gap-3 rounded-lg border border-border bg-gray-50 p-4">
+        <input
+          type="checkbox"
+          id="skip_work_auth"
+          checked={form.skip}
+          onChange={(e) => handleSkip(e.target.checked)}
+          className="h-4 w-4 rounded border-gray-300 text-maroon focus:ring-maroon"
+        />
+        <label htmlFor="skip_work_auth" className="text-sm text-slate">
+          I'll upload this later from my dashboard
+        </label>
+      </div>
 
-      <Select
-        label="Worker Type"
-        required
-        value={form.worker_type}
-        onChange={(e) => handleChange('worker_type', e.target.value)}
-        options={[
-          { value: 'employee', label: 'Employee (W-2)' },
-          { value: 'contractor', label: 'Independent Contractor (1099)' },
-        ]}
-      />
+      {!form.skip && (
+        <>
+          <Alert variant="info" title="Accepted Documents">
+            <ul className="mt-1 list-disc pl-4 space-y-1">
+              <li>Birth Certificate (US)</li>
+              <li>US Passport</li>
+              <li>Certificate of Naturalization</li>
+              <li>Work Authorization Card</li>
+            </ul>
+          </Alert>
 
-      <Select
-        label="Document Type"
-        required
-        value={form.document_type}
-        onChange={(e) => handleChange('document_type', e.target.value)}
-        options={DOCUMENT_TYPES}
-      />
+          <Select
+            label="Worker Type"
+            required
+            value={form.worker_type}
+            onChange={(e) => handleChange('worker_type', e.target.value)}
+            options={[
+              { value: 'employee', label: 'Employee (W-2)' },
+              { value: 'contractor', label: 'Independent Contractor (1099)' },
+            ]}
+          />
 
-      <Input
-        label="Issuing Authority"
-        required
-        value={form.issuing_authority}
-        onChange={(e) => handleChange('issuing_authority', e.target.value)}
-        placeholder="United States"
-      />
+          <Select
+            label="Document Type"
+            required
+            value={form.document_type}
+            onChange={(e) => handleChange('document_type', e.target.value)}
+            options={DOCUMENT_TYPES}
+          />
 
-      <Input
-        label="Document ID Number"
-        required
-        value={form.document_number}
-        onChange={(e) => handleChange('document_number', e.target.value)}
-        placeholder="Enter the document number"
-      />
+          <Input
+            label="Issuing Authority"
+            required
+            value={form.issuing_authority}
+            onChange={(e) => handleChange('issuing_authority', e.target.value)}
+            placeholder="United States"
+          />
 
-      <FileUpload
-        label="Work Authorization Document"
-        onFileSelect={handleFileSelect}
-        accept=".pdf,.jpg,.jpeg,.png"
-        maxSize={10 * 1024 * 1024}
-        currentFile={form.file_name ? { name: form.file_name } : null}
-        helperText="Upload a clear photo or scan of your work authorization document"
-      />
+          <Input
+            label="Document ID Number"
+            required
+            value={form.document_number}
+            onChange={(e) => handleChange('document_number', e.target.value)}
+            placeholder="Enter the document number"
+          />
+
+          <FileUpload
+            label="Work Authorization Document"
+            onFileSelect={handleFileSelect}
+            accept=".pdf,.jpg,.jpeg,.png"
+            maxSize={10 * 1024 * 1024}
+            currentFile={form.file_name ? { name: form.file_name } : null}
+            helperText="Upload a clear photo or scan of your work authorization document"
+          />
+        </>
+      )}
+
+      {form.skip && (
+        <Alert variant="warning" title="Required for Hiring">
+          Work authorization is required before you can be hired.
+          You can upload it from your dashboard at any time.
+        </Alert>
+      )}
     </div>
   );
 }
