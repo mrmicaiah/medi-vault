@@ -51,7 +51,6 @@ class ApplicationService:
                     "user_id": user_id,
                     "status": ApplicationStatus.IN_PROGRESS.value,
                     "current_step": 1,
-                    "completed_steps": 0,
                     "total_steps": 22,
                     "created_at": now,
                     "updated_at": now,
@@ -78,7 +77,8 @@ class ApplicationService:
                     "step_number": step_def.step_number,
                     "step_name": step_def.name,
                     "step_type": step_def.step_type.value,
-                    "status": "pending",
+                    "is_completed": False,
+                    "data": {},
                     "created_at": now,
                     "updated_at": now,
                 }
@@ -91,7 +91,6 @@ class ApplicationService:
             user_id=user_id,
             status=ApplicationStatus.IN_PROGRESS,
             current_step=1,
-            completed_steps=0,
             total_steps=22,
             created_at=app_data.get("created_at"),
             updated_at=app_data.get("updated_at"),
@@ -113,43 +112,17 @@ class ApplicationService:
 
         data = result.data
 
-        # Fetch steps
-        steps_result = (
-            self.supabase.table("application_steps")
-            .select("*")
-            .eq("application_id", app_id)
-            .order("step_number")
-            .execute()
-        )
-
-        steps = [
-            ApplicationStepResponse(
-                id=s.get("id"),
-                application_id=s["application_id"],
-                step_number=s["step_number"],
-                step_name=s["step_name"],
-                step_type=s["step_type"],
-                status=s.get("status", "pending"),
-                data=s.get("data"),
-                completed_at=s.get("completed_at"),
-            )
-            for s in (steps_result.data or [])
-        ]
-
         return ApplicationResponse(
             id=data["id"],
             user_id=data["user_id"],
             status=ApplicationStatus(data["status"]),
             current_step=data.get("current_step", 1),
-            completed_steps=data.get("completed_steps", 0),
             total_steps=data.get("total_steps", 22),
             submitted_at=data.get("submitted_at"),
             reviewed_at=data.get("reviewed_at"),
             reviewed_by=data.get("reviewed_by"),
-            notes=data.get("notes"),
             created_at=data.get("created_at"),
             updated_at=data.get("updated_at"),
-            steps=steps,
         )
 
     def get_user_applications(self, user_id: str) -> List[ApplicationResponse]:
@@ -168,25 +141,23 @@ class ApplicationService:
                 user_id=d["user_id"],
                 status=ApplicationStatus(d["status"]),
                 current_step=d.get("current_step", 1),
-                completed_steps=d.get("completed_steps", 0),
                 total_steps=d.get("total_steps", 22),
                 submitted_at=d.get("submitted_at"),
                 reviewed_at=d.get("reviewed_at"),
-                notes=d.get("notes"),
                 created_at=d.get("created_at"),
                 updated_at=d.get("updated_at"),
             )
             for d in (result.data or [])
         ]
 
-    def update_step(
-        self, app_id: str, step_number: int, step_data: StepData, user_id: str
+    def save_step(
+        self, app_id: str, step_number: int, data: dict, step_status: str, user_id: str
     ) -> ApplicationStepResponse:
-        """Update a specific step with form data and mark completed."""
+        """Save data for a specific step."""
         # Verify ownership
         app = self.get_application(app_id, user_id)
 
-        if app.status not in (ApplicationStatus.IN_PROGRESS, ApplicationStatus.NOT_STARTED):
+        if app.status not in (ApplicationStatus.IN_PROGRESS,):
             raise HTTPException(
                 status_code=status.HTTP_400_BAD_REQUEST,
                 detail="Application is not in a modifiable state",
@@ -199,18 +170,21 @@ class ApplicationService:
             )
 
         now = datetime.now(timezone.utc).isoformat()
+        is_completed = step_status == "completed"
 
         # Update the step
+        update_data = {
+            "data": data,
+            "is_completed": is_completed,
+            "updated_at": now,
+        }
+        
+        if is_completed:
+            update_data["completed_at"] = now
+
         step_result = (
             self.supabase.table("application_steps")
-            .update(
-                {
-                    "data": step_data.data,
-                    "status": "completed",
-                    "completed_at": now,
-                    "updated_at": now,
-                }
-            )
+            .update(update_data)
             .eq("application_id", app_id)
             .eq("step_number", step_number)
             .execute()
@@ -222,25 +196,15 @@ class ApplicationService:
                 detail=f"Step {step_number} not found",
             )
 
-        # Count completed steps and update application
-        completed_result = (
-            self.supabase.table("application_steps")
-            .select("id", count="exact")
-            .eq("application_id", app_id)
-            .eq("status", "completed")
-            .execute()
-        )
-
-        completed_count = completed_result.count or 0
-        next_step = min(step_number + 1, 22)
-
-        self.supabase.table("applications").update(
-            {
-                "completed_steps": completed_count,
-                "current_step": next_step,
-                "updated_at": now,
-            }
-        ).eq("id", app_id).execute()
+        # Update application's current step if moving forward
+        if is_completed and step_number >= app.current_step:
+            next_step = min(step_number + 1, 22)
+            self.supabase.table("applications").update(
+                {
+                    "current_step": next_step,
+                    "updated_at": now,
+                }
+            ).eq("id", app_id).execute()
 
         s = step_result.data[0]
         return ApplicationStepResponse(
@@ -249,10 +213,16 @@ class ApplicationService:
             step_number=s["step_number"],
             step_name=s["step_name"],
             step_type=s["step_type"],
-            status=s.get("status", "completed"),
+            status="completed" if s.get("is_completed") else "in_progress",
             data=s.get("data"),
             completed_at=s.get("completed_at"),
         )
+
+    def update_step(
+        self, app_id: str, step_number: int, step_data: StepData, user_id: str
+    ) -> ApplicationStepResponse:
+        """Update a specific step with form data and mark completed."""
+        return self.save_step(app_id, step_number, step_data.data, "completed", user_id)
 
     def get_steps(self, app_id: str, user_id: Optional[str] = None) -> List[ApplicationStepResponse]:
         """Get all steps for an application."""
@@ -274,7 +244,7 @@ class ApplicationService:
                 step_number=s["step_number"],
                 step_name=s["step_name"],
                 step_type=s["step_type"],
-                status=s.get("status", "pending"),
+                status="completed" if s.get("is_completed") else "pending",
                 data=s.get("data"),
                 completed_at=s.get("completed_at"),
             )
@@ -296,7 +266,7 @@ class ApplicationService:
             self.supabase.table("application_steps")
             .select("step_number, step_name", count="exact")
             .eq("application_id", app_id)
-            .eq("status", "pending")
+            .eq("is_completed", False)
             .execute()
         )
 
