@@ -1,4 +1,4 @@
-import React, { createContext, useEffect, useState, useCallback } from 'react';
+import React, { createContext, useEffect, useState, useCallback, useRef } from 'react';
 import type { Session, User as SupabaseUser } from '@supabase/supabase-js';
 import { supabase } from '../lib/supabase';
 import type { Profile, UserRole } from '../types';
@@ -28,6 +28,7 @@ interface AuthContextType extends AuthState {
   ) => Promise<{ needsEmailConfirmation: boolean }>;
   signOut: () => Promise<void>;
   resetPassword: (email: string) => Promise<void>;
+  refetchProfile: () => Promise<void>;
 }
 
 export const AuthContext = createContext<AuthContextType | undefined>(undefined);
@@ -41,17 +42,20 @@ export function AuthProvider({ children }: { children: React.ReactNode }) {
     loading: true,
     initialized: false,
   });
+  
+  const retryCountRef = useRef(0);
+  const maxRetries = 3;
 
-  const fetchProfile = useCallback(async (userId: string): Promise<Profile | null> => {
+  const fetchProfile = useCallback(async (userId: string, retryOnFail = true): Promise<Profile | null> => {
     console.log('[Auth] Fetching profile for:', userId);
     
     try {
-      // Race between the query and a timeout
+      // Longer timeout - 10 seconds
       const timeoutPromise = new Promise<null>((resolve) => {
         setTimeout(() => {
           console.warn('[Auth] Profile fetch timed out');
           resolve(null);
-        }, 5000);
+        }, 10000);
       });
 
       const queryPromise = supabase
@@ -65,10 +69,21 @@ export function AuthProvider({ children }: { children: React.ReactNode }) {
             return null;
           }
           console.log('[Auth] Profile fetched:', data);
+          retryCountRef.current = 0; // Reset retry count on success
           return data as Profile | null;
         });
 
-      return await Promise.race([queryPromise, timeoutPromise]);
+      const result = await Promise.race([queryPromise, timeoutPromise]);
+      
+      // If failed and should retry, try again after a delay
+      if (!result && retryOnFail && retryCountRef.current < maxRetries) {
+        retryCountRef.current++;
+        console.log(`[Auth] Retrying profile fetch (attempt ${retryCountRef.current}/${maxRetries})...`);
+        await new Promise(r => setTimeout(r, 1000)); // Wait 1 second
+        return fetchProfile(userId, retryCountRef.current < maxRetries);
+      }
+      
+      return result;
     } catch (err) {
       console.error('[Auth] Profile fetch exception:', err);
       return null;
@@ -97,6 +112,20 @@ export function AuthProvider({ children }: { children: React.ReactNode }) {
       });
     }
   }, [fetchProfile]);
+
+  const refetchProfile = useCallback(async () => {
+    if (state.user) {
+      retryCountRef.current = 0;
+      const profile = await fetchProfile(state.user.id, true);
+      if (profile) {
+        setState(prev => ({
+          ...prev,
+          profile,
+          role: (profile?.role as UserRole) || null,
+        }));
+      }
+    }
+  }, [state.user, fetchProfile]);
 
   useEffect(() => {
     // Set up auth state listener FIRST
@@ -137,8 +166,6 @@ export function AuthProvider({ children }: { children: React.ReactNode }) {
     lastName: string,
     options?: SignUpOptions
   ): Promise<{ needsEmailConfirmation: boolean }> => {
-    // Include agency_id and location_id in user metadata
-    // These will be used when creating the application
     const { data, error } = await supabase.auth.signUp({
       email,
       password,
@@ -172,7 +199,7 @@ export function AuthProvider({ children }: { children: React.ReactNode }) {
 
   return (
     <AuthContext.Provider
-      value={{ ...state, signIn, signUp, signOut, resetPassword }}
+      value={{ ...state, signIn, signUp, signOut, resetPassword, refetchProfile }}
     >
       {children}
     </AuthContext.Provider>
