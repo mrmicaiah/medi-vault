@@ -1,340 +1,399 @@
 import React, { useState, useEffect } from 'react';
-import { Card } from '../../components/ui/Card';
+import { Link } from 'react-router-dom';
 import { Badge } from '../../components/ui/Badge';
 import { Button } from '../../components/ui/Button';
-import { Input } from '../../components/ui/Input';
 import { Alert } from '../../components/ui/Alert';
 import { api } from '../../lib/api';
-import { formatDate } from '../../lib/utils';
-import { ApplicantDetailPanel } from '../../components/admin/ApplicantDetailPanel';
 
 interface Applicant {
-  application_id: string;
+  id: string;
   user_id: string;
+  status: string;
+  created_at: string;
+  submitted_at: string | null;
+  updated_at: string;
   first_name: string;
   last_name: string;
   email: string;
-  current_step: number;
-  completed_steps: number;
-  submitted_at: string | null;
-  updated_at: string;
-  location_name?: string;
-  status?: string;
+  location_name: string;
 }
 
-interface PipelineStage {
-  status: string;
-  count: number;
-  applicants: Applicant[];
+interface ApplicantDetail {
+  // Basic info
+  city?: string;
+  certifications?: string[];
+  has_cpr_certification?: string;
+  has_tb_test?: string;
+  has_drivers_license?: string;
+  will_travel_30_min?: string;
+  will_work_bed_bound?: string;
+  available_days?: string[];
+  hours_per_week?: string;
+  comfortable_with_smokers?: string;
+  position_applied?: string;
+  // Onboarding status
+  credentials_uploaded?: boolean;
+  cpr_uploaded?: boolean;
+  tb_uploaded?: boolean;
+  link_sent?: boolean;
+  onboarding_complete?: boolean;
 }
 
 interface PipelineResponse {
-  stages: PipelineStage[];
-  total: number;
+  applications: Applicant[];
 }
-
-interface DashboardStats {
-  total_applicants: number;
-  in_progress: number;
-  submitted: number;
-  under_review: number;
-  approved: number;
-  rejected: number;
-  hired: number;
-  total_employees: number;
-  active_employees: number;
-  expiring_documents: number;
-  expired_documents: number;
-}
-
-const statusFilters: { value: string; label: string }[] = [
-  { value: 'all', label: 'All' },
-  { value: 'in_progress', label: 'In Progress' },
-  { value: 'submitted', label: 'Submitted' },
-  { value: 'under_review', label: 'Under Review' },
-  { value: 'approved', label: 'Approved' },
-  { value: 'rejected', label: 'Rejected' },
-  { value: 'hired', label: 'Hired' },
-];
-
-const getStatusStyle = (status: string) => {
-  switch (status) {
-    case 'in_progress':
-      return { bg: 'bg-sky-50', text: 'text-navy', label: 'In Progress' };
-    case 'submitted':
-      return { bg: 'bg-amber-50', text: 'text-amber-700', label: 'Submitted' };
-    case 'under_review':
-      return { bg: 'bg-purple-50', text: 'text-purple-700', label: 'Under Review' };
-    case 'approved':
-      return { bg: 'bg-emerald-50', text: 'text-emerald-700', label: 'Ready' };
-    case 'rejected':
-      return { bg: 'bg-red-50', text: 'text-red-700', label: 'Rejected' };
-    case 'hired':
-      return { bg: 'bg-green-100', text: 'text-green-800', label: 'Hired' };
-    default:
-      return { bg: 'bg-gray-100', text: 'text-gray-600', label: status };
-  }
-};
 
 export function PipelinePage() {
-  const [pipeline, setPipeline] = useState<PipelineResponse | null>(null);
-  const [stats, setStats] = useState<DashboardStats | null>(null);
+  const [applicants, setApplicants] = useState<Applicant[]>([]);
   const [loading, setLoading] = useState(true);
   const [error, setError] = useState<string | null>(null);
   const [selectedApplicant, setSelectedApplicant] = useState<Applicant | null>(null);
+  const [applicantDetail, setApplicantDetail] = useState<ApplicantDetail | null>(null);
+  const [loadingDetail, setLoadingDetail] = useState(false);
 
-  const [search, setSearch] = useState('');
-  const [statusFilter, setStatusFilter] = useState<string>('all');
+  useEffect(() => {
+    loadApplicants();
+  }, []);
 
-  const loadData = async () => {
+  const loadApplicants = async () => {
     try {
       setLoading(true);
       setError(null);
-      const [pipelineRes, statsRes] = await Promise.all([
-        api.get<PipelineResponse>('/admin/pipeline'),
-        api.get<DashboardStats>('/admin/dashboard'),
-      ]);
-      setPipeline(pipelineRes);
-      setStats(statsRes);
+      const res = await api.get<PipelineResponse>('/admin/pipeline');
+      setApplicants(res.applications || []);
+      
+      // Auto-select first applicant if available
+      if (res.applications && res.applications.length > 0) {
+        selectApplicant(res.applications[0]);
+      }
     } catch (err) {
-      setError(err instanceof Error ? err.message : 'Failed to load data');
+      setError(err instanceof Error ? err.message : 'Failed to load applicants');
     } finally {
       setLoading(false);
     }
   };
 
-  useEffect(() => {
-    loadData();
-  }, []);
+  const selectApplicant = async (applicant: Applicant) => {
+    setSelectedApplicant(applicant);
+    setLoadingDetail(true);
+    
+    try {
+      // Fetch detailed applicant data
+      const res = await api.get<{ steps: Array<{ step_number: number; data: Record<string, unknown> }> }>(
+        `/admin/applicant/${applicant.id}`
+      );
+      
+      // Extract data from steps
+      const steps = res.steps || [];
+      const step1 = steps.find(s => s.step_number === 1)?.data || {};
+      const step2 = steps.find(s => s.step_number === 2)?.data || {};
+      const step4 = steps.find(s => s.step_number === 4)?.data || {};
+      const step8 = steps.find(s => s.step_number === 8)?.data || {};
+      const step15 = steps.find(s => s.step_number === 15)?.data || {};
+      const step16 = steps.find(s => s.step_number === 16)?.data || {};
+      const step17 = steps.find(s => s.step_number === 17)?.data || {};
+      
+      setApplicantDetail({
+        city: step2.city as string,
+        certifications: step4.certifications as string[],
+        has_cpr_certification: step4.has_cpr_certification as string,
+        has_tb_test: step4.has_tb_test as string,
+        has_drivers_license: step4.has_drivers_license as string,
+        will_travel_30_min: step4.will_travel_30_min as string,
+        will_work_bed_bound: step4.will_work_bed_bound as string,
+        available_days: step8.available_days as string[],
+        hours_per_week: step8.hours_per_week as string,
+        comfortable_with_smokers: step8.comfortable_with_smokers as string,
+        position_applied: step1.position_applied as string,
+        credentials_uploaded: Boolean(step15.file_name),
+        cpr_uploaded: Boolean(step16.file_name),
+        tb_uploaded: Boolean(step17.file_name),
+        link_sent: false, // TODO: track this
+        onboarding_complete: false, // TODO: track this
+      });
+    } catch (err) {
+      console.error('Failed to load applicant detail:', err);
+      setApplicantDetail(null);
+    } finally {
+      setLoadingDetail(false);
+    }
+  };
 
-  // Flatten all applicants with their status
-  const allApplicants: Applicant[] =
-    pipeline?.stages.flatMap((s) =>
-      s.applicants.map((a) => ({ ...a, status: s.status }))
-    ) || [];
+  const getPositionLabel = (position?: string) => {
+    const labels: Record<string, string> = {
+      pca: 'PCA',
+      hha: 'HHA',
+      cna: 'CNA',
+      lpn: 'LPN',
+      rn: 'RN',
+    };
+    return labels[position || ''] || position?.toUpperCase() || '—';
+  };
 
-  const filtered = allApplicants
-    .filter((a) => {
-      const name = `${a.first_name} ${a.last_name}`.toLowerCase();
-      const matchesSearch =
-        !search ||
-        name.includes(search.toLowerCase()) ||
-        a.email.toLowerCase().includes(search.toLowerCase());
-      const matchesStatus = statusFilter === 'all' || a.status === statusFilter;
-      return matchesSearch && matchesStatus;
-    })
-    .sort(
-      (a, b) =>
-        new Date(b.updated_at).getTime() - new Date(a.updated_at).getTime()
-    );
+  const formatCertifications = (certs?: string[]) => {
+    if (!certs || certs.length === 0 || (certs.length === 1 && certs[0] === 'none')) {
+      return 'None';
+    }
+    return certs.filter(c => c !== 'none').map(c => c.toUpperCase()).join(', ');
+  };
 
-  // Calculate stats for quick cards
-  const newToday = allApplicants.filter((a) => {
-    const today = new Date().toDateString();
-    return new Date(a.updated_at).toDateString() === today;
-  }).length;
+  const formatYesNo = (value?: string) => {
+    if (value === 'yes') return <span className="text-success font-medium">YES</span>;
+    if (value === 'no') return <span className="text-error font-medium">NO</span>;
+    return <span className="text-gray">—</span>;
+  };
 
-  const awaitingDocs = stats?.in_progress || 0;
-  const readyForReview = (stats?.submitted || 0) + (stats?.under_review || 0);
-  const thisWeek = allApplicants.filter((a) => {
-    const weekAgo = new Date();
-    weekAgo.setDate(weekAgo.getDate() - 7);
-    return new Date(a.updated_at) >= weekAgo;
-  }).length;
+  const formatAvailability = (days?: string[]) => {
+    if (!days || days.length === 0) return '—';
+    if (days.length === 7) return 'Any Day';
+    if (days.length >= 5) return 'Most Days';
+    return days.slice(0, 3).join(', ') + (days.length > 3 ? '...' : '');
+  };
 
-  const quickStats = [
-    { label: 'New Today', value: newToday.toString(), trend: null },
-    { label: 'Awaiting Docs', value: awaitingDocs.toString(), trend: null },
-    { label: 'Ready for Review', value: readyForReview.toString(), trend: null },
-    { label: 'This Week', value: thisWeek.toString(), trend: null },
-  ];
+  const formatHours = (hours?: string) => {
+    const labels: Record<string, string> = {
+      part_time: 'Part Time',
+      full_time: 'Full Time',
+      fill_in: 'Fill In',
+      live_in: 'Live-In',
+    };
+    return labels[hours || ''] || '—';
+  };
+
+  const formatSmokerPref = (pref?: string) => {
+    if (pref === 'yes') return 'OK with smokers';
+    if (pref === 'no') return 'No smokers';
+    if (pref === 'prefer_no_smoking') return 'Prefer non-smoking';
+    return 'No preference';
+  };
 
   if (loading) {
     return (
       <div className="flex h-64 items-center justify-center">
         <div className="text-center">
-          <svg
-            className="mx-auto h-8 w-8 animate-spin text-maroon"
-            fill="none"
-            viewBox="0 0 24 24"
-          >
-            <circle
-              className="opacity-25"
-              cx="12"
-              cy="12"
-              r="10"
-              stroke="currentColor"
-              strokeWidth="4"
-            />
-            <path
-              className="opacity-75"
-              fill="currentColor"
-              d="M4 12a8 8 0 018-8V0C5.373 0 0 5.373 0 12h4zm2 5.291A7.962 7.962 0 014 12H0c0 3.042 1.135 5.824 3 7.938l3-2.647z"
-            />
+          <svg className="mx-auto h-8 w-8 animate-spin text-maroon" fill="none" viewBox="0 0 24 24">
+            <circle className="opacity-25" cx="12" cy="12" r="10" stroke="currentColor" strokeWidth="4" />
+            <path className="opacity-75" fill="currentColor" d="M4 12a8 8 0 018-8V0C5.373 0 0 5.373 0 12h4zm2 5.291A7.962 7.962 0 014 12H0c0 3.042 1.135 5.824 3 7.938l3-2.647z" />
           </svg>
-          <p className="mt-3 text-sm text-gray">Loading pipeline...</p>
+          <p className="mt-3 text-sm text-gray">Loading applicants...</p>
         </div>
       </div>
     );
   }
 
-  const today = new Date();
-  const dateStr = today.toLocaleDateString('en-US', {
-    weekday: 'long',
-    year: 'numeric',
-    month: 'long',
-    day: 'numeric',
-  });
-
   return (
-    <div className="space-y-6">
-      {/* Header */}
-      <div className="flex items-center justify-between">
-        <div>
-          <h1 className="font-display text-2xl font-bold text-navy">Applicants</h1>
-          <p className="mt-1 text-sm text-gray">{dateStr}</p>
+    <div className="flex h-[calc(100vh-4rem)] -m-6">
+      {/* Left Sidebar - Applicant List */}
+      <div className="w-80 flex-shrink-0 border-r border-border bg-white overflow-hidden flex flex-col">
+        <div className="p-4 border-b border-border">
+          <h1 className="font-display text-xl font-bold text-navy">Applicants</h1>
+          <p className="text-xs text-gray mt-1">
+            {new Date().toLocaleDateString('en-US', { weekday: 'long', month: 'long', day: 'numeric', year: 'numeric' })}
+          </p>
         </div>
-        <Button>
-          <span className="mr-2 text-lg">+</span>
-          Add Applicant
-        </Button>
-      </div>
-
-      {error && (
-        <Alert variant="error" dismissible>
-          {error}
-        </Alert>
-      )}
-
-      {/* Stats Cards */}
-      <div className="grid grid-cols-1 gap-4 sm:grid-cols-2 lg:grid-cols-4">
-        {quickStats.map((stat, i) => (
-          <div
-            key={i}
-            className="rounded-xl bg-white p-6 shadow-sm"
-          >
-            <p className="text-sm font-medium text-gray">{stat.label}</p>
-            <div className="mt-2 flex items-baseline gap-2">
-              <span className="font-display text-4xl font-bold text-navy">
-                {stat.value}
-              </span>
-              {stat.trend && (
-                <span className="text-sm font-medium text-emerald-600">
-                  {stat.trend}
-                </span>
-              )}
-            </div>
+        
+        {error && (
+          <div className="p-4">
+            <Alert variant="error" dismissible>{error}</Alert>
           </div>
-        ))}
-      </div>
-
-      {/* Filters */}
-      <div className="flex flex-col gap-4 sm:flex-row sm:items-center sm:justify-between">
-        <div className="w-full sm:max-w-xs">
-          <Input
-            placeholder="Search by name or email..."
-            value={search}
-            onChange={(e) => setSearch(e.target.value)}
-          />
-        </div>
-        <div className="flex flex-wrap gap-2">
-          {statusFilters.map((f) => (
-            <button
-              key={f.value}
-              onClick={() => setStatusFilter(f.value)}
-              className={`rounded-lg border px-3 py-1.5 text-xs font-medium transition-colors ${
-                statusFilter === f.value
-                  ? 'border-maroon bg-maroon-subtle text-maroon'
-                  : 'border-border text-gray hover:bg-gray-50'
-              }`}
-            >
-              {f.label}
-              {f.value !== 'all' && (
-                <span className="ml-1 text-gray-light">
-                  ({pipeline?.stages.find((s) => s.status === f.value)?.count || 0})
-                </span>
-              )}
-            </button>
-          ))}
-        </div>
-      </div>
-
-      {/* Applicant Table */}
-      <div className="overflow-hidden rounded-xl bg-white shadow-sm">
-        {/* Table Header */}
-        <div className="grid grid-cols-[2fr_1fr_1fr_1fr_100px] gap-4 border-b border-gray-100 bg-gray-50/50 px-6 py-3">
-          <span className="text-xs font-semibold uppercase tracking-wide text-gray">
-            Applicant
-          </span>
-          <span className="text-xs font-semibold uppercase tracking-wide text-gray">
-            Position
-          </span>
-          <span className="text-xs font-semibold uppercase tracking-wide text-gray">
-            Location
-          </span>
-          <span className="text-xs font-semibold uppercase tracking-wide text-gray">
-            Status
-          </span>
-          <span className="text-xs font-semibold uppercase tracking-wide text-gray">
-            Applied
-          </span>
-        </div>
-
-        {/* Table Rows */}
-        {filtered.map((applicant) => {
-          const status = getStatusStyle(applicant.status || 'in_progress');
-          const initials = `${applicant.first_name?.[0] || ''}${applicant.last_name?.[0] || ''}`;
-
-          return (
-            <div
-              key={applicant.application_id}
-              onClick={() => setSelectedApplicant(applicant)}
-              className="grid cursor-pointer grid-cols-[2fr_1fr_1fr_1fr_100px] gap-4 border-b border-gray-50 px-6 py-4 transition-colors hover:bg-gray-50/50"
-            >
-              <div className="flex items-center gap-3">
-                <div className="flex h-10 w-10 flex-shrink-0 items-center justify-center rounded-lg bg-navy text-sm font-semibold text-white">
-                  {initials}
-                </div>
-                <div>
-                  <p className="text-sm font-semibold text-navy">
-                    {applicant.first_name} {applicant.last_name}
-                  </p>
-                  <p className="text-xs text-gray">{applicant.email}</p>
-                </div>
-              </div>
-              <span className="flex items-center text-sm text-slate">CNA</span>
-              <span className="flex items-center text-sm text-slate">
-                {applicant.location_name || 'Not assigned'}
-              </span>
-              <div className="flex items-center">
-                <span
-                  className={`inline-block rounded-md px-3 py-1 text-xs font-medium ${status.bg} ${status.text}`}
-                >
-                  {status.label}
-                </span>
-              </div>
-              <span className="flex items-center text-sm text-gray">
-                {formatDate(applicant.updated_at)}
-              </span>
+        )}
+        
+        <div className="flex-1 overflow-y-auto">
+          {applicants.length === 0 ? (
+            <div className="p-4 text-center text-sm text-gray">
+              No applicants yet
             </div>
-          );
-        })}
+          ) : (
+            <div className="divide-y divide-border">
+              {applicants.map((applicant) => (
+                <button
+                  key={applicant.id}
+                  onClick={() => selectApplicant(applicant)}
+                  className={`w-full text-left p-4 hover:bg-gray-50 transition-colors ${
+                    selectedApplicant?.id === applicant.id ? 'bg-maroon-subtle/30 border-l-4 border-maroon' : ''
+                  }`}
+                >
+                  <div className="flex items-center gap-3">
+                    <div className="flex h-10 w-10 flex-shrink-0 items-center justify-center rounded-full bg-navy text-sm font-medium text-white">
+                      {applicant.first_name?.[0] || ''}{applicant.last_name?.[0] || ''}
+                    </div>
+                    <div className="flex-1 min-w-0">
+                      <p className="text-sm font-semibold text-navy truncate">
+                        {applicant.first_name} {applicant.last_name}
+                      </p>
+                      <p className="text-xs text-gray truncate">{applicant.location_name}</p>
+                    </div>
+                  </div>
+                </button>
+              ))}
+            </div>
+          )}
+        </div>
+      </div>
 
-        {filtered.length === 0 && (
-          <div className="px-6 py-12 text-center text-sm text-gray">
-            No applicants found matching your criteria.
+      {/* Right Panel - Applicant Detail */}
+      <div className="flex-1 bg-gray-50 overflow-y-auto">
+        {selectedApplicant ? (
+          <div className="p-6">
+            {/* Header */}
+            <div className="flex items-start justify-between mb-6">
+              <div>
+                <h2 className="font-display text-2xl font-bold text-navy">
+                  {selectedApplicant.first_name} {selectedApplicant.last_name}
+                  <span className="text-maroon ml-2">| {getPositionLabel(applicantDetail?.position_applied)}</span>
+                </h2>
+              </div>
+              <button 
+                onClick={() => setSelectedApplicant(null)}
+                className="text-gray hover:text-slate"
+              >
+                <svg className="h-6 w-6" fill="none" viewBox="0 0 24 24" stroke="currentColor">
+                  <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M6 18L18 6M6 6l12 12" />
+                </svg>
+              </button>
+            </div>
+
+            {loadingDetail ? (
+              <div className="flex items-center justify-center py-12">
+                <svg className="h-6 w-6 animate-spin text-maroon" fill="none" viewBox="0 0 24 24">
+                  <circle className="opacity-25" cx="12" cy="12" r="10" stroke="currentColor" strokeWidth="4" />
+                  <path className="opacity-75" fill="currentColor" d="M4 12a8 8 0 018-8V0C5.373 0 0 5.373 0 12h4z" />
+                </svg>
+              </div>
+            ) : (
+              <>
+                {/* Info Grid */}
+                <div className="bg-white rounded-xl border border-border divide-y divide-border mb-6">
+                  <div className="grid grid-cols-2 divide-x divide-border">
+                    <div className="p-4">
+                      <p className="text-sm text-gray">City</p>
+                      <p className="text-sm font-medium text-navy mt-1">{applicantDetail?.city || '—'}</p>
+                    </div>
+                    <div className="p-4">
+                      <p className="text-sm text-gray">Certifications</p>
+                      <p className="text-sm font-medium text-navy mt-1">{formatCertifications(applicantDetail?.certifications)}</p>
+                    </div>
+                  </div>
+                  <div className="grid grid-cols-2 divide-x divide-border">
+                    <div className="p-4">
+                      <p className="text-sm text-gray">CPR / TB</p>
+                      <p className="text-sm mt-1">
+                        {formatYesNo(applicantDetail?.has_cpr_certification)}
+                        <span className="mx-2 text-gray">|</span>
+                        {formatYesNo(applicantDetail?.has_tb_test)}
+                      </p>
+                    </div>
+                    <div className="p-4">
+                      <p className="text-sm text-gray">Drivers Lic.</p>
+                      <p className="text-sm mt-1">{formatYesNo(applicantDetail?.has_drivers_license)}</p>
+                    </div>
+                  </div>
+                  <div className="grid grid-cols-2 divide-x divide-border">
+                    <div className="p-4">
+                      <p className="text-sm text-gray">Travel 30min</p>
+                      <p className="text-sm mt-1">{formatYesNo(applicantDetail?.will_travel_30_min)}</p>
+                    </div>
+                    <div className="p-4">
+                      <p className="text-sm text-gray">Bed Bound</p>
+                      <p className="text-sm mt-1">{formatYesNo(applicantDetail?.will_work_bed_bound)}</p>
+                    </div>
+                  </div>
+                  <div className="grid grid-cols-2 divide-x divide-border">
+                    <div className="p-4">
+                      <p className="text-sm text-gray">Availability</p>
+                      <p className="text-sm font-medium text-navy mt-1">{formatAvailability(applicantDetail?.available_days)}</p>
+                    </div>
+                    <div className="p-4">
+                      <p className="text-sm text-gray">Hours</p>
+                      <p className="text-sm font-medium text-navy mt-1">{formatHours(applicantDetail?.hours_per_week)}</p>
+                    </div>
+                  </div>
+                  <div className="p-4">
+                    <p className="text-sm text-gray">Smokers?</p>
+                    <p className="text-sm font-medium text-navy mt-1">{formatSmokerPref(applicantDetail?.comfortable_with_smokers)}</p>
+                  </div>
+                </div>
+
+                {/* Action Buttons */}
+                <div className="flex gap-2 mb-6">
+                  <Link to={`/admin/applicant/${selectedApplicant.id}`} className="flex-1">
+                    <Button variant="secondary" className="w-full">VIEW</Button>
+                  </Link>
+                  <Link to={`/admin/applicant/${selectedApplicant.id}`} className="flex-1">
+                    <Button variant="secondary" className="w-full">EDIT</Button>
+                  </Link>
+                  <Link to={`/admin/hire/${selectedApplicant.id}`} className="flex-1">
+                    <Button className="w-full">ONBOARD</Button>
+                  </Link>
+                </div>
+
+                {/* Onboarding Status */}
+                <div className="bg-white rounded-xl border border-border p-4 mb-6">
+                  <div className="flex items-center justify-between mb-3">
+                    <p className="text-sm font-medium text-gray">ONBOARDING STATUS</p>
+                  </div>
+                  <div className="flex flex-wrap gap-4">
+                    <label className="flex items-center gap-2">
+                      <input 
+                        type="checkbox" 
+                        checked={applicantDetail?.credentials_uploaded || false}
+                        readOnly
+                        className="h-4 w-4 rounded border-gray-300 text-success"
+                      />
+                      <span className="text-sm">Cred.</span>
+                    </label>
+                    <label className="flex items-center gap-2">
+                      <input 
+                        type="checkbox" 
+                        checked={applicantDetail?.cpr_uploaded || false}
+                        readOnly
+                        className="h-4 w-4 rounded border-gray-300 text-success"
+                      />
+                      <span className="text-sm">CPR</span>
+                    </label>
+                    <label className="flex items-center gap-2">
+                      <input 
+                        type="checkbox" 
+                        checked={applicantDetail?.tb_uploaded || false}
+                        readOnly
+                        className="h-4 w-4 rounded border-gray-300 text-success"
+                      />
+                      <span className="text-sm">TB</span>
+                    </label>
+                    <label className="flex items-center gap-2">
+                      <input 
+                        type="checkbox" 
+                        checked={applicantDetail?.link_sent || false}
+                        readOnly
+                        className="h-4 w-4 rounded border-gray-300 text-success"
+                      />
+                      <span className="text-sm">Link Sent</span>
+                    </label>
+                    <label className="flex items-center gap-2">
+                      <input 
+                        type="checkbox" 
+                        checked={applicantDetail?.onboarding_complete || false}
+                        readOnly
+                        className="h-4 w-4 rounded border-gray-300 text-success"
+                      />
+                      <span className="text-sm">Complete</span>
+                    </label>
+                  </div>
+                </div>
+
+                {/* Upload Button */}
+                <Button variant="secondary" className="w-full">
+                  UPLOAD
+                </Button>
+              </>
+            )}
+          </div>
+        ) : (
+          <div className="flex h-full items-center justify-center">
+            <p className="text-gray">Select an applicant to view details</p>
           </div>
         )}
       </div>
-
-      {/* Slide-out Detail Panel */}
-      {selectedApplicant && (
-        <ApplicantDetailPanel
-          applicant={selectedApplicant}
-          onClose={() => setSelectedApplicant(null)}
-          onRefresh={loadData}
-        />
-      )}
     </div>
   );
 }
