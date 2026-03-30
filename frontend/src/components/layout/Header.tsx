@@ -7,7 +7,7 @@ import type { UserRole } from '../../types';
 const STAFF_ROLES: UserRole[] = ['admin', 'superadmin', 'manager'];
 
 export function Header() {
-  const { profile, role, signOut } = useAuth();
+  const { user, profile, role, signOut } = useAuth();
   const navigate = useNavigate();
   const location = useLocation();
   const [menuOpen, setMenuOpen] = useState(false);
@@ -31,6 +31,15 @@ export function Header() {
     await signOut();
     navigate('/auth/login');
   };
+
+  // Get display name - fallback to email if no name
+  const displayName = profile?.first_name && profile?.last_name 
+    ? `${profile.first_name} ${profile.last_name}`
+    : profile?.email?.split('@')[0] || user?.email?.split('@')[0] || 'User';
+  
+  const initials = profile?.first_name && profile?.last_name
+    ? getInitials(profile.first_name, profile.last_name)
+    : (profile?.email?.[0] || user?.email?.[0] || '?').toUpperCase();
 
   return (
     <header className="sticky top-0 z-30 flex h-16 items-center justify-between border-b border-border bg-white px-6">
@@ -85,10 +94,10 @@ export function Header() {
             className="flex items-center gap-2 rounded-lg p-1.5 hover:bg-gray-50"
           >
             <div className="flex h-8 w-8 items-center justify-center rounded-full bg-maroon-subtle text-sm font-medium text-maroon">
-              {profile ? getInitials(profile.first_name, profile.last_name) : '?'}
+              {initials}
             </div>
             <span className="hidden text-sm font-medium text-slate sm:block">
-              {profile ? `${profile.first_name} ${profile.last_name}` : 'User'}
+              {displayName}
             </span>
             <svg className="h-4 w-4 text-gray" fill="none" viewBox="0 0 24 24" stroke="currentColor">
               <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M19 9l-7 7-7-7" />
@@ -99,9 +108,9 @@ export function Header() {
             <div className="absolute right-0 mt-2 w-48 rounded-lg border border-border bg-white py-1 shadow-lg">
               <div className="border-b border-border px-4 py-2">
                 <p className="text-sm font-medium text-navy">
-                  {profile?.first_name} {profile?.last_name}
+                  {displayName}
                 </p>
-                <p className="text-xs text-gray">{profile?.email}</p>
+                <p className="text-xs text-gray">{profile?.email || user?.email}</p>
               </div>
               <button
                 onClick={handleSignOut}
