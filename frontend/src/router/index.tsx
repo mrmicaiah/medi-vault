@@ -1,4 +1,4 @@
-import React from 'react';
+import React, { useState } from 'react';
 import { Routes, Route, Navigate } from 'react-router-dom';
 import { useAuth } from '../hooks/useAuth';
 import type { UserRole } from '../types';
@@ -58,6 +58,20 @@ function ProtectedRoute({ children }: { children: React.ReactNode }) {
 }
 
 function ProfileErrorScreen() {
+  const { refetchProfile } = useAuth();
+  const [retrying, setRetrying] = useState(false);
+
+  const handleRetry = async () => {
+    setRetrying(true);
+    try {
+      await refetchProfile();
+      // If successful, the component will re-render with profile
+    } catch {
+      // Failed, will stay on this screen
+    }
+    setRetrying(false);
+  };
+
   const handleSignOut = () => {
     localStorage.clear();
     sessionStorage.clear();
@@ -68,14 +82,15 @@ function ProfileErrorScreen() {
     <div className="flex h-screen items-center justify-center bg-bg">
       <div className="text-center max-w-md px-4">
         <h1 className="font-display text-2xl font-bold text-navy">Profile Error</h1>
-        <p className="mt-2 text-gray">Unable to load your profile. This may be a permissions issue.</p>
-        <p className="mt-4 text-sm text-gray">Try refreshing or signing out and back in.</p>
+        <p className="mt-2 text-gray">Unable to load your profile. This may be a temporary connection issue.</p>
+        <p className="mt-4 text-sm text-gray">Try again or sign out and back in.</p>
         <div className="mt-6 flex gap-3 justify-center">
           <button 
-            onClick={() => window.location.reload()} 
-            className="px-4 py-2 bg-navy text-white rounded-lg text-sm font-medium"
+            onClick={handleRetry}
+            disabled={retrying}
+            className="px-4 py-2 bg-navy text-white rounded-lg text-sm font-medium disabled:opacity-50"
           >
-            Refresh
+            {retrying ? 'Retrying...' : 'Try Again'}
           </button>
           <button 
             onClick={handleSignOut}
