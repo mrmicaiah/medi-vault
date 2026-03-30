@@ -30,9 +30,15 @@ interface ApplicantDetail {
   hours_per_week?: string;
   comfortable_with_smokers?: string;
   position_applied?: string;
+  // Document status flags
+  id_front_uploaded?: boolean;
+  id_back_uploaded?: boolean;
+  ssn_card_uploaded?: boolean;
+  work_auth_uploaded?: boolean;
   credentials_uploaded?: boolean;
   cpr_uploaded?: boolean;
   tb_uploaded?: boolean;
+  // Personal info for edit mode
   first_name?: string;
   last_name?: string;
   email?: string;
@@ -59,12 +65,12 @@ const YesNo = ({ value }: { value: boolean | string | undefined }) => {
   );
 };
 
-const CheckCircle = ({ checked, label }: { checked: boolean; label: string }) => (
+const DocNode = ({ uploaded, label }: { uploaded: boolean; label: string }) => (
   <div className="flex items-center gap-1.5">
     <div className={`w-4 h-4 rounded-full border-2 flex items-center justify-center text-[10px] ${
-      checked ? 'border-success bg-success text-white' : 'border-gray-300 bg-transparent'
+      uploaded ? 'border-success bg-success text-white' : 'border-gray-300 bg-transparent'
     }`}>
-      {checked && '✓'}
+      {uploaded && '✓'}
     </div>
     <span className="text-xs text-gray">{label}</span>
   </div>
@@ -156,6 +162,13 @@ export function PipelinePage() {
       const step8 = stepsMap.get(8) || {};
       const step9 = stepsMap.get(9) || {};
       const step10 = stepsMap.get(10) || {};
+      const step11 = stepsMap.get(11) || {};
+      const step12 = stepsMap.get(12) || {};
+      const step13 = stepsMap.get(13) || {};
+      const step14 = stepsMap.get(14) || {};
+      const step15 = stepsMap.get(15) || {};
+      const step16 = stepsMap.get(16) || {};
+      const step17 = stepsMap.get(17) || {};
       
       const detail: ApplicantDetail = {
         first_name: step1.first_name as string,
@@ -178,9 +191,14 @@ export function PipelinePage() {
         available_days: step10.available_days as string[],
         hours_per_week: step10.hours_per_week as string,
         comfortable_with_smokers: step10.comfortable_with_smokers as string,
-        credentials_uploaded: false,
-        cpr_uploaded: false,
-        tb_uploaded: false,
+        // Document uploads - check if file_url exists
+        work_auth_uploaded: !!step11.file_url,
+        id_front_uploaded: !!step12.file_url,
+        id_back_uploaded: !!step13.file_url,
+        ssn_card_uploaded: !!step14.file_url,
+        credentials_uploaded: !!step15.file_url,
+        cpr_uploaded: !!step16.file_url,
+        tb_uploaded: !!step17.file_url,
         emergency_name: step3.name as string,
         emergency_relationship: step3.relationship as string,
         emergency_phone: step3.phone as string,
@@ -350,7 +368,7 @@ export function PipelinePage() {
 
   const getPositionLabel = (position?: string) => {
     const labels: Record<string, string> = { pca: 'PCA', hha: 'HHA', cna: 'CNA', lpn: 'LPN', rn: 'RN' };
-    return labels[position || ''] || position?.toUpperCase() || '—';
+    return labels[position || ''] || position?.toUpperCase() || '';
   };
 
   const formatCertifications = (certs?: string[]) => {
@@ -489,8 +507,12 @@ export function PipelinePage() {
           <div className={`fixed top-0 right-0 h-full w-[420px] bg-white shadow-2xl z-50 flex flex-col transition-transform duration-250 ease-out ${panelOpen ? 'translate-x-0' : 'translate-x-full'}`}>
             <div className="px-6 py-5 bg-navy flex items-center justify-between">
               <div>
-                <h2 className="text-lg font-semibold text-white">{editMode ? 'Edit Applicant' : `${selectedApplicant.first_name} ${selectedApplicant.last_name}`}</h2>
-                <p className="text-sm text-maroon font-medium">{getPositionLabel(applicantDetail?.position_applied)}</p>
+                <div className="flex items-center gap-3">
+                  <h2 className="text-lg font-semibold text-white">{editMode ? 'Edit Applicant' : `${selectedApplicant.first_name} ${selectedApplicant.last_name}`}</h2>
+                  {!editMode && applicantDetail?.position_applied && (
+                    <span className="text-sm font-bold text-white">{getPositionLabel(applicantDetail.position_applied)}</span>
+                  )}
+                </div>
               </div>
               <button onClick={closePanel} className="text-white/60 hover:text-white text-2xl leading-none p-1">×</button>
             </div>
@@ -612,7 +634,6 @@ export function PipelinePage() {
                   <div className="bg-white rounded-lg shadow-sm overflow-hidden">
                     {[
                       { label: 'City', value: applicantDetail?.city || '—' },
-                      { label: 'SSN', value: applicantDetail?.ssn_last_four ? `***-**-${applicantDetail.ssn_last_four}` : 'Not on file' },
                       { label: 'Certifications', value: formatCertifications(applicantDetail?.certifications) },
                       { label: 'CPR / TB', value: (<><YesNo value={applicantDetail?.has_cpr_certification} /><span className="mx-2 text-gray-300">|</span><YesNo value={applicantDetail?.has_tb_test} /></>) },
                       { label: 'Drivers Lic.', value: <YesNo value={applicantDetail?.has_drivers_license} /> },
@@ -636,19 +657,28 @@ export function PipelinePage() {
                   </div>
 
                   <div className="bg-white rounded-lg shadow-sm p-4 mt-5">
-                    <div className="flex items-center justify-between">
-                      <span className="text-[11px] font-semibold text-gray uppercase tracking-wide">Documents</span>
-                      <div className="flex gap-4">
-                        <CheckCircle checked={applicantDetail?.credentials_uploaded || false} label="Cred." />
-                        <CheckCircle checked={applicantDetail?.cpr_uploaded || false} label="CPR" />
-                        <CheckCircle checked={applicantDetail?.tb_uploaded || false} label="TB" />
-                      </div>
+                    <span className="text-[11px] font-semibold text-gray uppercase tracking-wide block mb-3">Documents</span>
+                    <div className="flex flex-wrap gap-x-4 gap-y-2">
+                      <DocNode uploaded={applicantDetail?.id_front_uploaded || false} label="ID Front" />
+                      <DocNode uploaded={applicantDetail?.id_back_uploaded || false} label="ID Back" />
+                      <DocNode uploaded={applicantDetail?.ssn_card_uploaded || false} label="SSN Card" />
+                      <DocNode uploaded={applicantDetail?.work_auth_uploaded || false} label="Work Auth" />
+                    </div>
+                    <div className="flex flex-wrap gap-x-4 gap-y-2 mt-2">
+                      <DocNode uploaded={applicantDetail?.credentials_uploaded || false} label="Credentials" />
+                      <DocNode uploaded={applicantDetail?.cpr_uploaded || false} label="CPR" />
+                      <DocNode uploaded={applicantDetail?.tb_uploaded || false} label="TB" />
                     </div>
                   </div>
 
                   <button onClick={handleUploadClick} className="w-full mt-5 py-3 bg-white border border-border text-navy text-sm font-medium rounded-lg hover:bg-gray-50 transition-colors">Upload Document</button>
                 </>
               )}
+            </div>
+
+            {/* Footer */}
+            <div className="px-6 py-3 border-t border-gray-100 bg-white">
+              <p className="text-[10px] text-gray-400 text-center">Powered by MediVault</p>
             </div>
           </div>
         </>
