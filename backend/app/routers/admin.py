@@ -98,44 +98,38 @@ async def get_dashboard_stats(
             "pending_review": 0,
             "approved_this_month": 0,
             "expiring_documents": 0,
-            "recent_applications": []
+            "recent_activity": []
         }
         
-        try:
-            all_apps = supabase.table("applications").select("id, status, created_at, updated_at, user_id").execute()
-            apps_data = all_apps.data or []
-            stats["total_applicants"] = len(apps_data)
-            stats["pending_review"] = len([a for a in apps_data if a["status"] in ("submitted", "under_review")])
-            stats["approved_this_month"] = len([a for a in apps_data if a["status"] == "approved" and a.get("updated_at", "") >= thirty_days_ago])
-            recent_apps = [a for a in apps_data if a.get("created_at", "") >= seven_days_ago]
-            recent_apps.sort(key=lambda x: x.get("created_at", ""), reverse=True)
-            recent_apps = recent_apps[:10]
-            if recent_apps:
-                user_ids = list(set(a["user_id"] for a in recent_apps))
-                profiles_res = supabase.table("profiles").select("id, first_name, last_name, email").in_("id", user_ids).execute()
-                profiles_map = {p["id"]: p for p in (profiles_res.data or [])}
-                for app in recent_apps:
-                    profile = profiles_map.get(app["user_id"], {})
-                    stats["recent_applications"].append({
-                        "id": app["id"],
-                        "status": app["status"],
-                        "created_at": app["created_at"],
-                        "applicant_name": f"{profile.get('first_name') or ''} {profile.get('last_name') or ''}".strip() or "Unknown",
-                        "email": profile.get("email")
-                    })
-        except Exception as e:
-            logger.warning(f"Failed to get applications: {e}")
+        apps_res = supabase.table("applications").select("id", count="exact").execute()
+        stats["total_applicants"] = apps_res.count or 0
         
+        pending_res = supabase.table("applications").select("id", count="exact").eq("status", "submitted").execute()
+        stats["pending_review"] = pending_res.count or 0
+        
+        approved_res = supabase.table("applications").select("id", count="exact").eq("status", "approved").gte("updated_at", thirty_days_ago).execute()
+        stats["approved_this_month"] = approved_res.count or 0
+        
+        thirty_days_future = (now + timedelta(days=30)).isoformat()
         try:
-            thirty_days_future = (now + timedelta(days=30)).isoformat()
             docs_res = supabase.table("documents").select("id", count="exact").lt("expiration_date", thirty_days_future).gt("expiration_date", now.isoformat()).execute()
             stats["expiring_documents"] = docs_res.count or 0
-        except Exception as e:
-            logger.warning(f"Failed to get expiring docs count: {e}")
+        except:
+            pass
+        
+        recent_res = supabase.table("applications").select("id, status, updated_at, profiles(first_name, last_name)").order("updated_at", desc=True).limit(5).execute()
+        for app in (recent_res.data or []):
+            profile = app.get("profiles") or {}
+            stats["recent_activity"].append({
+                "id": app.get("id"),
+                "name": f"{profile.get('first_name', '')} {profile.get('last_name', '')}".strip() or "Unknown",
+                "status": app.get("status"),
+                "updated_at": app.get("updated_at")
+            })
         
         return stats
     except Exception as e:
-        logger.error(f"Dashboard error: {e}")
+        logger.error(f"Dashboard stats error: {e}")
         raise HTTPException(status_code=500, detail=str(e))
 
 
@@ -145,37 +139,30 @@ async def get_pipeline(
     user: dict = Depends(get_staff_user)
 ):
     try:
-        apps_res = supabase.table("applications").select("*").order("created_at", desc=True).execute()
-        apps_data = apps_res.data or []
-        if not apps_data:
-            return {"applications": []}
-        user_ids = list(set(a["user_id"] for a in apps_data))
-        profiles_res = supabase.table("profiles").select("id, first_name, last_name, email").in_("id", user_ids).execute()
-        profiles_map = {p["id"]: p for p in (profiles_res.data or [])}
-        location_ids = list(set(a["location_id"] for a in apps_data if a.get("location_id")))
-        locations_map = {}
-        if location_ids:
-            locations_res = supabase.table("locations").select("id, name").in_("id", location_ids).execute()
-            locations_map = {loc["id"]: loc for loc in (locations_res.data or [])}
+        res = supabase.table("applications").select(
+            "id, user_id, status, created_at, submitted_at, updated_at, current_step, completed_steps, location_id, profiles(first_name, last_name, email), locations(name)"
+        ).order("created_at", desc=True).execute()
+        
         applications = []
-        for app in apps_data:
-            profile = profiles_map.get(app["user_id"], {})
-            location = locations_map.get(app.get("location_id"), {})
+        for app in (res.data or []):
+            profile = app.get("profiles") or {}
+            location = app.get("locations") or {}
             applications.append({
-                "id": app["id"],
-                "user_id": app["user_id"],
-                "status": app["status"],
-                "created_at": app["created_at"],
+                "id": app.get("id"),
+                "user_id": app.get("user_id"),
+                "status": app.get("status"),
+                "created_at": app.get("created_at"),
                 "submitted_at": app.get("submitted_at"),
-                "updated_at": app["updated_at"],
-                "first_name": profile.get("first_name") or "",
-                "last_name": profile.get("last_name") or "",
-                "email": profile.get("email") or "",
-                "location_name": location.get("name") or ""
+                "updated_at": app.get("updated_at"),
+                "first_name": profile.get("first_name", ""),
+                "last_name": profile.get("last_name", ""),
+                "email": profile.get("email", ""),
+                "location_name": location.get("name", "")
             })
+        
         return {"applications": applications}
     except Exception as e:
-        logger.error(f"Pipeline error: {e}")
+        logger.error(f"Pipeline fetch error: {e}")
         raise HTTPException(status_code=500, detail=str(e))
 
 
@@ -186,54 +173,24 @@ async def get_applicant_detail(
     user: dict = Depends(get_staff_user)
 ):
     try:
-        app_res = supabase.table("applications").select("*").eq("id", application_id).single().execute()
+        app_res = supabase.table("applications").select(
+            "*, profiles(first_name, last_name, email, phone), locations(name)"
+        ).eq("id", application_id).single().execute()
+        
         if not app_res.data:
             raise HTTPException(status_code=404, detail="Application not found")
-        app = app_res.data
-        user_id = app["user_id"]
         
-        profile = {}
-        try:
-            profile_res = supabase.table("profiles").select("*").eq("id", user_id).single().execute()
-            profile = profile_res.data or {}
-        except Exception as e:
-            logger.warning(f"Failed to fetch profile: {e}")
+        application = app_res.data
+        user_id = application.get("user_id")
         
-        location_name = None
-        if app.get("location_id"):
-            try:
-                location_res = supabase.table("locations").select("name").eq("id", app["location_id"]).single().execute()
-                location_name = location_res.data.get("name") if location_res.data else None
-            except:
-                pass
+        steps_res = supabase.table("application_steps").select(
+            "step_number, data, completed, updated_at"
+        ).eq("application_id", application_id).order("step_number").execute()
         
-        steps = []
-        try:
-            steps_res = supabase.table("application_steps").select("*").eq("application_id", application_id).order("step_number").execute()
-            steps = steps_res.data or []
-        except Exception as e:
-            logger.warning(f"Failed to fetch steps: {e}")
-        
-        # Get SSN last four from sensitive_data table (column is ssn_last_four)
-        ssn_last_four = None
-        try:
-            ssn_res = supabase.table("sensitive_data").select("ssn_last_four").eq("user_id", user_id).execute()
-            if ssn_res.data and len(ssn_res.data) > 0:
-                ssn_last_four = ssn_res.data[0].get("ssn_last_four")
-        except Exception as e:
-            logger.warning(f"Failed to fetch SSN from sensitive_data: {e}")
-        
-        # Fall back to step 2 data if not in sensitive_data
-        if not ssn_last_four:
-            step2 = next((s for s in steps if s.get("step_number") == 2), None)
-            if step2:
-                step2_data = step2.get("data") or {}
-                ssn_last_four = step2_data.get("ssn_last_four")
-        
-        docs_data = []
+        documents = []
         try:
             docs_res = supabase.table("documents").select("*").eq("user_id", user_id).order("created_at", desc=True).execute()
-            docs_data = docs_res.data or []
+            documents = docs_res.data or []
         except Exception as e:
             logger.warning(f"Failed to fetch documents: {e}")
         
@@ -244,103 +201,86 @@ async def get_applicant_detail(
         except Exception as e:
             logger.warning(f"Failed to fetch agreements: {e}")
         
+        ssn_last_four = None
+        try:
+            ssn_res = supabase.table("sensitive_data").select("ssn_last_four").eq("user_id", user_id).single().execute()
+            if ssn_res.data:
+                ssn_last_four = ssn_res.data.get("ssn_last_four")
+        except:
+            pass
+        
         all_storage_paths = []
-        for doc in docs_data:
-            if doc.get("storage_path"):
-                all_storage_paths.append(doc["storage_path"])
         for agr in agreements_data:
             if agr.get("pdf_storage_path"):
                 all_storage_paths.append(agr["pdf_storage_path"])
-        upload_steps_set = {11, 12, 13, 14, 15, 16, 17}
-        for step in steps:
-            if step.get("step_number") in upload_steps_set:
-                data = step.get("data") or {}
-                if data.get("storage_path"):
-                    all_storage_paths.append(data["storage_path"])
+        
         signed_urls_map = generate_signed_urls_batch(supabase, all_storage_paths)
         
         documents = []
-        for doc in docs_data:
-            storage_path = doc.get("storage_path")
+        for doc in (docs_res.data if docs_res else []):
             documents.append({
-                "id": doc["id"],
+                "id": doc.get("id"),
                 "document_type": doc.get("document_type"),
-                "category": doc.get("category"),
-                "original_filename": doc.get("original_filename"),
-                "storage_path": storage_path,
-                "signed_url": signed_urls_map.get(storage_path),
-                "expiration_date": doc.get("expiration_date"),
+                "filename": doc.get("filename"),
+                "storage_path": doc.get("storage_path"),
                 "created_at": doc.get("created_at"),
-                "is_current": doc.get("is_current", True),
+                "expiration_date": doc.get("expiration_date")
             })
         
         agreements = []
         for agr in agreements_data:
             pdf_path = agr.get("pdf_storage_path")
             agreements.append({
-                "id": agr["id"],
+                "id": agr.get("id"),
                 "agreement_type": agr.get("agreement_type"),
-                "signed_name": agr.get("signed_name"),
                 "signed_at": agr.get("signed_at"),
+                "ip_address": agr.get("ip_address"),
                 "pdf_storage_path": pdf_path,
                 "pdf_url": signed_urls_map.get(pdf_path),
-                "ip_address": agr.get("ip_address"),
             })
         
-        uploaded_files = []
         upload_step_names = {
             11: "Work Authorization",
-            12: "Photo ID (Front)",
-            13: "Photo ID (Back)",
+            12: "ID Front",
+            13: "ID Back",
             14: "Social Security Card",
-            15: "Professional Credentials",
+            15: "Credentials",
             16: "CPR Certification",
-            17: "TB Test Results",
+            17: "TB Test"
         }
-        for step in steps:
+        
+        uploaded_docs = []
+        for step in (steps_res.data or []):
             step_num = step.get("step_number")
             if step_num in upload_step_names:
                 data = step.get("data") or {}
-                storage_path = data.get("storage_path") or ""
-                if storage_path or data.get("file_name"):
-                    uploaded_files.append({
+                storage_path = data.get("storage_path")
+                if storage_path:
+                    uploaded_docs.append({
                         "step_number": step_num,
                         "document_name": upload_step_names[step_num],
-                        "file_name": data.get("file_name") or data.get("original_filename"),
                         "storage_path": storage_path,
-                        "signed_url": signed_urls_map.get(storage_path) if storage_path else None,
-                        "uploaded_at": step.get("completed_at"),
-                        "skipped": data.get("skip", False),
+                        "file_name": data.get("file_name") or data.get("original_filename"),
+                        "uploaded_at": step.get("updated_at")
                     })
-                elif data.get("skip"):
-                    uploaded_files.append({
+                elif data.get("file_url"):
+                    uploaded_docs.append({
                         "step_number": step_num,
                         "document_name": upload_step_names[step_num],
-                        "file_name": None,
-                        "storage_path": None,
-                        "signed_url": None,
-                        "uploaded_at": None,
-                        "skipped": True,
+                        "file_url": data.get("file_url"),
+                        "file_name": data.get("file_name") or data.get("original_filename"),
+                        "uploaded_at": step.get("updated_at")
                     })
         
         return {
-            "application": {
-                "id": app["id"],
-                "user_id": app["user_id"],
-                "status": app["status"],
-                "current_step": app.get("current_step", 1),
-                "total_steps": app.get("total_steps", 22),
-                "created_at": app["created_at"],
-                "submitted_at": app.get("submitted_at"),
-                "location_id": app.get("location_id"),
-                "location_name": location_name
-            },
-            "profile": profile,
-            "steps": steps,
+            "application": application,
+            "profile": application.get("profiles") or {},
+            "location": application.get("locations") or {},
+            "steps": steps_res.data or [],
             "documents": documents,
             "agreements": agreements,
-            "uploaded_files": uploaded_files,
-            "ssn_last_four": ssn_last_four,
+            "uploaded_docs": uploaded_docs,
+            "ssn_last_four": ssn_last_four
         }
     except HTTPException:
         raise
@@ -349,99 +289,82 @@ async def get_applicant_detail(
         raise HTTPException(status_code=500, detail=str(e))
 
 
-@router.get("/applicant/{application_id}")
-async def get_applicant_detail_old(
-    application_id: str,
-    supabase: Client = Depends(get_supabase),
-    user: dict = Depends(get_staff_user)
-):
-    return await get_applicant_detail(application_id, supabase, user)
-
-
 @router.get("/applicants/{application_id}/ssn")
 async def get_applicant_ssn(
     application_id: str,
     supabase: Client = Depends(get_supabase),
     user: dict = Depends(get_staff_user)
 ):
-    """Get decrypted SSN for an applicant (admin only)."""
+    if user["role"] not in ("admin", "superadmin"):
+        raise HTTPException(status_code=403, detail="Admin access required to view SSN")
+    
     try:
         app_res = supabase.table("applications").select("user_id").eq("id", application_id).single().execute()
         if not app_res.data:
             raise HTTPException(status_code=404, detail="Application not found")
-        user_id = app_res.data["user_id"]
         
-        # Get from sensitive_data table - column is ssn_encrypted
-        ssn_res = supabase.table("sensitive_data").select("ssn_encrypted, ssn_last_four").eq("user_id", user_id).execute()
+        user_id = app_res.data.get("user_id")
         
-        if ssn_res.data and len(ssn_res.data) > 0 and ssn_res.data[0].get("ssn_encrypted"):
-            # Decrypt and return
-            encrypted_ssn = ssn_res.data[0]["ssn_encrypted"]
-            try:
-                decrypted_ssn = encryption_service.decrypt_ssn(encrypted_ssn)
-                formatted_ssn = encryption_service.format_ssn(decrypted_ssn)
-                return {"ssn": formatted_ssn, "ssn_raw": decrypted_ssn}
-            except Exception as e:
-                logger.error(f"SSN decryption error: {e}")
-                raise HTTPException(status_code=500, detail="Failed to decrypt SSN")
+        ssn_res = supabase.table("sensitive_data").select("ssn_encrypted").eq("user_id", user_id).single().execute()
+        if not ssn_res.data or not ssn_res.data.get("ssn_encrypted"):
+            raise HTTPException(status_code=404, detail="SSN not on file")
         
-        # No encrypted SSN found
-        raise HTTPException(status_code=404, detail="Full SSN not available - only last 4 digits on file")
+        ssn_raw = encryption_service.decrypt(ssn_res.data["ssn_encrypted"])
+        ssn_formatted = f"{ssn_raw[:3]}-{ssn_raw[3:5]}-{ssn_raw[5:]}" if len(ssn_raw) == 9 else ssn_raw
         
+        logger.info(f"SSN revealed for application {application_id} by user {user['user_id']}")
+        
+        return {"ssn": ssn_formatted, "ssn_raw": ssn_raw}
     except HTTPException:
         raise
     except Exception as e:
-        logger.error(f"SSN fetch error: {e}")
+        logger.error(f"SSN reveal error: {e}")
         raise HTTPException(status_code=500, detail=str(e))
 
 
 @router.put("/applicants/{application_id}/ssn")
 async def update_applicant_ssn(
     application_id: str,
-    data: dict,
+    ssn_data: dict,
     supabase: Client = Depends(get_supabase),
     user: dict = Depends(get_staff_user)
 ):
-    """Update SSN for an applicant (admin only). SSN stored as string to preserve leading zeros."""
+    if user["role"] not in ("admin", "superadmin"):
+        raise HTTPException(status_code=403, detail="Admin access required to update SSN")
+    
     try:
-        ssn = data.get("ssn", "")
-        clean_ssn = ''.join(filter(str.isdigit, str(ssn)))
-        
-        if len(clean_ssn) != 9:
+        ssn = ssn_data.get("ssn", "").replace("-", "").replace(" ", "")
+        if not ssn or len(ssn) != 9 or not ssn.isdigit():
             raise HTTPException(status_code=400, detail="SSN must be exactly 9 digits")
         
         app_res = supabase.table("applications").select("user_id").eq("id", application_id).single().execute()
         if not app_res.data:
             raise HTTPException(status_code=404, detail="Application not found")
-        user_id = app_res.data["user_id"]
         
-        # Encrypt the SSN
-        encrypted_ssn, last_four = encryption_service.encrypt_ssn(clean_ssn)
-        now = datetime.utcnow().isoformat()
+        user_id = app_res.data.get("user_id")
+        ssn_encrypted = encryption_service.encrypt(ssn)
+        ssn_last_four = ssn[-4:]
         
-        # Check if record exists
         existing = supabase.table("sensitive_data").select("id").eq("user_id", user_id).execute()
         
-        if existing.data and len(existing.data) > 0:
-            # Column is ssn_encrypted (not encrypted_ssn)
+        if existing.data:
             supabase.table("sensitive_data").update({
-                "ssn_encrypted": encrypted_ssn,
-                "ssn_last_four": last_four,
-                "ssn_provided_at": now,
-                "updated_at": now,
+                "ssn_encrypted": ssn_encrypted,
+                "ssn_last_four": ssn_last_four,
+                "updated_at": datetime.utcnow().isoformat()
             }).eq("user_id", user_id).execute()
         else:
             supabase.table("sensitive_data").insert({
                 "user_id": user_id,
-                "ssn_encrypted": encrypted_ssn,
-                "ssn_last_four": last_four,
-                "ssn_provided_at": now,
-                "created_at": now,
-                "updated_at": now,
+                "ssn_encrypted": ssn_encrypted,
+                "ssn_last_four": ssn_last_four,
+                "created_at": datetime.utcnow().isoformat(),
+                "updated_at": datetime.utcnow().isoformat()
             }).execute()
         
-        return {"success": True, "ssn_last_four": last_four}
+        logger.info(f"SSN updated for application {application_id} by user {user['user_id']}")
         
+        return {"success": True, "ssn_last_four": ssn_last_four}
     except HTTPException:
         raise
     except Exception as e:
@@ -449,7 +372,41 @@ async def update_applicant_ssn(
         raise HTTPException(status_code=500, detail=str(e))
 
 
-@router.patch("/applicants/{application_id}/profile")
+@router.get("/employees")
+async def get_employees(
+    supabase: Client = Depends(get_supabase),
+    user: dict = Depends(get_staff_user)
+):
+    try:
+        res = supabase.table("employees").select(
+            "id, user_id, status, position, hire_date, termination_date, created_at, profiles(first_name, last_name, email, phone), locations(name)"
+        ).order("created_at", desc=True).execute()
+        
+        employees = []
+        for emp in (res.data or []):
+            profile = emp.get("profiles") or {}
+            location = emp.get("locations") or {}
+            employees.append({
+                "id": emp.get("id"),
+                "user_id": emp.get("user_id"),
+                "status": emp.get("status"),
+                "position": emp.get("position"),
+                "hire_date": emp.get("hire_date"),
+                "termination_date": emp.get("termination_date"),
+                "first_name": profile.get("first_name", ""),
+                "last_name": profile.get("last_name", ""),
+                "email": profile.get("email", ""),
+                "phone": profile.get("phone", ""),
+                "location_name": location.get("name", "")
+            })
+        
+        return {"employees": employees}
+    except Exception as e:
+        logger.error(f"Employees fetch error: {e}")
+        raise HTTPException(status_code=500, detail=str(e))
+
+
+@router.put("/applicants/{application_id}")
 async def update_applicant_profile(
     application_id: str,
     updates: dict,
@@ -460,16 +417,25 @@ async def update_applicant_profile(
         app_res = supabase.table("applications").select("user_id").eq("id", application_id).single().execute()
         if not app_res.data:
             raise HTTPException(status_code=404, detail="Application not found")
-        user_id = app_res.data["user_id"]
         
-        allowed_fields = {"first_name", "last_name", "email", "phone"}
-        profile_updates = {k: v for k, v in updates.items() if k in allowed_fields and v is not None}
+        user_id = app_res.data.get("user_id")
+        
+        profile_updates = {}
+        profile_fields = ["first_name", "last_name", "email", "phone"]
+        for field in profile_fields:
+            if field in updates and updates[field] is not None:
+                profile_updates[field] = updates[field]
+        
         if profile_updates:
             profile_updates["updated_at"] = datetime.utcnow().isoformat()
             supabase.table("profiles").update(profile_updates).eq("id", user_id).execute()
         
-        address_fields = {"address_line1", "address_line2", "city", "state", "zip", "date_of_birth", "gender"}
-        step2_updates = {k: v for k, v in updates.items() if k in address_fields and v is not None}
+        step2_updates = {}
+        step2_fields = ["city", "address_line1", "address_line2", "state", "zip", "date_of_birth"]
+        for field in step2_fields:
+            if field in updates and updates[field] is not None:
+                step2_updates[field] = updates[field]
+        
         if step2_updates:
             step_res = supabase.table("application_steps").select("id, data").eq("application_id", application_id).eq("step_number", 2).single().execute()
             if step_res.data:
@@ -578,4 +544,399 @@ async def update_application_status(
         raise
     except Exception as e:
         logger.error(f"Status update error: {e}")
+        raise HTTPException(status_code=500, detail=str(e))
+
+
+# =============================================================================
+# PDF Generation Endpoints
+# =============================================================================
+
+from ..services.pdf_service import pdf_service
+from fastapi.responses import Response
+
+@router.get("/applicants/{application_id}/pdf/application")
+async def generate_application_pdf(
+    application_id: str,
+    supabase: Client = Depends(get_supabase),
+    user: dict = Depends(get_staff_user)
+):
+    """Generate and return the full employment application as a PDF."""
+    try:
+        app_res = supabase.table("applications").select("*").eq("id", application_id).single().execute()
+        if not app_res.data:
+            raise HTTPException(status_code=404, detail="Application not found")
+        
+        application = app_res.data
+        
+        steps_res = supabase.table("application_steps").select("step_number, data, completed").eq("application_id", application_id).order("step_number").execute()
+        
+        steps = {}
+        for step in (steps_res.data or []):
+            steps[step["step_number"]] = {
+                "data": step.get("data") or {},
+                "completed": step.get("completed", False)
+            }
+        
+        application_data = {
+            "id": application_id,
+            "status": application.get("status"),
+            "submitted_at": application.get("submitted_at"),
+            "steps": steps
+        }
+        
+        pdf_bytes = pdf_service.generate_employment_application(application_data)
+        
+        step2 = steps.get(2, {}).get("data", {})
+        first_name = step2.get("first_name", "Applicant")
+        last_name = step2.get("last_name", "")
+        filename = f"{first_name}_{last_name}_Application.pdf".replace(" ", "_")
+        
+        return Response(
+            content=pdf_bytes,
+            media_type="application/pdf",
+            headers={
+                "Content-Disposition": f'attachment; filename="{filename}"'
+            }
+        )
+    except HTTPException:
+        raise
+    except Exception as e:
+        logger.error(f"Application PDF generation error: {e}")
+        raise HTTPException(status_code=500, detail=str(e))
+
+
+@router.get("/applicants/{application_id}/pdf/i9")
+async def generate_i9_pdf(
+    application_id: str,
+    supabase: Client = Depends(get_supabase),
+    user: dict = Depends(get_staff_user)
+):
+    """Generate and return a pre-filled I-9 form as a PDF."""
+    try:
+        app_res = supabase.table("applications").select("*, user_id").eq("id", application_id).single().execute()
+        if not app_res.data:
+            raise HTTPException(status_code=404, detail="Application not found")
+        
+        application = app_res.data
+        user_id = application.get("user_id")
+        
+        steps_res = supabase.table("application_steps").select("step_number, data, completed").eq("application_id", application_id).order("step_number").execute()
+        
+        steps = {}
+        for step in (steps_res.data or []):
+            steps[step["step_number"]] = {
+                "data": step.get("data") or {},
+                "completed": step.get("completed", False)
+            }
+        
+        ssn = None
+        try:
+            ssn_res = supabase.table("sensitive_data").select("ssn_encrypted").eq("user_id", user_id).single().execute()
+            if ssn_res.data and ssn_res.data.get("ssn_encrypted"):
+                ssn = encryption_service.decrypt(ssn_res.data["ssn_encrypted"])
+        except Exception as e:
+            logger.warning(f"Could not decrypt SSN for I-9: {e}")
+        
+        application_data = {
+            "id": application_id,
+            "status": application.get("status"),
+            "submitted_at": application.get("submitted_at"),
+            "steps": steps
+        }
+        
+        pdf_bytes = pdf_service.generate_i9_form(application_data, ssn)
+        
+        step2 = steps.get(2, {}).get("data", {})
+        first_name = step2.get("first_name", "Applicant")
+        last_name = step2.get("last_name", "")
+        filename = f"{first_name}_{last_name}_I9.pdf".replace(" ", "_")
+        
+        return Response(
+            content=pdf_bytes,
+            media_type="application/pdf",
+            headers={
+                "Content-Disposition": f'attachment; filename="{filename}"'
+            }
+        )
+    except HTTPException:
+        raise
+    except FileNotFoundError as e:
+        raise HTTPException(status_code=404, detail=str(e))
+    except Exception as e:
+        logger.error(f"I-9 PDF generation error: {e}")
+        raise HTTPException(status_code=500, detail=str(e))
+
+
+@router.get("/applicants/{application_id}/pdf/agreement/{agreement_type}")
+async def generate_agreement_pdf(
+    application_id: str,
+    agreement_type: str,
+    supabase: Client = Depends(get_supabase),
+    user: dict = Depends(get_staff_user)
+):
+    """
+    Generate a signed agreement as a PDF.
+    
+    Agreement types: confidentiality, esignature, criminal_background, orientation, 
+                     va_code_disclosure, job_description, final_signature
+    """
+    try:
+        app_res = supabase.table("applications").select("*").eq("id", application_id).single().execute()
+        if not app_res.data:
+            raise HTTPException(status_code=404, detail="Application not found")
+        
+        agreement_step_map = {
+            "confidentiality": 9,
+            "esignature": 10,
+            "orientation": 18,
+            "criminal_background": 19,
+            "va_code_disclosure": 20,
+            "job_description": 21,
+            "final_signature": 22,
+        }
+        
+        step_number = agreement_step_map.get(agreement_type)
+        if not step_number:
+            raise HTTPException(status_code=400, detail=f"Invalid agreement type: {agreement_type}")
+        
+        step_res = supabase.table("application_steps").select("data, completed, updated_at").eq("application_id", application_id).eq("step_number", step_number).single().execute()
+        if not step_res.data:
+            raise HTTPException(status_code=404, detail="Agreement step not found")
+        
+        step_data = step_res.data.get("data") or {}
+        
+        step2_res = supabase.table("application_steps").select("data").eq("application_id", application_id).eq("step_number", 2).single().execute()
+        personal_info = step2_res.data.get("data") if step2_res.data else {}
+        
+        context = {
+            "applicant_name": f"{personal_info.get('first_name', '')} {personal_info.get('last_name', '')}".strip() or "Applicant",
+            "signature": step_data.get("signature", ""),
+            "signed_date": step_data.get("signed_date", ""),
+            "agreed": step_data.get("agreed", False),
+            "agreed_truthful": step_data.get("agreed_truthful", False),
+            "agreed_at_will": step_data.get("agreed_at_will", False),
+            "agreed_policies": step_data.get("agreed_policies", False),
+            "generated_date": datetime.now().strftime("%B %d, %Y"),
+            "company_name": "Eveready HomeCare",
+        }
+        
+        template_map = {
+            "confidentiality": "confidentiality_agreement.html",
+            "esignature": "esignature_consent.html",
+            "orientation": "orientation_acknowledgment.html",
+            "criminal_background": "criminal_background_attestation.html",
+            "va_code_disclosure": "va_code_disclosure.html",
+            "job_description": "job_description_acknowledgment.html",
+            "final_signature": "master_onboarding_consent.html",
+        }
+        
+        template_name = template_map.get(agreement_type)
+        
+        from jinja2 import Environment, FileSystemLoader
+        from weasyprint import HTML, CSS
+        import os
+        
+        templates_dir = os.path.join(os.path.dirname(__file__), '..', 'templates')
+        jinja_env = Environment(loader=FileSystemLoader(templates_dir), autoescape=True)
+        template = jinja_env.get_template(template_name)
+        html_content = template.render(**context)
+        
+        css_path = os.path.join(templates_dir, 'application_styles.css')
+        stylesheets = []
+        if os.path.exists(css_path):
+            stylesheets.append(CSS(filename=css_path))
+        
+        pdf_bytes = HTML(string=html_content).write_pdf(stylesheets=stylesheets)
+        
+        first_name = personal_info.get('first_name', 'Applicant')
+        last_name = personal_info.get('last_name', '')
+        filename = f"{first_name}_{last_name}_{agreement_type}.pdf".replace(" ", "_")
+        
+        return Response(
+            content=pdf_bytes,
+            media_type="application/pdf",
+            headers={
+                "Content-Disposition": f'attachment; filename="{filename}"'
+            }
+        )
+    except HTTPException:
+        raise
+    except Exception as e:
+        logger.error(f"Agreement PDF generation error: {e}")
+        raise HTTPException(status_code=500, detail=str(e))
+
+
+@router.get("/employees/{employee_id}/documents")
+async def get_employee_documents(
+    employee_id: str,
+    supabase: Client = Depends(get_supabase),
+    user: dict = Depends(get_staff_user)
+):
+    """Get all documents for an employee including agreements, uploaded docs, and generated PDFs."""
+    try:
+        emp_res = supabase.table("employees").select("*, user_id").eq("id", employee_id).single().execute()
+        if not emp_res.data:
+            raise HTTPException(status_code=404, detail="Employee not found")
+        
+        employee = emp_res.data
+        user_id = employee.get("user_id")
+        
+        app_res = supabase.table("applications").select("id").eq("user_id", user_id).single().execute()
+        application_id = app_res.data.get("id") if app_res.data else None
+        
+        documents = {
+            "uploaded": [],
+            "agreements": [],
+            "generated": []
+        }
+        
+        if user_id:
+            docs_res = supabase.table("documents").select("*").eq("user_id", user_id).order("created_at", desc=True).execute()
+            for doc in (docs_res.data or []):
+                documents["uploaded"].append({
+                    "id": doc.get("id"),
+                    "type": doc.get("document_type"),
+                    "filename": doc.get("filename"),
+                    "uploaded_at": doc.get("created_at"),
+                    "expires_at": doc.get("expiration_date"),
+                    "storage_path": doc.get("storage_path")
+                })
+        
+        if application_id:
+            documents["generated"] = [
+                {"type": "application", "name": "Employment Application", "endpoint": f"/admin/applicants/{application_id}/pdf/application"},
+                {"type": "i9", "name": "I-9 Form", "endpoint": f"/admin/applicants/{application_id}/pdf/i9"},
+            ]
+            
+            agreement_steps = [
+                (9, "confidentiality", "Confidentiality Agreement"),
+                (10, "esignature", "E-Signature Consent"),
+                (18, "orientation", "Orientation Acknowledgment"),
+                (19, "criminal_background", "Criminal Background Authorization"),
+                (20, "va_code_disclosure", "VA Code Disclosure"),
+                (21, "job_description", "Job Description Acknowledgment"),
+                (22, "final_signature", "Final Signature"),
+            ]
+            
+            steps_res = supabase.table("application_steps").select("step_number, completed, data").eq("application_id", application_id).in_("step_number", [s[0] for s in agreement_steps]).execute()
+            completed_steps = {s["step_number"]: s for s in (steps_res.data or [])}
+            
+            for step_num, agreement_type, name in agreement_steps:
+                step = completed_steps.get(step_num)
+                if step and step.get("completed"):
+                    data = step.get("data") or {}
+                    documents["agreements"].append({
+                        "type": agreement_type,
+                        "name": name,
+                        "signed": bool(data.get("signature")),
+                        "signed_date": data.get("signed_date"),
+                        "endpoint": f"/admin/applicants/{application_id}/pdf/agreement/{agreement_type}"
+                    })
+        
+        return {
+            "employee_id": employee_id,
+            "employee_name": f"{employee.get('first_name', '')} {employee.get('last_name', '')}",
+            "application_id": application_id,
+            "documents": documents
+        }
+    except HTTPException:
+        raise
+    except Exception as e:
+        logger.error(f"Employee documents error: {e}")
+        raise HTTPException(status_code=500, detail=str(e))
+
+
+@router.get("/applicants/{application_id}/documents-summary")
+async def get_applicant_documents_summary(
+    application_id: str,
+    supabase: Client = Depends(get_supabase),
+    user: dict = Depends(get_staff_user)
+):
+    """Get all documents for an applicant including agreements, uploaded docs, and generated PDFs."""
+    try:
+        app_res = supabase.table("applications").select("*, user_id, profiles(first_name, last_name)").eq("id", application_id).single().execute()
+        if not app_res.data:
+            raise HTTPException(status_code=404, detail="Application not found")
+        
+        application = app_res.data
+        user_id = application.get("user_id")
+        profile = application.get("profiles") or {}
+        
+        documents = {
+            "uploaded": [],
+            "agreements": [],
+            "generated": []
+        }
+        
+        # Generated PDFs always available
+        documents["generated"] = [
+            {"type": "application", "name": "Employment Application", "endpoint": f"/admin/applicants/{application_id}/pdf/application"},
+            {"type": "i9", "name": "I-9 Form", "endpoint": f"/admin/applicants/{application_id}/pdf/i9"},
+        ]
+        
+        # Get uploaded documents from steps
+        upload_steps = [
+            (11, "work_authorization", "Work Authorization"),
+            (12, "id_front", "ID Front"),
+            (13, "id_back", "ID Back"),
+            (14, "ssn_card", "Social Security Card"),
+            (15, "credentials", "Credentials"),
+            (16, "cpr", "CPR Certification"),
+            (17, "tb", "TB Test"),
+        ]
+        
+        steps_res = supabase.table("application_steps").select("step_number, data, completed, updated_at").eq("application_id", application_id).in_("step_number", [s[0] for s in upload_steps]).execute()
+        upload_steps_data = {s["step_number"]: s for s in (steps_res.data or [])}
+        
+        for step_num, doc_type, name in upload_steps:
+            step = upload_steps_data.get(step_num)
+            if step:
+                data = step.get("data") or {}
+                storage_path = data.get("storage_path") or data.get("file_url")
+                if storage_path:
+                    documents["uploaded"].append({
+                        "type": doc_type,
+                        "name": name,
+                        "step_number": step_num,
+                        "filename": data.get("file_name") or data.get("original_filename"),
+                        "uploaded_at": step.get("updated_at"),
+                        "endpoint": f"/admin/applicants/{application_id}/documents/{step_num}/url"
+                    })
+        
+        # Get agreements
+        agreement_steps = [
+            (9, "confidentiality", "Confidentiality Agreement"),
+            (10, "esignature", "E-Signature Consent"),
+            (18, "orientation", "Orientation Acknowledgment"),
+            (19, "criminal_background", "Criminal Background Authorization"),
+            (20, "va_code_disclosure", "VA Code Disclosure"),
+            (21, "job_description", "Job Description Acknowledgment"),
+            (22, "final_signature", "Final Signature"),
+        ]
+        
+        agreement_steps_res = supabase.table("application_steps").select("step_number, completed, data").eq("application_id", application_id).in_("step_number", [s[0] for s in agreement_steps]).execute()
+        agreement_steps_data = {s["step_number"]: s for s in (agreement_steps_res.data or [])}
+        
+        for step_num, agreement_type, name in agreement_steps:
+            step = agreement_steps_data.get(step_num)
+            if step and step.get("completed"):
+                data = step.get("data") or {}
+                documents["agreements"].append({
+                    "type": agreement_type,
+                    "name": name,
+                    "signed": bool(data.get("signature")),
+                    "signed_date": data.get("signed_date"),
+                    "endpoint": f"/admin/applicants/{application_id}/pdf/agreement/{agreement_type}"
+                })
+        
+        return {
+            "application_id": application_id,
+            "applicant_name": f"{profile.get('first_name', '')} {profile.get('last_name', '')}".strip(),
+            "status": application.get("status"),
+            "documents": documents
+        }
+    except HTTPException:
+        raise
+    except Exception as e:
+        logger.error(f"Applicant documents summary error: {e}")
         raise HTTPException(status_code=500, detail=str(e))
