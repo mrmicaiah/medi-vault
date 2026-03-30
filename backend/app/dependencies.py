@@ -2,9 +2,12 @@
 
 from fastapi import Depends, Header, HTTPException, status
 from supabase import create_client, Client
+import logging
 
 from app.config import get_settings, Settings
 from app.models.user import UserProfile, UserRole
+
+logger = logging.getLogger(__name__)
 
 
 def get_supabase() -> Client:
@@ -41,19 +44,27 @@ async def get_current_user(
             )
         auth_user = user_response.user
     except Exception as exc:
+        logger.error(f"Token verification failed: {exc}")
         raise HTTPException(
             status_code=status.HTTP_401_UNAUTHORIZED,
             detail=f"Token verification failed: {str(exc)}",
         )
 
     # Fetch profile from profiles table
-    profile_result = (
-        supabase.table("profiles")
-        .select("*")
-        .eq("id", str(auth_user.id))
-        .single()
-        .execute()
-    )
+    try:
+        profile_result = (
+            supabase.table("profiles")
+            .select("*")
+            .eq("id", str(auth_user.id))
+            .single()
+            .execute()
+        )
+    except Exception as exc:
+        logger.error(f"Profile fetch failed: {exc}")
+        raise HTTPException(
+            status_code=status.HTTP_500_INTERNAL_SERVER_ERROR,
+            detail=f"Failed to fetch profile: {str(exc)}",
+        )
 
     if not profile_result.data:
         raise HTTPException(
@@ -62,12 +73,21 @@ async def get_current_user(
         )
 
     data = profile_result.data
+    
+    # Parse role safely - default to applicant if invalid
+    role_str = data.get("role", "applicant")
+    try:
+        role = UserRole(role_str)
+    except ValueError:
+        logger.warning(f"Invalid role '{role_str}' for user {auth_user.id}, defaulting to applicant")
+        role = UserRole.APPLICANT
+    
     return UserProfile(
         id=data["id"],
         email=auth_user.email or data.get("email", ""),
         first_name=data.get("first_name", ""),
         last_name=data.get("last_name", ""),
-        role=UserRole(data.get("role", "applicant")),
+        role=role,
         phone=data.get("phone"),
         created_at=data.get("created_at"),
         updated_at=data.get("updated_at"),
