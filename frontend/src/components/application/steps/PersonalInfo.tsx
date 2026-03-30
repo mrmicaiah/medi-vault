@@ -183,19 +183,14 @@ export function PersonalInfo({ data, onSave, onChange }: StepProps) {
         <h3 className="text-sm font-semibold text-navy border-b border-border pb-2">Personal Details</h3>
         
         <div className="grid grid-cols-1 gap-4 sm:grid-cols-3">
-          <div>
-            <Input 
-              label="Date of Birth" 
-              type="date" 
-              required 
-              value={form.date_of_birth} 
-              onChange={(e) => handleChange('date_of_birth', e.target.value)}
-              error={ageError || undefined}
-            />
-            {ageError && (
-              <p className="mt-1 text-sm text-error">{ageError}</p>
-            )}
-          </div>
+          <Input 
+            label="Date of Birth" 
+            type="date" 
+            required 
+            value={form.date_of_birth} 
+            onChange={(e) => handleChange('date_of_birth', e.target.value)}
+            error={ageError || undefined}
+          />
           <div>
             {ssnSaved ? (
               <div>
