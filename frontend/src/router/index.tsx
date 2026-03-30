@@ -57,6 +57,39 @@ function ProtectedRoute({ children }: { children: React.ReactNode }) {
   return <>{children}</>;
 }
 
+function ProfileErrorScreen() {
+  const handleSignOut = () => {
+    localStorage.clear();
+    sessionStorage.clear();
+    window.location.href = '/auth/login';
+  };
+
+  return (
+    <div className="flex h-screen items-center justify-center bg-bg">
+      <div className="text-center max-w-md px-4">
+        <h1 className="font-display text-2xl font-bold text-navy">Profile Error</h1>
+        <p className="mt-2 text-gray">Unable to load your profile. This may be a permissions issue.</p>
+        <p className="mt-4 text-sm text-gray">Try refreshing or signing out and back in.</p>
+        <div className="mt-6 flex gap-3 justify-center">
+          <button 
+            onClick={() => window.location.reload()} 
+            className="px-4 py-2 bg-navy text-white rounded-lg text-sm font-medium"
+          >
+            Refresh
+          </button>
+          <button 
+            onClick={handleSignOut}
+            className="px-4 py-2 bg-gray-200 text-navy rounded-lg text-sm font-medium"
+          >
+            Sign Out
+          </button>
+        </div>
+        <p className="mt-6 text-xs text-gray">Debug: Check browser console for [Auth] logs</p>
+      </div>
+    </div>
+  );
+}
+
 function AdminRoute({ children }: { children: React.ReactNode }) {
   const { role, profile, loading, initialized } = useAuth();
 
@@ -64,33 +97,8 @@ function AdminRoute({ children }: { children: React.ReactNode }) {
 
   if (!initialized || loading) return null;
 
-  // If profile failed to load, show error - don't just redirect
   if (!profile) {
-    return (
-      <div className="flex h-screen items-center justify-center bg-bg">
-        <div className="text-center max-w-md px-4">
-          <h1 className="font-display text-2xl font-bold text-navy">Profile Error</h1>
-          <p className="mt-2 text-gray">Unable to load your profile. This may be a permissions issue.</p>
-          <p className="mt-4 text-sm text-gray">Try refreshing or signing out and back in.</p>
-          <div className="mt-6 flex gap-3 justify-center">
-            <button 
-              onClick={() => window.location.reload()} 
-              className="px-4 py-2 bg-navy text-white rounded-lg text-sm font-medium"
-            >
-              Refresh
-            </button>
-            <a 
-              href="/auth/login" 
-              onClick={() => { localStorage.clear(); sessionStorage.clear(); }}
-              className="px-4 py-2 bg-gray-200 text-navy rounded-lg text-sm font-medium"
-            >
-              Sign Out
-            </a>
-          </div>
-          <p className="mt-6 text-xs text-gray">Debug: Check browser console for [Auth] logs</p>
-        </div>
-      </div>
-    );
+    return <ProfileErrorScreen />;
   }
 
   if (!isStaffRole(role)) {
@@ -100,7 +108,6 @@ function AdminRoute({ children }: { children: React.ReactNode }) {
   return <>{children}</>;
 }
 
-// NEW: Guard to prevent staff from seeing applicant pages
 function ApplicantRoute({ children }: { children: React.ReactNode }) {
   const { role, profile, loading, initialized } = useAuth();
 
@@ -108,31 +115,8 @@ function ApplicantRoute({ children }: { children: React.ReactNode }) {
 
   if (!initialized || loading) return null;
 
-  // If profile failed to load, show error
   if (!profile) {
-    return (
-      <div className="flex h-screen items-center justify-center bg-bg">
-        <div className="text-center max-w-md px-4">
-          <h1 className="font-display text-2xl font-bold text-navy">Profile Error</h1>
-          <p className="mt-2 text-gray">Unable to load your profile.</p>
-          <div className="mt-6 flex gap-3 justify-center">
-            <button 
-              onClick={() => window.location.reload()} 
-              className="px-4 py-2 bg-navy text-white rounded-lg text-sm font-medium"
-            >
-              Refresh
-            </button>
-            <a 
-              href="/auth/login" 
-              onClick={() => { localStorage.clear(); sessionStorage.clear(); }}
-              className="px-4 py-2 bg-gray-200 text-navy rounded-lg text-sm font-medium"
-            >
-              Sign Out
-            </a>
-          </div>
-        </div>
-      </div>
-    );
+    return <ProfileErrorScreen />;
   }
 
   // Staff should NOT see applicant pages - redirect to admin
@@ -148,7 +132,6 @@ function RootRedirect() {
   
   console.log('[RootRedirect] role:', role, 'profile:', profile);
 
-  // If no profile, go to login (something is wrong)
   if (!profile) {
     return <Navigate to="/auth/login" replace />;
   }
@@ -162,11 +145,11 @@ function RootRedirect() {
 export function RouterConfig() {
   return (
     <Routes>
-      {/* Public application pages - supports agency slug */}
+      {/* Public application pages */}
       <Route path="/apply" element={<ApplyPage />} />
       <Route path="/apply/:agencySlug" element={<ApplyPage />} />
       
-      {/* Staff invitation page - no auth required */}
+      {/* Staff invitation page */}
       <Route path="/invite/:token" element={<InvitePage />} />
 
       {/* Auth routes */}
@@ -176,7 +159,7 @@ export function RouterConfig() {
         <Route path="/auth/reset-password" element={<ResetPasswordPage />} />
       </Route>
 
-      {/* Protected applicant routes - staff get redirected away */}
+      {/* Protected applicant routes */}
       <Route
         element={
           <ProtectedRoute>
@@ -191,7 +174,7 @@ export function RouterConfig() {
         <Route path="/applicant/documents" element={<DocumentsPage />} />
       </Route>
 
-      {/* Protected admin/manager routes */}
+      {/* Protected admin routes */}
       <Route
         element={
           <ProtectedRoute>
