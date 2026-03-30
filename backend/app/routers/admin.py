@@ -214,12 +214,12 @@ async def get_applicant_detail(
         except Exception as e:
             logger.warning(f"Failed to fetch steps: {e}")
         
-        # Get SSN last four - check sensitive_data first, then fall back to step 2
+        # Get SSN last four from sensitive_data table (column is ssn_last_four)
         ssn_last_four = None
         try:
-            ssn_res = supabase.table("sensitive_data").select("ssn_last_four").eq("user_id", user_id).single().execute()
-            if ssn_res.data:
-                ssn_last_four = ssn_res.data.get("ssn_last_four")
+            ssn_res = supabase.table("sensitive_data").select("ssn_last_four").eq("user_id", user_id).execute()
+            if ssn_res.data and len(ssn_res.data) > 0:
+                ssn_last_four = ssn_res.data[0].get("ssn_last_four")
         except Exception as e:
             logger.warning(f"Failed to fetch SSN from sensitive_data: {e}")
         
@@ -371,20 +371,12 @@ async def get_applicant_ssn(
             raise HTTPException(status_code=404, detail="Application not found")
         user_id = app_res.data["user_id"]
         
-        # Try sensitive_data table first
-        encrypted_ssn = None
-        ssn_last_four = None
+        # Get from sensitive_data table - column is ssn_encrypted
+        ssn_res = supabase.table("sensitive_data").select("ssn_encrypted, ssn_last_four").eq("user_id", user_id).execute()
         
-        try:
-            ssn_res = supabase.table("sensitive_data").select("encrypted_ssn, ssn_last_four").eq("user_id", user_id).execute()
-            if ssn_res.data and len(ssn_res.data) > 0:
-                encrypted_ssn = ssn_res.data[0].get("encrypted_ssn")
-                ssn_last_four = ssn_res.data[0].get("ssn_last_four")
-        except Exception as e:
-            logger.warning(f"Error fetching from sensitive_data: {e}")
-        
-        # If we have encrypted SSN, decrypt it
-        if encrypted_ssn:
+        if ssn_res.data and len(ssn_res.data) > 0 and ssn_res.data[0].get("ssn_encrypted"):
+            # Decrypt and return
+            encrypted_ssn = ssn_res.data[0]["ssn_encrypted"]
             try:
                 decrypted_ssn = encryption_service.decrypt_ssn(encrypted_ssn)
                 formatted_ssn = encryption_service.format_ssn(decrypted_ssn)
@@ -393,27 +385,8 @@ async def get_applicant_ssn(
                 logger.error(f"SSN decryption error: {e}")
                 raise HTTPException(status_code=500, detail="Failed to decrypt SSN")
         
-        # Fall back to step 2 data (unencrypted legacy data)
-        try:
-            steps_res = supabase.table("application_steps").select("data").eq("application_id", application_id).eq("step_number", 2).single().execute()
-            if steps_res.data:
-                step_data = steps_res.data.get("data") or {}
-                # Check for full SSN in step data
-                full_ssn = step_data.get("ssn") or step_data.get("social_security")
-                if full_ssn:
-                    clean_ssn = ''.join(filter(str.isdigit, str(full_ssn)))
-                    if len(clean_ssn) == 9:
-                        formatted = f"{clean_ssn[:3]}-{clean_ssn[3:5]}-{clean_ssn[5:]}"
-                        return {"ssn": formatted, "ssn_raw": clean_ssn}
-                # If only last four, we can't reveal full
-                if ssn_last_four:
-                    raise HTTPException(status_code=404, detail="Full SSN not available - only last 4 digits on file")
-        except HTTPException:
-            raise
-        except Exception as e:
-            logger.warning(f"Error fetching from step 2: {e}")
-        
-        raise HTTPException(status_code=404, detail="SSN not found")
+        # No encrypted SSN found
+        raise HTTPException(status_code=404, detail="Full SSN not available - only last 4 digits on file")
         
     except HTTPException:
         raise
@@ -450,35 +423,22 @@ async def update_applicant_ssn(
         existing = supabase.table("sensitive_data").select("id").eq("user_id", user_id).execute()
         
         if existing.data and len(existing.data) > 0:
+            # Column is ssn_encrypted (not encrypted_ssn)
             supabase.table("sensitive_data").update({
-                "encrypted_ssn": encrypted_ssn,
+                "ssn_encrypted": encrypted_ssn,
                 "ssn_last_four": last_four,
+                "ssn_provided_at": now,
                 "updated_at": now,
             }).eq("user_id", user_id).execute()
         else:
             supabase.table("sensitive_data").insert({
                 "user_id": user_id,
-                "encrypted_ssn": encrypted_ssn,
+                "ssn_encrypted": encrypted_ssn,
                 "ssn_last_four": last_four,
+                "ssn_provided_at": now,
                 "created_at": now,
                 "updated_at": now,
             }).execute()
-        
-        # Also update step 2 ssn_last_four for display purposes
-        try:
-            step_res = supabase.table("application_steps").select("id, data").eq("application_id", application_id).eq("step_number", 2).single().execute()
-            if step_res.data:
-                current_data = step_res.data.get("data") or {}
-                current_data["ssn_last_four"] = last_four
-                # Remove any unencrypted full SSN from step data
-                current_data.pop("ssn", None)
-                current_data.pop("social_security", None)
-                supabase.table("application_steps").update({
-                    "data": current_data,
-                    "updated_at": now
-                }).eq("id", step_res.data["id"]).execute()
-        except Exception as e:
-            logger.warning(f"Failed to update step 2: {e}")
         
         return {"success": True, "ssn_last_four": last_four}
         
