@@ -3,14 +3,11 @@ from fastapi.responses import Response
 from supabase import Client
 from datetime import datetime, timedelta
 from typing import Optional, Dict, List
-from jinja2 import Environment, FileSystemLoader
-from weasyprint import HTML, CSS
 import logging
 import os
 
 from ..dependencies import get_supabase
 from ..services.encryption_service import encryption_service
-from ..services.pdf_service import pdf_service
 
 logger = logging.getLogger(__name__)
 
@@ -192,6 +189,7 @@ async def get_applicant_detail(
         ).eq("application_id", application_id).order("step_number").execute()
         
         documents = []
+        docs_res = None
         try:
             docs_res = supabase.table("documents").select("*").eq("user_id", user_id).order("created_at", desc=True).execute()
             documents = docs_res.data or []
@@ -221,15 +219,16 @@ async def get_applicant_detail(
         signed_urls_map = generate_signed_urls_batch(supabase, all_storage_paths)
         
         documents = []
-        for doc in (docs_res.data if 'docs_res' in dir() and docs_res else []):
-            documents.append({
-                "id": doc.get("id"),
-                "document_type": doc.get("document_type"),
-                "filename": doc.get("filename"),
-                "storage_path": doc.get("storage_path"),
-                "created_at": doc.get("created_at"),
-                "expiration_date": doc.get("expiration_date")
-            })
+        if docs_res and docs_res.data:
+            for doc in docs_res.data:
+                documents.append({
+                    "id": doc.get("id"),
+                    "document_type": doc.get("document_type"),
+                    "filename": doc.get("filename"),
+                    "storage_path": doc.get("storage_path"),
+                    "created_at": doc.get("created_at"),
+                    "expiration_date": doc.get("expiration_date")
+                })
         
         agreements = []
         for agr in agreements_data:
@@ -562,6 +561,8 @@ async def generate_application_pdf(
     user: dict = Depends(get_staff_user)
 ):
     """Generate and return the full employment application as a PDF."""
+    from ..services.pdf_service import pdf_service
+    
     try:
         app_res = supabase.table("applications").select("*").eq("id", application_id).single().execute()
         if not app_res.data:
@@ -613,6 +614,8 @@ async def generate_i9_pdf(
     user: dict = Depends(get_staff_user)
 ):
     """Generate and return a pre-filled I-9 form as a PDF."""
+    from ..services.pdf_service import pdf_service
+    
     try:
         app_res = supabase.table("applications").select("*, user_id").eq("id", application_id).single().execute()
         if not app_res.data:
@@ -681,6 +684,9 @@ async def generate_agreement_pdf(
     Agreement types: confidentiality, esignature, criminal_background, orientation, 
                      va_code_disclosure, job_description, final_signature
     """
+    from jinja2 import Environment, FileSystemLoader
+    from weasyprint import HTML, CSS
+    
     try:
         app_res = supabase.table("applications").select("*").eq("id", application_id).single().execute()
         if not app_res.data:
