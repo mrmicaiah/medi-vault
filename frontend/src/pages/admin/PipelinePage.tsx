@@ -1,8 +1,9 @@
-import React, { useState, useEffect } from 'react';
-import { Link } from 'react-router-dom';
+import React, { useState, useEffect, useRef } from 'react';
+import { Link, useNavigate } from 'react-router-dom';
 import { Button } from '../../components/ui/Button';
 import { Alert } from '../../components/ui/Alert';
 import { api } from '../../lib/api';
+import { supabase } from '../../lib/supabase';
 
 interface Applicant {
   id: string;
@@ -55,6 +56,9 @@ const CheckCircle = ({ checked, label }: { checked: boolean; label: string }) =>
 );
 
 export function PipelinePage() {
+  const navigate = useNavigate();
+  const fileInputRef = useRef<HTMLInputElement>(null);
+  
   const [applicants, setApplicants] = useState<Applicant[]>([]);
   const [loading, setLoading] = useState(true);
   const [error, setError] = useState<string | null>(null);
@@ -62,6 +66,12 @@ export function PipelinePage() {
   const [applicantDetail, setApplicantDetail] = useState<ApplicantDetail | null>(null);
   const [loadingDetail, setLoadingDetail] = useState(false);
   const [panelOpen, setPanelOpen] = useState(false);
+  
+  // Upload state
+  const [showUploadModal, setShowUploadModal] = useState(false);
+  const [uploadType, setUploadType] = useState('');
+  const [uploading, setUploading] = useState(false);
+  const [uploadError, setUploadError] = useState<string | null>(null);
 
   useEffect(() => {
     loadApplicants();
@@ -130,6 +140,40 @@ export function PipelinePage() {
       setSelectedApplicant(null);
       setApplicantDetail(null);
     }, 250);
+  };
+
+  const handleUploadClick = () => {
+    setShowUploadModal(true);
+    setUploadError(null);
+  };
+
+  const handleFileSelect = async (e: React.ChangeEvent<HTMLInputElement>) => {
+    const file = e.target.files?.[0];
+    if (!file || !selectedApplicant || !uploadType) return;
+
+    setUploading(true);
+    setUploadError(null);
+
+    try {
+      const fileExt = file.name.split('.').pop();
+      const fileName = `${selectedApplicant.user_id}/${uploadType}_${Date.now()}.${fileExt}`;
+      
+      const { error: uploadErr } = await supabase.storage
+        .from('documents')
+        .upload(fileName, file);
+
+      if (uploadErr) throw uploadErr;
+
+      // Refresh applicant detail
+      await selectApplicant(selectedApplicant);
+      setShowUploadModal(false);
+      setUploadType('');
+    } catch (err) {
+      setUploadError(err instanceof Error ? err.message : 'Upload failed');
+    } finally {
+      setUploading(false);
+      if (fileInputRef.current) fileInputRef.current.value = '';
+    }
   };
 
   const getPositionLabel = (position?: string) => {
@@ -202,7 +246,7 @@ export function PipelinePage() {
             {new Date().toLocaleDateString('en-US', { weekday: 'long', month: 'long', day: 'numeric', year: 'numeric' })}
           </p>
         </div>
-        <Button>
+        <Button onClick={() => window.open('/apply/eveready-homecare', '_blank')}>
           <span className="mr-1">+</span> Add Applicant
         </Button>
       </div>
@@ -340,26 +384,29 @@ export function PipelinePage() {
 
                   {/* Action Buttons */}
                   <div className="grid grid-cols-3 mt-5 rounded-lg overflow-hidden shadow-sm">
-                    <Link to={`/admin/applicant/${selectedApplicant.id}`} className="block">
-                      <button className="w-full py-3.5 bg-navy text-white text-xs font-semibold hover:bg-navy/90 transition-colors">
-                        VIEW
-                      </button>
-                    </Link>
-                    <Link to={`/admin/applicant/${selectedApplicant.id}`} className="block">
-                      <button className="w-full py-3.5 bg-navy/80 text-white text-xs font-semibold hover:bg-navy/70 transition-colors">
-                        EDIT
-                      </button>
-                    </Link>
-                    <Link to={`/admin/hire/${selectedApplicant.id}`} className="block">
-                      <button className="w-full py-3.5 bg-success text-navy text-xs font-semibold hover:bg-success/90 transition-colors">
-                        ONBOARD
-                      </button>
-                    </Link>
+                    <button 
+                      onClick={() => navigate(`/admin/applicant/${selectedApplicant.id}`)}
+                      className="w-full py-3.5 bg-navy text-white text-xs font-semibold hover:bg-navy/90 transition-colors"
+                    >
+                      VIEW
+                    </button>
+                    <button 
+                      onClick={() => navigate(`/admin/applicant/${selectedApplicant.id}`)}
+                      className="w-full py-3.5 bg-navy/80 text-white text-xs font-semibold hover:bg-navy/70 transition-colors"
+                    >
+                      EDIT
+                    </button>
+                    <button 
+                      onClick={() => navigate(`/admin/hire/${selectedApplicant.id}`)}
+                      className="w-full py-3.5 bg-success text-navy text-xs font-semibold hover:bg-success/90 transition-colors"
+                    >
+                      ONBOARD
+                    </button>
                   </div>
 
                   {/* Onboarding Status */}
                   <div className="bg-white rounded-lg shadow-sm p-4 mt-5">
-                    <div className="flex items-center justify-between mb-3">
+                    <div className="flex items-center justify-between">
                       <span className="text-[11px] font-semibold text-gray uppercase tracking-wide">Onboarding Status</span>
                       <div className="flex gap-4">
                         <CheckCircle checked={applicantDetail?.credentials_uploaded || false} label="Cred." />
@@ -370,11 +417,76 @@ export function PipelinePage() {
                   </div>
 
                   {/* Upload Button */}
-                  <button className="w-full mt-5 py-3.5 bg-navy text-white text-xs font-semibold rounded-lg hover:bg-navy/90 transition-colors tracking-wide">
+                  <button 
+                    onClick={handleUploadClick}
+                    className="w-full mt-5 py-3.5 bg-navy text-white text-xs font-semibold rounded-lg hover:bg-navy/90 transition-colors tracking-wide"
+                  >
                     UPLOAD DOCUMENT
                   </button>
                 </>
               )}
+            </div>
+          </div>
+        </>
+      )}
+
+      {/* Upload Modal */}
+      {showUploadModal && selectedApplicant && (
+        <>
+          <div className="fixed inset-0 bg-black/40 z-[60]" onClick={() => setShowUploadModal(false)} />
+          <div className="fixed top-1/2 left-1/2 -translate-x-1/2 -translate-y-1/2 w-full max-w-md bg-white rounded-xl shadow-2xl z-[70] p-6">
+            <h3 className="text-lg font-semibold text-navy mb-4">Upload Document</h3>
+            <p className="text-sm text-gray mb-4">
+              Upload a document for {selectedApplicant.first_name} {selectedApplicant.last_name}
+            </p>
+            
+            {uploadError && (
+              <Alert variant="error" className="mb-4">{uploadError}</Alert>
+            )}
+
+            <div className="mb-4">
+              <label className="block text-sm font-medium text-slate mb-1">Document Type</label>
+              <select
+                value={uploadType}
+                onChange={(e) => setUploadType(e.target.value)}
+                className="w-full rounded-lg border border-border px-3 py-2 text-sm focus:border-maroon focus:outline-none focus:ring-2 focus:ring-maroon/20"
+              >
+                <option value="">Select type...</option>
+                <option value="credentials">Professional Credentials</option>
+                <option value="cpr">CPR Certification</option>
+                <option value="tb">TB Test Results</option>
+                <option value="id_front">Photo ID (Front)</option>
+                <option value="id_back">Photo ID (Back)</option>
+                <option value="ssn">Social Security Card</option>
+                <option value="work_auth">Work Authorization</option>
+                <option value="other">Other</option>
+              </select>
+            </div>
+
+            <input
+              ref={fileInputRef}
+              type="file"
+              accept=".pdf,.jpg,.jpeg,.png"
+              onChange={handleFileSelect}
+              className="hidden"
+            />
+
+            <div className="flex gap-3">
+              <Button 
+                variant="secondary" 
+                className="flex-1"
+                onClick={() => setShowUploadModal(false)}
+              >
+                Cancel
+              </Button>
+              <Button 
+                className="flex-1"
+                disabled={!uploadType || uploading}
+                loading={uploading}
+                onClick={() => fileInputRef.current?.click()}
+              >
+                Select File
+              </Button>
             </div>
           </div>
         </>
