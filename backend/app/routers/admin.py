@@ -52,7 +52,6 @@ async def get_staff_user(
 
 
 def generate_signed_url(supabase: Client, storage_path: str, expires_in: int = 3600) -> Optional[str]:
-    """Generate a signed URL for a file in Supabase Storage."""
     if not storage_path:
         return None
     try:
@@ -64,12 +63,10 @@ def generate_signed_url(supabase: Client, storage_path: str, expires_in: int = 3
 
 
 def generate_signed_urls_batch(supabase: Client, storage_paths: List[str], expires_in: int = 3600) -> Dict[str, str]:
-    """Generate signed URLs for multiple files at once."""
     result = {}
     valid_paths = [p for p in storage_paths if p]
     if not valid_paths:
         return result
-    
     try:
         batch_result = supabase.storage.from_("documents").create_signed_urls(valid_paths, expires_in)
         for item in (batch_result or []):
@@ -83,7 +80,6 @@ def generate_signed_urls_batch(supabase: Client, storage_paths: List[str], expir
             url = generate_signed_url(supabase, path, expires_in)
             if url:
                 result[path] = url
-    
     return result
 
 
@@ -92,7 +88,6 @@ async def get_dashboard_stats(
     supabase: Client = Depends(get_supabase),
     user: dict = Depends(get_staff_user)
 ):
-    """Get dashboard statistics for admin users."""
     try:
         now = datetime.utcnow()
         thirty_days_ago = (now - timedelta(days=30)).isoformat()
@@ -109,20 +104,16 @@ async def get_dashboard_stats(
         try:
             all_apps = supabase.table("applications").select("id, status, created_at, updated_at, user_id").execute()
             apps_data = all_apps.data or []
-            
             stats["total_applicants"] = len(apps_data)
             stats["pending_review"] = len([a for a in apps_data if a["status"] in ("submitted", "under_review")])
             stats["approved_this_month"] = len([a for a in apps_data if a["status"] == "approved" and a.get("updated_at", "") >= thirty_days_ago])
-            
             recent_apps = [a for a in apps_data if a.get("created_at", "") >= seven_days_ago]
             recent_apps.sort(key=lambda x: x.get("created_at", ""), reverse=True)
             recent_apps = recent_apps[:10]
-            
             if recent_apps:
                 user_ids = list(set(a["user_id"] for a in recent_apps))
                 profiles_res = supabase.table("profiles").select("id, first_name, last_name, email").in_("id", user_ids).execute()
                 profiles_map = {p["id"]: p for p in (profiles_res.data or [])}
-                
                 for app in recent_apps:
                     profile = profiles_map.get(app["user_id"], {})
                     stats["recent_applications"].append({
@@ -143,7 +134,6 @@ async def get_dashboard_stats(
             logger.warning(f"Failed to get expiring docs count: {e}")
         
         return stats
-        
     except Exception as e:
         logger.error(f"Dashboard error: {e}")
         raise HTTPException(status_code=500, detail=str(e))
@@ -154,29 +144,23 @@ async def get_pipeline(
     supabase: Client = Depends(get_supabase),
     user: dict = Depends(get_staff_user)
 ):
-    """Get applicant pipeline for admin users - optimized with batch queries."""
     try:
         apps_res = supabase.table("applications").select("*").order("created_at", desc=True).execute()
         apps_data = apps_res.data or []
-        
         if not apps_data:
             return {"applications": []}
-        
         user_ids = list(set(a["user_id"] for a in apps_data))
         profiles_res = supabase.table("profiles").select("id, first_name, last_name, email").in_("id", user_ids).execute()
         profiles_map = {p["id"]: p for p in (profiles_res.data or [])}
-        
         location_ids = list(set(a["location_id"] for a in apps_data if a.get("location_id")))
         locations_map = {}
         if location_ids:
             locations_res = supabase.table("locations").select("id, name").in_("id", location_ids).execute()
             locations_map = {loc["id"]: loc for loc in (locations_res.data or [])}
-        
         applications = []
         for app in apps_data:
             profile = profiles_map.get(app["user_id"], {})
             location = locations_map.get(app.get("location_id"), {})
-            
             applications.append({
                 "id": app["id"],
                 "user_id": app["user_id"],
@@ -189,9 +173,7 @@ async def get_pipeline(
                 "email": profile.get("email") or "",
                 "location_name": location.get("name") or ""
             })
-        
         return {"applications": applications}
-        
     except Exception as e:
         logger.error(f"Pipeline error: {e}")
         raise HTTPException(status_code=500, detail=str(e))
@@ -203,13 +185,11 @@ async def get_applicant_detail(
     supabase: Client = Depends(get_supabase),
     user: dict = Depends(get_staff_user)
 ):
-    """Get detailed applicant information - optimized with batch queries."""
     try:
         app_res = supabase.table("applications").select("*").eq("id", application_id).single().execute()
         if not app_res.data:
             raise HTTPException(status_code=404, detail="Application not found")
         app = app_res.data
-        
         user_id = app["user_id"]
         
         profile = {}
@@ -234,14 +214,21 @@ async def get_applicant_detail(
         except Exception as e:
             logger.warning(f"Failed to fetch steps: {e}")
         
-        # Get SSN last four (masked)
+        # Get SSN last four - check sensitive_data first, then fall back to step 2
         ssn_last_four = None
         try:
             ssn_res = supabase.table("sensitive_data").select("ssn_last_four").eq("user_id", user_id).single().execute()
             if ssn_res.data:
                 ssn_last_four = ssn_res.data.get("ssn_last_four")
         except Exception as e:
-            logger.warning(f"Failed to fetch SSN: {e}")
+            logger.warning(f"Failed to fetch SSN from sensitive_data: {e}")
+        
+        # Fall back to step 2 data if not in sensitive_data
+        if not ssn_last_four:
+            step2 = next((s for s in steps if s.get("step_number") == 2), None)
+            if step2:
+                step2_data = step2.get("data") or {}
+                ssn_last_four = step2_data.get("ssn_last_four")
         
         docs_data = []
         try:
@@ -264,14 +251,12 @@ async def get_applicant_detail(
         for agr in agreements_data:
             if agr.get("pdf_storage_path"):
                 all_storage_paths.append(agr["pdf_storage_path"])
-        
-        upload_steps = {11, 12, 13, 14, 15, 16, 17}
+        upload_steps_set = {11, 12, 13, 14, 15, 16, 17}
         for step in steps:
-            if step.get("step_number") in upload_steps:
+            if step.get("step_number") in upload_steps_set:
                 data = step.get("data") or {}
                 if data.get("storage_path"):
                     all_storage_paths.append(data["storage_path"])
-        
         signed_urls_map = generate_signed_urls_batch(supabase, all_storage_paths)
         
         documents = []
@@ -317,7 +302,6 @@ async def get_applicant_detail(
             if step_num in upload_step_names:
                 data = step.get("data") or {}
                 storage_path = data.get("storage_path") or ""
-                
                 if storage_path or data.get("file_name"):
                     uploaded_files.append({
                         "step_number": step_num,
@@ -358,7 +342,6 @@ async def get_applicant_detail(
             "uploaded_files": uploaded_files,
             "ssn_last_four": ssn_last_four,
         }
-        
     except HTTPException:
         raise
     except Exception as e:
@@ -372,7 +355,6 @@ async def get_applicant_detail_old(
     supabase: Client = Depends(get_supabase),
     user: dict = Depends(get_staff_user)
 ):
-    """Backward compatible endpoint."""
     return await get_applicant_detail(application_id, supabase, user)
 
 
@@ -384,27 +366,54 @@ async def get_applicant_ssn(
 ):
     """Get decrypted SSN for an applicant (admin only)."""
     try:
-        # Get application to find user_id
         app_res = supabase.table("applications").select("user_id").eq("id", application_id).single().execute()
         if not app_res.data:
             raise HTTPException(status_code=404, detail="Application not found")
-        
         user_id = app_res.data["user_id"]
         
-        # Get encrypted SSN
-        ssn_res = supabase.table("sensitive_data").select("encrypted_ssn, ssn_last_four").eq("user_id", user_id).single().execute()
+        # Try sensitive_data table first
+        encrypted_ssn = None
+        ssn_last_four = None
         
-        if not ssn_res.data or not ssn_res.data.get("encrypted_ssn"):
-            raise HTTPException(status_code=404, detail="SSN not found")
+        try:
+            ssn_res = supabase.table("sensitive_data").select("encrypted_ssn, ssn_last_four").eq("user_id", user_id).execute()
+            if ssn_res.data and len(ssn_res.data) > 0:
+                encrypted_ssn = ssn_res.data[0].get("encrypted_ssn")
+                ssn_last_four = ssn_res.data[0].get("ssn_last_four")
+        except Exception as e:
+            logger.warning(f"Error fetching from sensitive_data: {e}")
         
-        # Decrypt
-        decrypted_ssn = encryption_service.decrypt_ssn(ssn_res.data["encrypted_ssn"])
-        formatted_ssn = encryption_service.format_ssn(decrypted_ssn)
+        # If we have encrypted SSN, decrypt it
+        if encrypted_ssn:
+            try:
+                decrypted_ssn = encryption_service.decrypt_ssn(encrypted_ssn)
+                formatted_ssn = encryption_service.format_ssn(decrypted_ssn)
+                return {"ssn": formatted_ssn, "ssn_raw": decrypted_ssn}
+            except Exception as e:
+                logger.error(f"SSN decryption error: {e}")
+                raise HTTPException(status_code=500, detail="Failed to decrypt SSN")
         
-        return {
-            "ssn": formatted_ssn,
-            "ssn_raw": decrypted_ssn,  # 9 digits, no dashes - preserves leading zeros
-        }
+        # Fall back to step 2 data (unencrypted legacy data)
+        try:
+            steps_res = supabase.table("application_steps").select("data").eq("application_id", application_id).eq("step_number", 2).single().execute()
+            if steps_res.data:
+                step_data = steps_res.data.get("data") or {}
+                # Check for full SSN in step data
+                full_ssn = step_data.get("ssn") or step_data.get("social_security")
+                if full_ssn:
+                    clean_ssn = ''.join(filter(str.isdigit, str(full_ssn)))
+                    if len(clean_ssn) == 9:
+                        formatted = f"{clean_ssn[:3]}-{clean_ssn[3:5]}-{clean_ssn[5:]}"
+                        return {"ssn": formatted, "ssn_raw": clean_ssn}
+                # If only last four, we can't reveal full
+                if ssn_last_four:
+                    raise HTTPException(status_code=404, detail="Full SSN not available - only last 4 digits on file")
+        except HTTPException:
+            raise
+        except Exception as e:
+            logger.warning(f"Error fetching from step 2: {e}")
+        
+        raise HTTPException(status_code=404, detail="SSN not found")
         
     except HTTPException:
         raise
@@ -420,40 +429,33 @@ async def update_applicant_ssn(
     supabase: Client = Depends(get_supabase),
     user: dict = Depends(get_staff_user)
 ):
-    """Update SSN for an applicant (admin only). SSN should be 9 digits as a string."""
+    """Update SSN for an applicant (admin only). SSN stored as string to preserve leading zeros."""
     try:
         ssn = data.get("ssn", "")
-        
-        # Clean and validate - remove dashes/spaces, keep as string for leading zeros
-        clean_ssn = ''.join(filter(str.isdigit, ssn))
+        clean_ssn = ''.join(filter(str.isdigit, str(ssn)))
         
         if len(clean_ssn) != 9:
             raise HTTPException(status_code=400, detail="SSN must be exactly 9 digits")
         
-        # Get application to find user_id
         app_res = supabase.table("applications").select("user_id").eq("id", application_id).single().execute()
         if not app_res.data:
             raise HTTPException(status_code=404, detail="Application not found")
-        
         user_id = app_res.data["user_id"]
         
         # Encrypt the SSN
         encrypted_ssn, last_four = encryption_service.encrypt_ssn(clean_ssn)
+        now = datetime.utcnow().isoformat()
         
         # Check if record exists
         existing = supabase.table("sensitive_data").select("id").eq("user_id", user_id).execute()
         
-        now = datetime.utcnow().isoformat()
-        
-        if existing.data:
-            # Update existing
+        if existing.data and len(existing.data) > 0:
             supabase.table("sensitive_data").update({
                 "encrypted_ssn": encrypted_ssn,
                 "ssn_last_four": last_four,
                 "updated_at": now,
             }).eq("user_id", user_id).execute()
         else:
-            # Insert new
             supabase.table("sensitive_data").insert({
                 "user_id": user_id,
                 "encrypted_ssn": encrypted_ssn,
@@ -462,10 +464,23 @@ async def update_applicant_ssn(
                 "updated_at": now,
             }).execute()
         
-        return {
-            "success": True,
-            "ssn_last_four": last_four,
-        }
+        # Also update step 2 ssn_last_four for display purposes
+        try:
+            step_res = supabase.table("application_steps").select("id, data").eq("application_id", application_id).eq("step_number", 2).single().execute()
+            if step_res.data:
+                current_data = step_res.data.get("data") or {}
+                current_data["ssn_last_four"] = last_four
+                # Remove any unencrypted full SSN from step data
+                current_data.pop("ssn", None)
+                current_data.pop("social_security", None)
+                supabase.table("application_steps").update({
+                    "data": current_data,
+                    "updated_at": now
+                }).eq("id", step_res.data["id"]).execute()
+        except Exception as e:
+            logger.warning(f"Failed to update step 2: {e}")
+        
+        return {"success": True, "ssn_last_four": last_four}
         
     except HTTPException:
         raise
@@ -481,24 +496,20 @@ async def update_applicant_profile(
     supabase: Client = Depends(get_supabase),
     user: dict = Depends(get_staff_user)
 ):
-    """Update applicant's profile information."""
     try:
         app_res = supabase.table("applications").select("user_id").eq("id", application_id).single().execute()
         if not app_res.data:
             raise HTTPException(status_code=404, detail="Application not found")
-        
         user_id = app_res.data["user_id"]
         
         allowed_fields = {"first_name", "last_name", "email", "phone"}
         profile_updates = {k: v for k, v in updates.items() if k in allowed_fields and v is not None}
-        
         if profile_updates:
             profile_updates["updated_at"] = datetime.utcnow().isoformat()
             supabase.table("profiles").update(profile_updates).eq("id", user_id).execute()
         
-        address_fields = {"address_line1", "address_line2", "city", "state", "zip", "date_of_birth", "gender", "ssn_last_four"}
+        address_fields = {"address_line1", "address_line2", "city", "state", "zip", "date_of_birth", "gender"}
         step2_updates = {k: v for k, v in updates.items() if k in address_fields and v is not None}
-        
         if step2_updates:
             step_res = supabase.table("application_steps").select("id, data").eq("application_id", application_id).eq("step_number", 2).single().execute()
             if step_res.data:
@@ -514,7 +525,6 @@ async def update_applicant_profile(
             if k.startswith("emergency_") and v is not None:
                 field_name = k.replace("emergency_", "")
                 step3_updates[field_name] = v
-        
         if step3_updates:
             step_res = supabase.table("application_steps").select("id, data").eq("application_id", application_id).eq("step_number", 3).single().execute()
             if step_res.data:
@@ -526,7 +536,6 @@ async def update_applicant_profile(
                 }).eq("id", step_res.data["id"]).execute()
         
         return {"success": True, "updated_fields": list(profile_updates.keys()) + list(step2_updates.keys()) + [f"emergency_{k}" for k in step3_updates.keys()]}
-        
     except HTTPException:
         raise
     except Exception as e:
@@ -541,30 +550,18 @@ async def get_document_url(
     supabase: Client = Depends(get_supabase),
     user: dict = Depends(get_staff_user)
 ):
-    """Get a signed URL for a specific uploaded document."""
     try:
         step_res = supabase.table("application_steps").select("data").eq("application_id", application_id).eq("step_number", step_number).single().execute()
-        
         if not step_res.data:
             raise HTTPException(status_code=404, detail="Step not found")
-        
         data = step_res.data.get("data") or {}
         storage_path = data.get("storage_path")
-        
         if not storage_path:
             raise HTTPException(status_code=404, detail="No file uploaded for this step")
-        
         signed_url = generate_signed_url(supabase, storage_path, expires_in=3600)
-        
         if not signed_url:
             raise HTTPException(status_code=500, detail="Failed to generate signed URL")
-        
-        return {
-            "signed_url": signed_url,
-            "file_name": data.get("file_name") or data.get("original_filename"),
-            "expires_in": 3600
-        }
-        
+        return {"signed_url": signed_url, "file_name": data.get("file_name") or data.get("original_filename"), "expires_in": 3600}
     except HTTPException:
         raise
     except Exception as e:
@@ -579,30 +576,17 @@ async def get_agreement_pdf_url(
     supabase: Client = Depends(get_supabase),
     user: dict = Depends(get_staff_user)
 ):
-    """Get a signed URL for an agreement PDF."""
     try:
         agr_res = supabase.table("agreements").select("*").eq("id", agreement_id).eq("application_id", application_id).single().execute()
-        
         if not agr_res.data:
             raise HTTPException(status_code=404, detail="Agreement not found")
-        
         pdf_path = agr_res.data.get("pdf_storage_path")
-        
         if not pdf_path:
             raise HTTPException(status_code=404, detail="PDF not yet generated for this agreement")
-        
         signed_url = generate_signed_url(supabase, pdf_path, expires_in=3600)
-        
         if not signed_url:
             raise HTTPException(status_code=500, detail="Failed to generate signed URL")
-        
-        return {
-            "signed_url": signed_url,
-            "agreement_type": agr_res.data.get("agreement_type"),
-            "signed_at": agr_res.data.get("signed_at"),
-            "expires_in": 3600
-        }
-        
+        return {"signed_url": signed_url, "agreement_type": agr_res.data.get("agreement_type"), "signed_at": agr_res.data.get("signed_at"), "expires_in": 3600}
     except HTTPException:
         raise
     except Exception as e:
@@ -617,30 +601,19 @@ async def update_application_status(
     supabase: Client = Depends(get_supabase),
     user: dict = Depends(get_staff_user)
 ):
-    """Update application status."""
     try:
         new_status = status_update.get("status")
         valid_statuses = ["draft", "in_progress", "submitted", "under_review", "approved", "rejected", "hired"]
-        
         if new_status not in valid_statuses:
             raise HTTPException(status_code=400, detail=f"Invalid status. Must be one of: {valid_statuses}")
-        
-        update_data = {
-            "status": new_status,
-            "updated_at": datetime.utcnow().isoformat()
-        }
-        
+        update_data = {"status": new_status, "updated_at": datetime.utcnow().isoformat()}
         if new_status in ("approved", "rejected"):
             update_data["reviewed_by"] = user["user_id"]
             update_data["reviewed_at"] = datetime.utcnow().isoformat()
-        
         res = supabase.table("applications").update(update_data).eq("id", application_id).execute()
-        
         if not res.data:
             raise HTTPException(status_code=404, detail="Application not found")
-        
         return {"success": True, "status": new_status}
-        
     except HTTPException:
         raise
     except Exception as e:
