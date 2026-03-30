@@ -7,124 +7,132 @@ MediVault: Multi-tenant home care agency management platform for applicant intak
 - **Database**: Supabase (PostgreSQL + Auth + Storage)
 - **Repo**: github.com/mrmicaiah/medi-vault
 
+---
+
+## 🚨 CRITICAL: RUN THESE IN SUPABASE SQL EDITOR
+
+Your profile role constraint is broken. Run each of these ONE AT A TIME:
+
+### Step 1: Drop old role constraint
+```sql
+DO $$
+DECLARE
+    constraint_name TEXT;
+BEGIN
+    FOR constraint_name IN
+        SELECT conname FROM pg_constraint 
+        WHERE conrelid = 'profiles'::regclass 
+        AND conname LIKE '%role%'
+    LOOP
+        EXECUTE format('ALTER TABLE profiles DROP CONSTRAINT IF EXISTS %I', constraint_name);
+    END LOOP;
+END $$;
+```
+
+### Step 2: Add new constraint with all roles
+```sql
+ALTER TABLE profiles ADD CONSTRAINT profiles_role_check 
+    CHECK (role IN ('applicant', 'employee', 'manager', 'admin', 'superadmin'));
+```
+
+### Step 3: Create is_staff function
+```sql
+CREATE OR REPLACE FUNCTION public.is_staff()
+RETURNS BOOLEAN AS $$
+DECLARE
+    user_role TEXT;
+BEGIN
+    SELECT role INTO user_role
+    FROM public.profiles
+    WHERE id = auth.uid();
+    
+    RETURN user_role IN ('manager', 'admin', 'superadmin');
+END;
+$$ LANGUAGE plpgsql SECURITY DEFINER STABLE;
+
+GRANT EXECUTE ON FUNCTION public.is_staff() TO authenticated;
+```
+
+### Step 4: Ensure is_admin includes superadmin
+```sql
+CREATE OR REPLACE FUNCTION public.is_admin()
+RETURNS BOOLEAN AS $$
+DECLARE
+    user_role TEXT;
+BEGIN
+    SELECT role INTO user_role
+    FROM public.profiles
+    WHERE id = auth.uid();
+    
+    RETURN user_role IN ('admin', 'superadmin');
+END;
+$$ LANGUAGE plpgsql SECURITY DEFINER STABLE;
+```
+
+### Step 5: Update your profile to superadmin (replace YOUR_USER_ID)
+```sql
+UPDATE profiles 
+SET role = 'superadmin' 
+WHERE email = 'mrmicaiah@gmail.com';
+```
+
+### Step 6: Verify
+```sql
+SELECT id, email, role FROM profiles WHERE email = 'mrmicaiah@gmail.com';
+```
+
+---
+
 ## Current Session Work (March 30, 2026)
 
-### Bug Fix: Column Name Mismatch
-**Issue:** `compliance_service.py` was querying non-existent columns:
-- `expires_at` → should be `expiration_date`
-- `file_name` → should be `original_filename`
+### Bug Fixes Applied
 
-**Fixed:** Updated all references in `backend/app/services/compliance_service.py` to use correct column names matching the schema in `001_initial_schema.sql`.
+1. **compliance_service.py** - Fixed column name mismatches:
+   - `expires_at` → `expiration_date`
+   - `file_name` → `original_filename`
 
-### Previous Session (March 29-30, 2026)
+2. **011_fix_roles.sql** - Created migration to fix role constraint:
+   - Original constraint only allowed `('applicant', 'employee', 'admin')`
+   - New constraint allows `('applicant', 'employee', 'manager', 'admin', 'superadmin')`
+   - Added `is_staff()` function for checking any staff role
+   - Updated `is_admin()` to include superadmin
 
-#### Multi-Tenant Architecture Implemented
-Created full multi-agency support:
+### Root Cause of "Always shows applicant dashboard"
+The database `profiles` table has a CHECK constraint that only allows:
+- `applicant`
+- `employee`
+- `admin`
 
-**Database Tables Created:**
-- `agencies` - Stores agency info (name, slug, branding, contact)
-- `locations` - Locations per agency (linked via agency_id)
-- `invitations` - Staff invitation system
-
-**Columns Added:**
-- `profiles.agency_id` - Links staff to their agency
-- `applications.agency_id` - Links applications to agency
-- `applications.location_id` - Links applications to specific location
-
-**Seed Data:**
-- Eveready HomeCare (id: a0000000-0000-0000-0000-000000000001)
-- 4 locations: Dumfries, Arlington, Sterling, Hampton
-
-#### Frontend Changes
-1. **ApplyPage** (`/apply/:agencySlug`) - Public application page with agency branding
-2. **InvitePage** (`/invite/:token`) - Staff invitation acceptance
-3. **Header** - Added Admin/Applicant view toggle for staff
-4. **Types** - Updated UserRole to include: applicant, employee, manager, admin, superadmin
-5. **Router** - Updated to support agency slug routes
-
-#### Backend Changes
-1. **agencies.py** router - Public endpoints for fetching agency/locations
-2. **invitations.py** router - Staff invitation CRUD
-3. **admin.py** - Filters by agency_id
-4. **application_service.py** - Stores agency_id and location_id
-5. **encryption_service.py** - Fixed singleton export
-6. **requirements.txt** - Added email-validator
-
-#### Database Migrations Run
-All migrations applied manually step-by-step:
-- agencies table ✅
-- locations table ✅
-- Eveready seed data ✅
-- profiles.agency_id column ✅
-- applications.agency_id and location_id columns ✅
-- invitations table ✅
-- RLS policies ✅
-- Updated profiles_role_check constraint to include manager/superadmin ✅
-- Disabled RLS on agencies/locations (for public access) ✅
+It does NOT allow `superadmin` or `manager`. When you try to set `role = 'superadmin'`, it silently fails or reverts, so your role defaults to `applicant`.
 
 ---
 
-## CURRENT STATUS
+## Previous Session (March 29-30, 2026)
 
-### ✅ Fixed Issues
-1. **Column name mismatch** - compliance_service.py now uses correct column names
-2. **CORS** - Already hardcoded to specific origins in main.py (not "*")
-
-### Database Schema - Documents Table
-The `documents` table uses these column names (per `001_initial_schema.sql`):
-- `expiration_date` (DATE) - NOT `expires_at`
-- `original_filename` (TEXT) - NOT `file_name`
-- `is_current` (BOOLEAN DEFAULT true) - Already exists
-
-### Current Superadmin
-- Email: mrmicaiah@gmail.com
-- Role: superadmin
-- Agency: Eveready HomeCare
-
----
-
-## Environment Variables (Render)
-
-**CORS_ORIGINS:**
-```
-https://medi-vault.pages.dev,https://medisvault.com,https://www.medisvault.com
-```
-
-**Other required:**
-- SUPABASE_URL
-- SUPABASE_KEY (service role)
-- SUPABASE_ANON_KEY
-- ENCRYPTION_KEY (for SSN encryption)
+### Multi-Tenant Architecture Implemented
+- `agencies` table with Eveready seed data
+- `locations` table with 4 Eveready locations
+- `invitations` table for staff invites
+- Added `agency_id` to profiles and applications
+- Public apply pages at `/apply/:agencySlug`
 
 ---
 
 ## Key File Paths
 
 **Backend:**
-- `backend/app/main.py` - FastAPI app entry, CORS config
+- `backend/app/main.py` - FastAPI app, CORS config
 - `backend/app/routers/admin.py` - Dashboard/pipeline endpoints
-- `backend/app/routers/agencies.py` - Agency/location endpoints
-- `backend/app/routers/invitations.py` - Staff invitation system
-- `backend/app/routers/compliance.py` - Compliance endpoints
-- `backend/app/services/application_service.py` - Application CRUD
 - `backend/app/services/compliance_service.py` - Compliance queries (FIXED)
-- `backend/app/services/encryption_service.py` - SSN encryption
 
 **Frontend:**
-- `frontend/src/pages/public/ApplyPage.tsx` - Public application flow
-- `frontend/src/pages/auth/InvitePage.tsx` - Staff invitation acceptance
-- `frontend/src/pages/admin/DashboardPage.tsx` - Admin dashboard
-- `frontend/src/pages/admin/CompliancePage.tsx` - Compliance tracker (uses mock data)
-- `frontend/src/pages/admin/UsersPage.tsx` - User management with invitations tab
-- `frontend/src/components/layout/Header.tsx` - Admin/Applicant toggle
-- `frontend/src/router/index.tsx` - Route definitions
-- `frontend/src/types/index.ts` - TypeScript types
+- `frontend/src/router/index.tsx` - Route definitions (checks STAFF_ROLES)
+- `frontend/src/contexts/AuthContext.tsx` - Fetches profile, sets role
+- `frontend/src/pages/admin/PipelinePage.tsx` - Applicants table with slide-out panel
 
 **Migrations:**
-- `supabase/migrations/001_initial_schema.sql` - Core schema (documents table defined here)
-- `supabase/migrations/010a_agencies_locations.sql`
-- `supabase/migrations/010b_add_agency_columns.sql`
-- `supabase/migrations/010c_invitations_rls.sql`
+- `supabase/migrations/001_initial_schema.sql` - Original schema (buggy role constraint)
+- `supabase/migrations/011_fix_roles.sql` - Fix for role constraint (RUN THIS!)
 
 ---
 
@@ -133,16 +141,14 @@ https://medi-vault.pages.dev,https://medisvault.com,https://www.medisvault.com
 - **Production Frontend:** https://medisvault.com
 - **Production API:** https://medi-vault-api.onrender.com
 - **Apply Page:** https://medisvault.com/apply/eveready-homecare
-- **API Health:** https://medi-vault-api.onrender.com/api/health
 - **API Docs:** https://medi-vault-api.onrender.com/api/docs
 
 ---
 
-## Next Steps
+## Next Steps After Running Migrations
 
-1. Test compliance endpoints after deploy
-2. Connect CompliancePage frontend to actual API (currently using mock data)
-3. Test full applicant flow with new email
-4. Test staff invitation flow
-5. Add location reassignment feature for admins
-6. Consider faster deployment option (Railway/Fly.io)
+1. ✅ Run the SQL migrations above in Supabase
+2. Log out and log back in to medisvault.com
+3. You should now land on `/admin` dashboard
+4. Navigate to `/admin/applicants` to see the pipeline with slide-out panel
+5. Test compliance endpoints
