@@ -61,42 +61,22 @@ async def get_dashboard_stats(
         
         # Recent applications (last 7 days)
         try:
-            recent_res = supabase.table("applications").select(
-                "id, status, created_at, user_id, profiles(first_name, last_name, email)"
-            ).gte("created_at", seven_days_ago).order("created_at", desc=True).limit(10).execute()
+            recent_res = supabase.table("applications").select("*").gte("created_at", seven_days_ago).order("created_at", desc=True).limit(10).execute()
             
-            stats["recent_applications"] = [
-                {
+            for app in (recent_res.data or []):
+                # Get profile separately
+                profile_res = supabase.table("profiles").select("first_name, last_name, email").eq("id", app["user_id"]).single().execute()
+                profile = profile_res.data or {}
+                
+                stats["recent_applications"].append({
                     "id": app["id"],
                     "status": app["status"],
                     "created_at": app["created_at"],
-                    "applicant_name": f"{app['profiles']['first_name'] or ''} {app['profiles']['last_name'] or ''}".strip() if app.get("profiles") else "Unknown",
-                    "email": app["profiles"]["email"] if app.get("profiles") else None
-                }
-                for app in (recent_res.data or [])
-            ]
+                    "applicant_name": f"{profile.get('first_name') or ''} {profile.get('last_name') or ''}".strip() or "Unknown",
+                    "email": profile.get("email")
+                })
         except Exception as e:
             logger.warning(f"Failed to get recent applications: {e}")
-        
-        # Expiring documents details
-        try:
-            thirty_days_future = (now + timedelta(days=30)).isoformat()
-            exp_docs_res = supabase.table("documents").select(
-                "id, document_type, expiration_date, original_filename, user_id, profiles(first_name, last_name)"
-            ).lt("expiration_date", thirty_days_future).gt("expiration_date", now.isoformat()).order("expiration_date").limit(10).execute()
-            
-            stats["expiring_docs"] = [
-                {
-                    "id": doc["id"],
-                    "type": doc["document_type"],
-                    "expires": doc["expiration_date"],
-                    "file_name": doc["original_filename"],
-                    "employee_name": f"{doc['profiles']['first_name'] or ''} {doc['profiles']['last_name'] or ''}".strip() if doc.get("profiles") else "Unknown"
-                }
-                for doc in (exp_docs_res.data or [])
-            ]
-        except Exception as e:
-            logger.warning(f"Failed to get expiring docs details: {e}")
         
         return stats
         
@@ -112,17 +92,32 @@ async def get_pipeline(
 ):
     """Get applicant pipeline for admin users."""
     try:
-        # Get all applications with profile info
-        res = supabase.table("applications").select(
-            "id, status, created_at, submitted_at, updated_at, user_id, location_id, "
-            "profiles(first_name, last_name, email), "
-            "locations(name)"
-        ).order("created_at", desc=True).execute()
+        logger.info("Fetching pipeline applications...")
+        
+        # Get all applications first
+        res = supabase.table("applications").select("*").order("created_at", desc=True).execute()
+        
+        logger.info(f"Found {len(res.data or [])} applications")
         
         applications = []
         for app in (res.data or []):
-            profile = app.get("profiles") or {}
-            location = app.get("locations") or {}
+            # Get profile separately to avoid join issues
+            profile = {}
+            location = {}
+            
+            try:
+                profile_res = supabase.table("profiles").select("first_name, last_name, email").eq("id", app["user_id"]).single().execute()
+                profile = profile_res.data or {}
+            except Exception as e:
+                logger.warning(f"Failed to get profile for {app['user_id']}: {e}")
+            
+            if app.get("location_id"):
+                try:
+                    location_res = supabase.table("locations").select("name").eq("id", app["location_id"]).single().execute()
+                    location = location_res.data or {}
+                except Exception as e:
+                    logger.warning(f"Failed to get location for {app['location_id']}: {e}")
+            
             applications.append({
                 "id": app["id"],
                 "user_id": app["user_id"],
@@ -133,9 +128,10 @@ async def get_pipeline(
                 "first_name": profile.get("first_name") or "",
                 "last_name": profile.get("last_name") or "",
                 "email": profile.get("email") or "",
-                "location_name": location.get("name") or "Unknown"
+                "location_name": location.get("name") or ""
             })
         
+        logger.info(f"Returning {len(applications)} applications")
         return {"applications": applications}
         
     except Exception as e:
@@ -151,15 +147,30 @@ async def get_applicant_detail(
 ):
     """Get detailed applicant information."""
     try:
-        # Get application with profile
-        app_res = supabase.table("applications").select(
-            "*, profiles(first_name, last_name, email), locations(name)"
-        ).eq("id", application_id).single().execute()
+        # Get application
+        app_res = supabase.table("applications").select("*").eq("id", application_id).single().execute()
         
         if not app_res.data:
             raise HTTPException(status_code=404, detail="Application not found")
         
         app = app_res.data
+        
+        # Get profile separately
+        profile = {}
+        try:
+            profile_res = supabase.table("profiles").select("*").eq("id", app["user_id"]).single().execute()
+            profile = profile_res.data or {}
+        except:
+            pass
+        
+        # Get location separately
+        location_name = None
+        if app.get("location_id"):
+            try:
+                location_res = supabase.table("locations").select("name").eq("id", app["location_id"]).single().execute()
+                location_name = location_res.data.get("name") if location_res.data else None
+            except:
+                pass
         
         # Get all application steps
         steps_res = supabase.table("application_steps").select(
@@ -177,9 +188,9 @@ async def get_applicant_detail(
                 "status": app["status"],
                 "created_at": app["created_at"],
                 "submitted_at": app.get("submitted_at"),
-                "location_name": app.get("locations", {}).get("name") if app.get("locations") else None
+                "location_name": location_name
             },
-            "profile": app.get("profiles") or {},
+            "profile": profile,
             "steps": steps_res.data or [],
             "documents": docs_res.data or []
         }
@@ -253,15 +264,12 @@ async def get_training_leads(
             app_id = step["application_id"]
             step_data_map[app_id] = data
             
-            # Check HHA interest
             if data.get("interested_in_hha_certification") in ["yes", "maybe"]:
                 hha_app_ids.append(app_id)
             
-            # Check CPR interest
             if data.get("interested_in_cpr_certification") in ["yes", "maybe"]:
                 cpr_app_ids.append(app_id)
         
-        # Get application and profile info for these leads
         all_app_ids = list(set(hha_app_ids + cpr_app_ids))
         
         if not all_app_ids:
@@ -272,13 +280,10 @@ async def get_training_leads(
                 "total_cpr": 0
             }
         
-        apps_res = supabase.table("applications").select(
-            "id, user_id, status, submitted_at, updated_at, location_id, "
-            "profiles(first_name, last_name, email), "
-            "locations(name)"
-        ).in_("id", all_app_ids).execute()
+        # Get applications
+        apps_res = supabase.table("applications").select("*").in_("id", all_app_ids).execute()
         
-        # Also get step 2 (Personal Info) for phone numbers
+        # Get phone numbers from step 2
         personal_steps_res = supabase.table("application_steps").select(
             "application_id, data"
         ).eq("step_number", 2).in_("application_id", all_app_ids).execute()
@@ -288,10 +293,24 @@ async def get_training_leads(
             data = step.get("data") or {}
             phone_map[step["application_id"]] = data.get("phone")
         
-        # Build lead objects
         def build_lead(app):
-            profile = app.get("profiles") or {}
-            location = app.get("locations") or {}
+            # Get profile separately
+            profile = {}
+            location_name = None
+            
+            try:
+                profile_res = supabase.table("profiles").select("first_name, last_name, email").eq("id", app["user_id"]).single().execute()
+                profile = profile_res.data or {}
+            except:
+                pass
+            
+            if app.get("location_id"):
+                try:
+                    location_res = supabase.table("locations").select("name").eq("id", app["location_id"]).single().execute()
+                    location_name = location_res.data.get("name") if location_res.data else None
+                except:
+                    pass
+            
             edu_data = step_data_map.get(app["id"]) or {}
             
             return {
@@ -301,7 +320,7 @@ async def get_training_leads(
                 "last_name": profile.get("last_name") or "",
                 "email": profile.get("email") or "",
                 "phone": phone_map.get(app["id"]),
-                "location_name": location.get("name"),
+                "location_name": location_name,
                 "interested_in_hha": edu_data.get("interested_in_hha_certification"),
                 "interested_in_cpr": edu_data.get("interested_in_cpr_certification"),
                 "has_cpr": edu_data.get("has_cpr_certification"),
