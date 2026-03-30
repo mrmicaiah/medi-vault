@@ -2,30 +2,63 @@
 
 **Last Updated:** March 30, 2026
 **Repository:** `mrmicaiah/medi-vault`
-**Status:** Active Development - Applicants Page Issue
+**Status:** Settings Page Added - Ready for Deploy
 
 ---
 
-## Current Issue (NEEDS FIX)
+## Latest Changes (This Session)
 
-**Problem:** Applicants page shows applicants in the table, but clicking on them shows "Applicant not found" in the sliding panel.
+**Added Settings Page for Superadmins:**
+- Settings gear icon in header dropdown (only visible to superadmin role)
+- `/admin/settings` route with two tabs:
+  - **Company Tab:** Edit name, tagline, phone, email, website, brand colors, upload logo
+  - **Locations Tab:** Full CRUD for locations, toggle is_hiring status
 
-**Root Cause:** The frontend is calling `/admin/applicants/{id}` but getting a 404. Need to verify:
-1. The backend endpoint `/admin/applicants/{application_id}` is deployed on Render
-2. The application ID being passed matches what's in the database
+**Backend Endpoints Added:**
+- `PUT /api/agencies/me` - Update agency info (superadmin only)
+- `POST /api/agencies/me/logo` - Upload agency logo (superadmin only)
+- `POST /api/agencies/me/locations` - Create location (superadmin only)
+- `PUT /api/agencies/me/locations/{id}` - Update location (superadmin only)
+- `DELETE /api/agencies/me/locations/{id}` - Soft delete location (superadmin only)
 
-**Debug Steps:**
-1. Check browser Network tab when clicking an applicant - see what URL is being called and what response comes back
-2. Check Render logs for any errors
-3. Verify the application IDs in the database match what's being sent
+**Database Migrations Run:**
+- Added `location_id` column to `profiles` table
+- Created `agency-assets` storage bucket (public, for logos)
+- Added storage policies for agency assets
 
-**Files Changed This Session:**
-- `frontend/src/pages/admin/PipelinePage.tsx` - Redesigned with table view + sliding panel, calls `/admin/applicants/{id}`
-- `backend/app/routers/admin.py` - Added `/admin/applicants/{id}` endpoint (plural), kept `/admin/applicant/{id}` for backward compat
-- `frontend/src/components/layout/Sidebar.tsx` - Renamed Pipeline to Applicants, dark navy theme
-- `frontend/src/router/index.tsx` - Changed routes from /admin/pipeline to /admin/applicants
-- `frontend/src/components/layout/Header.tsx` - Added fallback to email if profile name missing
-- `frontend/src/pages/admin/DashboardPage.tsx` - Simplified dashboard layout
+**Files Changed:**
+- `backend/app/dependencies.py` - Added `require_superadmin` dependency
+- `backend/app/routers/agencies.py` - Added superadmin CRUD endpoints
+- `frontend/src/components/layout/Header.tsx` - Added Settings button for superadmin
+- `frontend/src/lib/api.ts` - Added `postFormData` method
+- `frontend/src/pages/admin/SettingsPage.tsx` - New settings page
+- `frontend/src/router/index.tsx` - Added `/admin/settings` route
+
+---
+
+## Role Hierarchy (Clarified)
+
+**Agency Level:**
+- **Superadmin** → Can edit agency settings (logo, name, colors) + manage all locations
+
+**Location Level:**
+- **Admin** → Manages their specific location
+- **Manager** → Works within their location
+
+Profiles now have both `agency_id` and `location_id` columns for this hierarchy.
+
+---
+
+## To Deploy
+
+1. **Push to GitHub:** Done!
+
+2. **Deploy Backend on Render:**
+   - Go to https://dashboard.render.com
+   - Find `medi-vault-api` service
+   - Click "Manual Deploy" → "Deploy latest commit"
+
+3. **Frontend auto-deploys** via Cloudflare Pages on push
 
 ---
 
@@ -39,81 +72,10 @@
 | Backend | Python 3.11 + FastAPI | Render | https://medi-vault-api.onrender.com |
 | Database | PostgreSQL | Supabase | (Supabase Dashboard) |
 | Auth | Supabase Auth | Supabase | Integrated |
-| File Storage | Supabase Storage | Supabase | `documents` bucket |
+| File Storage | Supabase Storage | Supabase | `documents`, `agreements`, `agency-assets` buckets |
 
 ### Key URLs
 - **Frontend:** https://medisvault.com
 - **Backend API:** https://medi-vault-api.onrender.com/api
 - **Apply Page:** https://medisvault.com/apply/eveready
-
----
-
-## Database State
-
-**Applications table has 2 records:**
-```
-| id                                   | status      | email                |
-| 49412d3c-df37-47f8-a0ff-398cb1e475a3 | in_progress | mrmicaiah@gmail.com  |
-| 000b22ec-5c7f-4a29-a3d9-8ba6bc299723 | submitted   | mrmicaiah@icloud.com |
-```
-
-**Profiles:**
-- mrmicaiah@gmail.com - Micaiah Bussey - superadmin
-- mrmicaiah@icloud.com - Test Applicant - applicant
-
----
-
-## RLS Fix Applied
-
-Migration 009 was run to fix RLS recursion. The `is_admin()` function now exists and checks for both 'admin' and 'superadmin' roles.
-
----
-
-## Render Auto-Deploy
-
-Render is NOT set up for auto-deploy. Must manually deploy:
-1. Go to https://dashboard.render.com
-2. Find `medi-vault-api` service
-3. Click "Manual Deploy" → "Deploy latest commit"
-
----
-
-## Application Wizard (22 Steps)
-
-Steps 1-10: Form data (basics, personal info, emergency contact, education, references, work history, preferences, agreements)
-Steps 11-17: Document uploads (work auth, ID front/back, SSN card, credentials, CPR, TB test)
-Steps 18-22: Final agreements and signature
-
----
-
-## Key Backend Endpoints
-
-- `GET /api/admin/pipeline` - Get all applicants (working)
-- `GET /api/admin/applicants/{id}` - Get applicant detail (NOT WORKING - 404)
-- `GET /api/admin/applicant/{id}` - Old endpoint (kept for backward compat)
-- `GET /api/admin/dashboard` - Dashboard stats
-- `GET /api/admin/training-leads` - Certification interest leads
-
----
-
-## Frontend Routes
-
-- `/admin` - Dashboard
-- `/admin/applicants` - Applicants table with sliding panel (was /admin/pipeline)
-- `/admin/applicant/{id}` - Full applicant detail page
-- `/admin/employees` - Employees list
-- `/admin/documents` - Document compliance (was /admin/compliance)
-- `/admin/training-leads` - HHA/CPR certification leads
-
----
-
-## Next Steps
-
-1. **FIX:** Debug why `/admin/applicants/{id}` returns 404
-   - Check if Render deployed the latest backend code
-   - Check if the endpoint is registered correctly
-   - Verify the application ID format
-
-2. **THEN:** Test the full applicant detail sliding panel
-
-3. **THEN:** Continue with remaining features (document upload, onboarding flow)
+- **Settings Page:** https://medisvault.com/admin/settings (superadmin only)
