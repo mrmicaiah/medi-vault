@@ -1,21 +1,22 @@
 import React, { useState, useEffect } from 'react';
-import { useParams, Link, useNavigate } from 'react-router-dom';
-import { Card } from '../../components/ui/Card';
-import { Badge } from '../../components/ui/Badge';
+import { useParams, Link } from 'react-router-dom';
 import { Button } from '../../components/ui/Button';
-import { Modal } from '../../components/ui/Modal';
+import { Badge } from '../../components/ui/Badge';
 import { Alert } from '../../components/ui/Alert';
-import { STEP_NAMES, TOTAL_STEPS } from '../../types';
-import { formatDate } from '../../lib/utils';
 import { api } from '../../lib/api';
-import { useAuth } from '../../hooks/useAuth';
+import { formatDate } from '../../lib/utils';
 
+// Types
 interface ApplicationData {
   application: {
     id: string;
+    user_id: string;
     status: string;
+    current_step: number;
+    total_steps: number;
     created_at: string;
     submitted_at: string | null;
+    location_id: string | null;
     location_name: string | null;
   };
   profile: {
@@ -28,6 +29,7 @@ interface ApplicationData {
   steps: Array<{
     step_number: number;
     step_name: string;
+    step_type: string;
     status: string;
     data: Record<string, unknown> | null;
     completed_at: string | null;
@@ -35,14 +37,41 @@ interface ApplicationData {
   documents: Array<{
     id: string;
     document_type: string;
+    category: string;
     original_filename: string;
-    created_at: string;
+    signed_url: string | null;
     expiration_date: string | null;
-    storage_path: string;
+    created_at: string;
+  }>;
+  agreements: Array<{
+    id: string;
+    agreement_type: string;
+    signed_name: string;
+    signed_at: string;
+    pdf_url: string | null;
+  }>;
+  uploaded_files: Array<{
+    step_number: number;
+    document_name: string;
+    file_name: string | null;
+    signed_url: string | null;
+    uploaded_at: string | null;
+    skipped: boolean;
   }>;
 }
 
-const DOCUMENT_STEP_NAMES: Record<number, string> = {
+// Step name mapping
+const STEP_NAMES: Record<number, string> = {
+  1: 'Position & Eligibility',
+  2: 'Personal Information',
+  3: 'Emergency Contact',
+  4: 'Education & Certifications',
+  5: 'Reference 1',
+  6: 'Reference 2',
+  7: 'Employment History',
+  8: 'Work Preferences',
+  9: 'Confidentiality Agreement',
+  10: 'E-Signature Consent',
   11: 'Work Authorization',
   12: 'Photo ID (Front)',
   13: 'Photo ID (Back)',
@@ -50,98 +79,112 @@ const DOCUMENT_STEP_NAMES: Record<number, string> = {
   15: 'Professional Credentials',
   16: 'CPR Certification',
   17: 'TB Test Results',
+  18: 'Orientation Agreement',
+  19: 'Criminal Background Attestation',
+  20: 'VA Code Disclosure',
+  21: 'Job Description',
+  22: 'Final Submission',
+};
+
+const AGREEMENT_NAMES: Record<string, string> = {
+  confidentiality: 'Confidentiality Agreement',
+  esignature_consent: 'E-Signature Consent',
+  orientation: 'Orientation Agreement',
+  criminal_attestation: 'Criminal Background Attestation',
+  va_code_disclosure: 'VA Code Disclosure',
+  job_description: 'Job Description Acknowledgment',
+  master_onboarding: 'Master Onboarding Agreement',
+};
+
+// Status badge styles
+const statusStyles: Record<string, { bg: string; text: string }> = {
+  in_progress: { bg: 'bg-blue-50', text: 'text-blue-700' },
+  submitted: { bg: 'bg-amber-50', text: 'text-amber-700' },
+  under_review: { bg: 'bg-purple-50', text: 'text-purple-700' },
+  approved: { bg: 'bg-emerald-50', text: 'text-emerald-700' },
+  rejected: { bg: 'bg-red-50', text: 'text-red-700' },
+  hired: { bg: 'bg-teal-50', text: 'text-teal-700' },
 };
 
 export function ApplicantDetailPage() {
   const { id } = useParams();
-  const navigate = useNavigate();
-  const { role } = useAuth();
-  
   const [data, setData] = useState<ApplicationData | null>(null);
   const [loading, setLoading] = useState(true);
   const [error, setError] = useState<string | null>(null);
-  const [actionLoading, setActionLoading] = useState(false);
+  const [activeTab, setActiveTab] = useState<'profile' | 'application' | 'documents' | 'agreements'>('profile');
   
-  const [showApproveModal, setShowApproveModal] = useState(false);
-  const [showRejectModal, setShowRejectModal] = useState(false);
-  const [notes, setNotes] = useState('');
-
-  const isAdmin = role === 'admin' || role === 'superadmin';
+  // Edit mode state
+  const [editing, setEditing] = useState(false);
+  const [saving, setSaving] = useState(false);
+  const [editForm, setEditForm] = useState<Record<string, string>>({});
 
   useEffect(() => {
-    const loadApplicant = async () => {
-      if (!id) return;
-      
-      try {
-        setLoading(true);
-        setError(null);
-        const res = await api.get<ApplicationData>(`/admin/applicants/${id}`);
-        setData(res);
-      } catch (err) {
-        console.error('Failed to load applicant:', err);
-        setError(err instanceof Error ? err.message : 'Failed to load applicant');
-      } finally {
-        setLoading(false);
-      }
-    };
-    
-    loadApplicant();
+    loadData();
   }, [id]);
 
-  const handleStatusUpdate = async (newStatus: string) => {
+  const loadData = async () => {
     if (!id) return;
-    
     try {
-      setActionLoading(true);
-      await api.post(`/admin/applicant/${id}/status`, { status: newStatus });
-      setShowApproveModal(false);
-      setShowRejectModal(false);
-      // Reload
+      setLoading(true);
+      setError(null);
       const res = await api.get<ApplicationData>(`/admin/applicants/${id}`);
       setData(res);
+      
+      // Initialize edit form with current values
+      const step2 = res.steps.find(s => s.step_number === 2)?.data || {};
+      const step3 = res.steps.find(s => s.step_number === 3)?.data || {};
+      setEditForm({
+        first_name: res.profile.first_name || '',
+        last_name: res.profile.last_name || '',
+        email: res.profile.email || '',
+        phone: res.profile.phone || (step2.phone as string) || '',
+        address_line1: (step2.address_line1 as string) || '',
+        address_line2: (step2.address_line2 as string) || '',
+        city: (step2.city as string) || '',
+        state: (step2.state as string) || '',
+        zip: (step2.zip as string) || '',
+        date_of_birth: (step2.date_of_birth as string) || '',
+        emergency_name: (step3.name as string) || '',
+        emergency_relationship: (step3.relationship as string) || '',
+        emergency_phone: (step3.phone as string) || '',
+      });
     } catch (err) {
-      setError(err instanceof Error ? err.message : `Failed to ${newStatus} application`);
+      setError(err instanceof Error ? err.message : 'Failed to load applicant');
     } finally {
-      setActionLoading(false);
+      setLoading(false);
     }
   };
 
-  const getDocumentStatus = () => {
-    if (!data) return [];
-    
-    return [11, 12, 13, 14, 15, 16, 17].map(stepNum => {
-      const step = data.steps.find(s => s.step_number === stepNum);
-      const stepData = step?.data || {};
-      
-      const hasFile = Boolean(stepData.file_name) && !stepData.skip;
-      const skipped = Boolean(stepData.skip);
-      
-      return {
-        stepNumber: stepNum,
-        name: DOCUMENT_STEP_NAMES[stepNum],
-        status: hasFile ? 'uploaded' : skipped ? 'skipped' : 'missing',
-        fileName: stepData.file_name as string || null,
-        storageUrl: stepData.storage_url as string || null,
-        uploadedAt: stepData.uploaded_at as string || step?.completed_at || null,
-      };
-    });
+  const handleSaveProfile = async () => {
+    if (!id) return;
+    try {
+      setSaving(true);
+      await api.patch(`/admin/applicants/${id}/profile`, editForm);
+      await loadData();
+      setEditing(false);
+    } catch (err) {
+      setError(err instanceof Error ? err.message : 'Failed to save changes');
+    } finally {
+      setSaving(false);
+    }
   };
 
-  const documents = getDocumentStatus();
-
-  const docBadgeVariant: Record<string, 'success' | 'warning' | 'error' | 'neutral'> = {
-    uploaded: 'success',
-    skipped: 'warning',
-    missing: 'error',
+  const handleStatusChange = async (newStatus: string) => {
+    if (!id) return;
+    try {
+      await api.post(`/admin/applicant/${id}/status`, { status: newStatus });
+      await loadData();
+    } catch (err) {
+      setError(err instanceof Error ? err.message : 'Failed to update status');
+    }
   };
 
-  const statusBadgeVariant: Record<string, 'success' | 'warning' | 'error' | 'info' | 'neutral'> = {
-    in_progress: 'info',
-    submitted: 'warning',
-    under_review: 'info',
-    approved: 'success',
-    rejected: 'error',
-    hired: 'success',
+  const openDocument = (url: string | null) => {
+    if (url) {
+      window.open(url, '_blank');
+    } else {
+      alert('Document not available');
+    }
   };
 
   if (loading) {
@@ -161,65 +204,64 @@ export function ApplicantDetailPage() {
   if (!data) {
     return (
       <div className="text-center py-12">
-        <p className="text-gray">Applicant not found</p>
-        <Link to="/admin/applicants" className="text-maroon hover:underline mt-2 inline-block">
-          Back to Applicants
+        <p className="text-gray text-lg">Applicant not found</p>
+        <Link to="/admin/applicants" className="text-maroon hover:underline mt-4 inline-block">
+          ← Back to Applicants
         </Link>
       </div>
     );
   }
 
-  const { application, profile, steps } = data;
-  const completedSteps = steps.filter(s => s.status === 'completed').length;
-  const progress = Math.round((completedSteps / TOTAL_STEPS) * 100);
+  const { application, profile, steps, agreements, uploaded_files } = data;
+  const step2 = steps.find(s => s.step_number === 2)?.data || {};
+  const step3 = steps.find(s => s.step_number === 3)?.data || {};
+  const step1 = steps.find(s => s.step_number === 1)?.data || {};
   
-  const canReview = ['submitted', 'under_review'].includes(application.status) && isAdmin;
-  const canHire = application.status === 'approved' && isAdmin;
-
-  // Get personal info from step 2
-  const personalInfo = steps.find(s => s.step_number === 2)?.data || {};
-  const address = [
-    personalInfo.address_line1,
-    personalInfo.address_line2,
-    personalInfo.city,
-    personalInfo.state,
-    personalInfo.zip
-  ].filter(Boolean).join(', ');
+  const statusStyle = statusStyles[application.status] || { bg: 'bg-gray-100', text: 'text-gray-700' };
 
   return (
     <div className="space-y-6">
-      <div className="flex items-center justify-between">
-        <div className="flex items-center gap-3">
-          <Link to="/admin/applicants" className="rounded-lg p-1 hover:bg-gray-100">
+      {/* Header */}
+      <div className="flex items-start justify-between">
+        <div className="flex items-center gap-4">
+          <Link to="/admin/applicants" className="rounded-lg p-2 hover:bg-gray-100 transition-colors">
             <svg className="h-5 w-5 text-gray" fill="none" viewBox="0 0 24 24" stroke="currentColor">
               <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M15 19l-7-7 7-7" />
             </svg>
           </Link>
-          <div>
-            <h1 className="font-display text-2xl font-bold text-navy">
-              {profile.first_name} {profile.last_name}
-            </h1>
-            <p className="mt-1 text-sm text-gray">{profile.email}</p>
+          <div className="flex items-center gap-4">
+            <div className="flex h-14 w-14 items-center justify-center rounded-xl bg-navy text-xl font-bold text-white">
+              {profile.first_name?.[0]}{profile.last_name?.[0]}
+            </div>
+            <div>
+              <h1 className="font-display text-2xl font-bold text-navy">
+                {profile.first_name} {profile.last_name}
+              </h1>
+              <p className="text-sm text-gray">{profile.email}</p>
+            </div>
           </div>
         </div>
-        <div className="flex gap-3">
-          {canReview && (
+        
+        <div className="flex items-center gap-3">
+          <span className={`px-3 py-1.5 rounded-lg text-sm font-medium ${statusStyle.bg} ${statusStyle.text}`}>
+            {application.status.replace(/_/g, ' ')}
+          </span>
+          
+          {application.status === 'submitted' && (
             <>
-              <Button variant="danger" size="sm" onClick={() => setShowRejectModal(true)}>
+              <Button variant="danger" size="sm" onClick={() => handleStatusChange('rejected')}>
                 Reject
               </Button>
-              <Button size="sm" onClick={() => setShowApproveModal(true)}>
+              <Button size="sm" onClick={() => handleStatusChange('approved')}>
                 Approve
               </Button>
             </>
           )}
-          {canHire && (
+          
+          {application.status === 'approved' && (
             <Link to={`/admin/hire/${application.id}`}>
               <Button size="sm">Hire</Button>
             </Link>
-          )}
-          {!isAdmin && ['submitted', 'under_review'].includes(application.status) && (
-            <Badge variant="info">Admin approval required</Badge>
           )}
         </div>
       </div>
@@ -230,158 +272,402 @@ export function ApplicantDetailPage() {
         </Alert>
       )}
 
-      <div className="grid grid-cols-1 gap-6 lg:grid-cols-3">
-        <div className="lg:col-span-2 space-y-6">
-          <Card header="Personal Information">
-            <div className="grid grid-cols-2 gap-4">
-              <div>
-                <p className="text-xs font-medium uppercase text-gray">Full Name</p>
-                <p className="mt-1 text-sm text-slate">{profile.first_name} {profile.last_name}</p>
-              </div>
-              <div>
-                <p className="text-xs font-medium uppercase text-gray">Email</p>
-                <p className="mt-1 text-sm text-slate">{profile.email}</p>
-              </div>
-              <div>
-                <p className="text-xs font-medium uppercase text-gray">Phone</p>
-                <p className="mt-1 text-sm text-slate">{profile.phone || personalInfo.phone as string || '--'}</p>
-              </div>
-              <div>
-                <p className="text-xs font-medium uppercase text-gray">Address</p>
-                <p className="mt-1 text-sm text-slate">{address || '--'}</p>
-              </div>
-              <div>
-                <p className="text-xs font-medium uppercase text-gray">Location</p>
-                <p className="mt-1 text-sm text-slate">{application.location_name || '--'}</p>
-              </div>
-              <div>
-                <p className="text-xs font-medium uppercase text-gray">Submitted</p>
-                <p className="mt-1 text-sm text-slate">{application.submitted_at ? formatDate(application.submitted_at) : '--'}</p>
-              </div>
-            </div>
-          </Card>
+      {/* Tabs */}
+      <div className="border-b border-border">
+        <nav className="flex gap-6">
+          {(['profile', 'application', 'documents', 'agreements'] as const).map((tab) => (
+            <button
+              key={tab}
+              onClick={() => setActiveTab(tab)}
+              className={`py-3 text-sm font-medium border-b-2 transition-colors ${
+                activeTab === tab
+                  ? 'border-maroon text-maroon'
+                  : 'border-transparent text-gray hover:text-slate'
+              }`}
+            >
+              {tab.charAt(0).toUpperCase() + tab.slice(1)}
+              {tab === 'documents' && (
+                <span className="ml-2 px-1.5 py-0.5 text-xs bg-gray-100 rounded-full">
+                  {uploaded_files.filter(f => !f.skipped && f.file_name).length}
+                </span>
+              )}
+              {tab === 'agreements' && (
+                <span className="ml-2 px-1.5 py-0.5 text-xs bg-gray-100 rounded-full">
+                  {agreements.length}
+                </span>
+              )}
+            </button>
+          ))}
+        </nav>
+      </div>
 
-          <Card header="Documents">
-            <div className="space-y-2">
-              {documents.map((doc) => (
-                <div key={doc.stepNumber} className="flex items-center justify-between rounded-lg border border-border p-3">
-                  <div className="flex items-center gap-3">
-                    <svg className="h-5 w-5 text-gray" fill="none" viewBox="0 0 24 24" stroke="currentColor">
-                      <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M7 21h10a2 2 0 002-2V9.414a1 1 0 00-.293-.707l-5.414-5.414A1 1 0 0012.586 3H7a2 2 0 00-2 2v14a2 2 0 002 2z" />
-                    </svg>
-                    <div>
-                      <p className="text-sm font-medium text-slate">{doc.name}</p>
-                      {doc.uploadedAt && (
-                        <p className="text-xs text-gray">{doc.status === 'uploaded' ? 'Uploaded' : 'Updated'} {formatDate(doc.uploadedAt)}</p>
-                      )}
-                      {doc.fileName && <p className="text-xs text-gray-light">{doc.fileName}</p>}
-                    </div>
+      {/* Tab Content */}
+      <div className="bg-white rounded-xl border border-border">
+        
+        {/* Profile Tab */}
+        {activeTab === 'profile' && (
+          <div className="p-6">
+            <div className="flex items-center justify-between mb-6">
+              <h2 className="text-lg font-semibold text-navy">Personal Information</h2>
+              {!editing ? (
+                <Button variant="secondary" size="sm" onClick={() => setEditing(true)}>
+                  Edit
+                </Button>
+              ) : (
+                <div className="flex gap-2">
+                  <Button variant="secondary" size="sm" onClick={() => setEditing(false)}>
+                    Cancel
+                  </Button>
+                  <Button size="sm" onClick={handleSaveProfile} loading={saving}>
+                    Save Changes
+                  </Button>
+                </div>
+              )}
+            </div>
+
+            {!editing ? (
+              <div className="grid grid-cols-1 md:grid-cols-2 gap-6">
+                <div className="space-y-4">
+                  <div>
+                    <p className="text-xs font-medium text-gray uppercase tracking-wide">Full Name</p>
+                    <p className="mt-1 text-slate">{profile.first_name} {profile.last_name}</p>
                   </div>
-                  <div className="flex items-center gap-2">
-                    <Badge variant={docBadgeVariant[doc.status]}>{doc.status}</Badge>
-                    {doc.storageUrl && (
-                      <a href={doc.storageUrl} target="_blank" rel="noopener noreferrer">
-                        <Button variant="ghost" size="sm">View</Button>
-                      </a>
-                    )}
+                  <div>
+                    <p className="text-xs font-medium text-gray uppercase tracking-wide">Email</p>
+                    <p className="mt-1 text-slate">{profile.email}</p>
+                  </div>
+                  <div>
+                    <p className="text-xs font-medium text-gray uppercase tracking-wide">Phone</p>
+                    <p className="mt-1 text-slate">{profile.phone || step2.phone || '—'}</p>
+                  </div>
+                  <div>
+                    <p className="text-xs font-medium text-gray uppercase tracking-wide">Date of Birth</p>
+                    <p className="mt-1 text-slate">{step2.date_of_birth ? formatDate(step2.date_of_birth as string) : '—'}</p>
+                  </div>
+                  <div>
+                    <p className="text-xs font-medium text-gray uppercase tracking-wide">Position Applied</p>
+                    <p className="mt-1 text-slate">{(step1.position_applied as string)?.toUpperCase() || '—'}</p>
                   </div>
                 </div>
-              ))}
-            </div>
-          </Card>
-        </div>
+                
+                <div className="space-y-4">
+                  <div>
+                    <p className="text-xs font-medium text-gray uppercase tracking-wide">Address</p>
+                    <p className="mt-1 text-slate">
+                      {step2.address_line1 || '—'}
+                      {step2.address_line2 && <><br />{step2.address_line2}</>}
+                      {(step2.city || step2.state || step2.zip) && (
+                        <><br />{[step2.city, step2.state, step2.zip].filter(Boolean).join(', ')}</>
+                      )}
+                    </p>
+                  </div>
+                  <div>
+                    <p className="text-xs font-medium text-gray uppercase tracking-wide">Emergency Contact</p>
+                    <p className="mt-1 text-slate">
+                      {step3.name || '—'}
+                      {step3.relationship && <span className="text-gray"> ({step3.relationship})</span>}
+                      {step3.phone && <><br />{step3.phone}</>}
+                    </p>
+                  </div>
+                  <div>
+                    <p className="text-xs font-medium text-gray uppercase tracking-wide">Application Date</p>
+                    <p className="mt-1 text-slate">{formatDate(application.created_at)}</p>
+                  </div>
+                  <div>
+                    <p className="text-xs font-medium text-gray uppercase tracking-wide">Location</p>
+                    <p className="mt-1 text-slate">{application.location_name || '—'}</p>
+                  </div>
+                </div>
+              </div>
+            ) : (
+              <div className="grid grid-cols-1 md:grid-cols-2 gap-4">
+                <div>
+                  <label className="block text-xs font-medium text-gray uppercase mb-1">First Name</label>
+                  <input
+                    type="text"
+                    value={editForm.first_name}
+                    onChange={(e) => setEditForm({ ...editForm, first_name: e.target.value })}
+                    className="w-full px-3 py-2 border border-border rounded-lg text-sm focus:border-maroon focus:ring-2 focus:ring-maroon/20 outline-none"
+                  />
+                </div>
+                <div>
+                  <label className="block text-xs font-medium text-gray uppercase mb-1">Last Name</label>
+                  <input
+                    type="text"
+                    value={editForm.last_name}
+                    onChange={(e) => setEditForm({ ...editForm, last_name: e.target.value })}
+                    className="w-full px-3 py-2 border border-border rounded-lg text-sm focus:border-maroon focus:ring-2 focus:ring-maroon/20 outline-none"
+                  />
+                </div>
+                <div>
+                  <label className="block text-xs font-medium text-gray uppercase mb-1">Email</label>
+                  <input
+                    type="email"
+                    value={editForm.email}
+                    onChange={(e) => setEditForm({ ...editForm, email: e.target.value })}
+                    className="w-full px-3 py-2 border border-border rounded-lg text-sm focus:border-maroon focus:ring-2 focus:ring-maroon/20 outline-none"
+                  />
+                </div>
+                <div>
+                  <label className="block text-xs font-medium text-gray uppercase mb-1">Phone</label>
+                  <input
+                    type="tel"
+                    value={editForm.phone}
+                    onChange={(e) => setEditForm({ ...editForm, phone: e.target.value })}
+                    className="w-full px-3 py-2 border border-border rounded-lg text-sm focus:border-maroon focus:ring-2 focus:ring-maroon/20 outline-none"
+                  />
+                </div>
+                <div>
+                  <label className="block text-xs font-medium text-gray uppercase mb-1">Date of Birth</label>
+                  <input
+                    type="date"
+                    value={editForm.date_of_birth}
+                    onChange={(e) => setEditForm({ ...editForm, date_of_birth: e.target.value })}
+                    className="w-full px-3 py-2 border border-border rounded-lg text-sm focus:border-maroon focus:ring-2 focus:ring-maroon/20 outline-none"
+                  />
+                </div>
+                <div>
+                  <label className="block text-xs font-medium text-gray uppercase mb-1">Address Line 1</label>
+                  <input
+                    type="text"
+                    value={editForm.address_line1}
+                    onChange={(e) => setEditForm({ ...editForm, address_line1: e.target.value })}
+                    className="w-full px-3 py-2 border border-border rounded-lg text-sm focus:border-maroon focus:ring-2 focus:ring-maroon/20 outline-none"
+                  />
+                </div>
+                <div>
+                  <label className="block text-xs font-medium text-gray uppercase mb-1">Address Line 2</label>
+                  <input
+                    type="text"
+                    value={editForm.address_line2}
+                    onChange={(e) => setEditForm({ ...editForm, address_line2: e.target.value })}
+                    className="w-full px-3 py-2 border border-border rounded-lg text-sm focus:border-maroon focus:ring-2 focus:ring-maroon/20 outline-none"
+                  />
+                </div>
+                <div>
+                  <label className="block text-xs font-medium text-gray uppercase mb-1">City</label>
+                  <input
+                    type="text"
+                    value={editForm.city}
+                    onChange={(e) => setEditForm({ ...editForm, city: e.target.value })}
+                    className="w-full px-3 py-2 border border-border rounded-lg text-sm focus:border-maroon focus:ring-2 focus:ring-maroon/20 outline-none"
+                  />
+                </div>
+                <div>
+                  <label className="block text-xs font-medium text-gray uppercase mb-1">State</label>
+                  <input
+                    type="text"
+                    value={editForm.state}
+                    onChange={(e) => setEditForm({ ...editForm, state: e.target.value })}
+                    className="w-full px-3 py-2 border border-border rounded-lg text-sm focus:border-maroon focus:ring-2 focus:ring-maroon/20 outline-none"
+                  />
+                </div>
+                <div>
+                  <label className="block text-xs font-medium text-gray uppercase mb-1">ZIP</label>
+                  <input
+                    type="text"
+                    value={editForm.zip}
+                    onChange={(e) => setEditForm({ ...editForm, zip: e.target.value })}
+                    className="w-full px-3 py-2 border border-border rounded-lg text-sm focus:border-maroon focus:ring-2 focus:ring-maroon/20 outline-none"
+                  />
+                </div>
+                
+                <div className="md:col-span-2 border-t border-border pt-4 mt-2">
+                  <h3 className="text-sm font-semibold text-navy mb-3">Emergency Contact</h3>
+                  <div className="grid grid-cols-1 md:grid-cols-3 gap-4">
+                    <div>
+                      <label className="block text-xs font-medium text-gray uppercase mb-1">Name</label>
+                      <input
+                        type="text"
+                        value={editForm.emergency_name}
+                        onChange={(e) => setEditForm({ ...editForm, emergency_name: e.target.value })}
+                        className="w-full px-3 py-2 border border-border rounded-lg text-sm focus:border-maroon focus:ring-2 focus:ring-maroon/20 outline-none"
+                      />
+                    </div>
+                    <div>
+                      <label className="block text-xs font-medium text-gray uppercase mb-1">Relationship</label>
+                      <input
+                        type="text"
+                        value={editForm.emergency_relationship}
+                        onChange={(e) => setEditForm({ ...editForm, emergency_relationship: e.target.value })}
+                        className="w-full px-3 py-2 border border-border rounded-lg text-sm focus:border-maroon focus:ring-2 focus:ring-maroon/20 outline-none"
+                      />
+                    </div>
+                    <div>
+                      <label className="block text-xs font-medium text-gray uppercase mb-1">Phone</label>
+                      <input
+                        type="tel"
+                        value={editForm.emergency_phone}
+                        onChange={(e) => setEditForm({ ...editForm, emergency_phone: e.target.value })}
+                        className="w-full px-3 py-2 border border-border rounded-lg text-sm focus:border-maroon focus:ring-2 focus:ring-maroon/20 outline-none"
+                      />
+                    </div>
+                  </div>
+                </div>
+              </div>
+            )}
+          </div>
+        )}
 
-        <div className="space-y-6">
-          <Card header="Status">
-            <div className="space-y-3">
-              <div className="flex justify-between">
-                <span className="text-sm text-gray">Application Status</span>
-                <Badge variant={statusBadgeVariant[application.status]}>
-                  {application.status.replace(/_/g, ' ')}
-                </Badge>
-              </div>
-              <div className="flex justify-between">
-                <span className="text-sm text-gray">Progress</span>
-                <span className="text-sm font-medium text-navy">{completedSteps}/{TOTAL_STEPS} ({progress}%)</span>
-              </div>
-              <div className="h-2 w-full rounded-full bg-gray-100">
-                <div className="h-2 rounded-full bg-maroon" style={{ width: `${progress}%` }} />
-              </div>
+        {/* Application Tab */}
+        {activeTab === 'application' && (
+          <div className="p-6">
+            <div className="flex items-center justify-between mb-6">
+              <h2 className="text-lg font-semibold text-navy">Application Progress</h2>
+              <span className="text-sm text-gray">
+                {steps.filter(s => s.status === 'completed').length} of {application.total_steps} steps completed
+              </span>
             </div>
-          </Card>
-
-          <Card header="Application Steps">
-            <div className="max-h-96 space-y-1 overflow-y-auto">
-              {Array.from({ length: TOTAL_STEPS }, (_, i) => {
-                const stepNum = i + 1;
+            
+            <div className="space-y-2">
+              {Array.from({ length: 22 }, (_, i) => i + 1).map((stepNum) => {
                 const step = steps.find(s => s.step_number === stepNum);
                 const isCompleted = step?.status === 'completed';
                 const isSkipped = step?.data?.skip === true;
                 
                 return (
-                  <div key={stepNum} className="flex items-center gap-2 rounded px-2 py-1.5">
-                    <div className={`flex h-5 w-5 flex-shrink-0 items-center justify-center rounded-full text-xs ${
-                      isCompleted ? (isSkipped ? 'bg-warning text-white' : 'bg-success text-white') : 'bg-gray-100 text-gray'
-                    }`}>
-                      {isCompleted ? (
-                        <svg className="h-3 w-3" fill="none" viewBox="0 0 24 24" stroke="currentColor">
-                          <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={3} d="M5 13l4 4L19 7" />
-                        </svg>
-                      ) : stepNum}
+                  <div
+                    key={stepNum}
+                    className={`flex items-center justify-between p-3 rounded-lg border ${
+                      isCompleted 
+                        ? isSkipped ? 'border-warning/30 bg-warning/5' : 'border-success/30 bg-success/5'
+                        : 'border-border bg-gray-50'
+                    }`}
+                  >
+                    <div className="flex items-center gap-3">
+                      <div className={`flex h-7 w-7 items-center justify-center rounded-full text-xs font-medium ${
+                        isCompleted
+                          ? isSkipped ? 'bg-warning text-white' : 'bg-success text-white'
+                          : 'bg-gray-200 text-gray'
+                      }`}>
+                        {isCompleted ? '✓' : stepNum}
+                      </div>
+                      <span className={`text-sm ${isCompleted ? 'text-slate' : 'text-gray'}`}>
+                        {STEP_NAMES[stepNum]}
+                      </span>
+                      {isSkipped && (
+                        <span className="text-xs text-warning font-medium">(Skipped)</span>
+                      )}
                     </div>
-                    <span className={`text-xs ${isCompleted ? 'text-slate' : 'text-gray'}`}>
-                      {STEP_NAMES[stepNum]}
-                      {isSkipped && <span className="text-warning ml-1">(skipped)</span>}
-                    </span>
+                    {step?.completed_at && (
+                      <span className="text-xs text-gray">{formatDate(step.completed_at)}</span>
+                    )}
                   </div>
                 );
               })}
             </div>
-          </Card>
+          </div>
+        )}
 
-          <Card header="Quick Actions">
-            <div className="space-y-2">
-              <Button variant="secondary" size="sm" className="w-full" onClick={() => navigate('/admin/applicants')}>
-                Back to Applicants
-              </Button>
+        {/* Documents Tab */}
+        {activeTab === 'documents' && (
+          <div className="p-6">
+            <h2 className="text-lg font-semibold text-navy mb-6">Uploaded Documents</h2>
+            
+            <div className="space-y-3">
+              {uploaded_files.map((file) => (
+                <div
+                  key={file.step_number}
+                  className="flex items-center justify-between p-4 rounded-lg border border-border hover:border-gray-300 transition-colors"
+                >
+                  <div className="flex items-center gap-3">
+                    <div className={`flex h-10 w-10 items-center justify-center rounded-lg ${
+                      file.skipped ? 'bg-gray-100' : file.file_name ? 'bg-maroon-subtle' : 'bg-gray-100'
+                    }`}>
+                      <svg className={`h-5 w-5 ${file.skipped ? 'text-gray' : file.file_name ? 'text-maroon' : 'text-gray'}`} fill="none" viewBox="0 0 24 24" stroke="currentColor">
+                        <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M7 21h10a2 2 0 002-2V9.414a1 1 0 00-.293-.707l-5.414-5.414A1 1 0 0012.586 3H7a2 2 0 00-2 2v14a2 2 0 002 2z" />
+                      </svg>
+                    </div>
+                    <div>
+                      <p className="text-sm font-medium text-slate">{file.document_name}</p>
+                      {file.file_name && (
+                        <p className="text-xs text-gray">{file.file_name}</p>
+                      )}
+                      {file.skipped && (
+                        <p className="text-xs text-warning">Skipped by applicant</p>
+                      )}
+                      {!file.file_name && !file.skipped && (
+                        <p className="text-xs text-gray">Not uploaded</p>
+                      )}
+                    </div>
+                  </div>
+                  
+                  <div className="flex items-center gap-2">
+                    {file.uploaded_at && (
+                      <span className="text-xs text-gray mr-2">{formatDate(file.uploaded_at)}</span>
+                    )}
+                    {file.file_name && file.signed_url ? (
+                      <Button 
+                        variant="secondary" 
+                        size="sm"
+                        onClick={() => openDocument(file.signed_url)}
+                      >
+                        View
+                      </Button>
+                    ) : file.file_name ? (
+                      <Badge variant="warning">No URL</Badge>
+                    ) : null}
+                  </div>
+                </div>
+              ))}
+              
+              {uploaded_files.length === 0 && (
+                <p className="text-center text-gray py-8">No documents uploaded yet</p>
+              )}
             </div>
-          </Card>
-        </div>
+          </div>
+        )}
+
+        {/* Agreements Tab */}
+        {activeTab === 'agreements' && (
+          <div className="p-6">
+            <h2 className="text-lg font-semibold text-navy mb-6">Signed Agreements</h2>
+            
+            <div className="space-y-3">
+              {agreements.map((agreement) => (
+                <div
+                  key={agreement.id}
+                  className="flex items-center justify-between p-4 rounded-lg border border-border hover:border-gray-300 transition-colors"
+                >
+                  <div className="flex items-center gap-3">
+                    <div className="flex h-10 w-10 items-center justify-center rounded-lg bg-success/10">
+                      <svg className="h-5 w-5 text-success" fill="none" viewBox="0 0 24 24" stroke="currentColor">
+                        <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M9 12l2 2 4-4m6 2a9 9 0 11-18 0 9 9 0 0118 0z" />
+                      </svg>
+                    </div>
+                    <div>
+                      <p className="text-sm font-medium text-slate">
+                        {AGREEMENT_NAMES[agreement.agreement_type] || agreement.agreement_type}
+                      </p>
+                      <p className="text-xs text-gray">
+                        Signed by "{agreement.signed_name}" on {formatDate(agreement.signed_at)}
+                      </p>
+                    </div>
+                  </div>
+                  
+                  <div className="flex items-center gap-2">
+                    {agreement.pdf_url ? (
+                      <Button 
+                        variant="secondary" 
+                        size="sm"
+                        onClick={() => openDocument(agreement.pdf_url)}
+                      >
+                        View PDF
+                      </Button>
+                    ) : (
+                      <Badge variant="neutral">PDF Pending</Badge>
+                    )}
+                  </div>
+                </div>
+              ))}
+              
+              {agreements.length === 0 && (
+                <p className="text-center text-gray py-8">No agreements signed yet</p>
+              )}
+            </div>
+          </div>
+        )}
       </div>
-
-      {/* Approve Modal */}
-      <Modal
-        isOpen={showApproveModal}
-        onClose={() => setShowApproveModal(false)}
-        title="Approve Application"
-        actions={
-          <>
-            <Button variant="secondary" onClick={() => setShowApproveModal(false)}>Cancel</Button>
-            <Button onClick={() => handleStatusUpdate('approved')} loading={actionLoading}>Approve</Button>
-          </>
-        }
-      >
-        <p className="text-sm text-slate">
-          Are you sure you want to approve <strong>{profile.first_name} {profile.last_name}</strong>'s application?
-        </p>
-      </Modal>
-
-      {/* Reject Modal */}
-      <Modal
-        isOpen={showRejectModal}
-        onClose={() => setShowRejectModal(false)}
-        title="Reject Application"
-        actions={
-          <>
-            <Button variant="secondary" onClick={() => setShowRejectModal(false)}>Cancel</Button>
-            <Button variant="danger" onClick={() => handleStatusUpdate('rejected')} loading={actionLoading}>Reject</Button>
-          </>
-        }
-      >
-        <p className="text-sm text-slate">
-          Are you sure you want to reject <strong>{profile.first_name} {profile.last_name}</strong>'s application?
-        </p>
-      </Modal>
     </div>
   );
 }
