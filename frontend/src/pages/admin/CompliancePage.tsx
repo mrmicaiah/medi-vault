@@ -1,12 +1,21 @@
-import React, { useState } from 'react';
+import React, { useState, useEffect } from 'react';
 import { Link } from 'react-router-dom';
-import { Card } from '../../components/ui/Card';
 import { Badge } from '../../components/ui/Badge';
 import { Button } from '../../components/ui/Button';
-import { Alert } from '../../components/ui/Alert';
+import { api } from '../../lib/api';
 import { formatDate, daysUntil } from '../../lib/utils';
 
-interface ComplianceItem {
+interface Employee {
+  id: string;
+  user_id: string;
+  first_name: string;
+  last_name: string;
+  position: string;
+  status: string;
+  hire_date: string;
+}
+
+interface DocumentAlert {
   id: string;
   employee_id: string;
   employee_name: string;
@@ -16,177 +25,264 @@ interface ComplianceItem {
   status: 'expiring_soon' | 'expired' | 'missing';
 }
 
-const mockAlerts: ComplianceItem[] = [
-  { id: '1', employee_id: '2', employee_name: 'Thomas Garcia', document_type: 'CPR Certification', category: 'Certification', expires_at: '2026-04-10', status: 'expiring_soon' },
-  { id: '2', employee_id: '2', employee_name: 'Thomas Garcia', document_type: 'TB Test Results', category: 'Health', expires_at: '2026-04-05', status: 'expiring_soon' },
-  { id: '3', employee_id: '3', employee_name: 'Lisa Park', document_type: 'HHA Certificate', category: 'Certification', expires_at: '2026-03-15', status: 'expired' },
-  { id: '4', employee_id: '6', employee_name: 'Carlos Rodriguez', document_type: 'Driver\'s License', category: 'Identification', expires_at: '2026-02-28', status: 'expired' },
-  { id: '5', employee_id: '6', employee_name: 'Carlos Rodriguez', document_type: 'CPR Certification', category: 'Certification', status: 'missing' },
-  { id: '6', employee_id: '6', employee_name: 'Carlos Rodriguez', document_type: 'TB Test Results', category: 'Health', status: 'missing' },
-  { id: '7', employee_id: '8', employee_name: 'Daniel Kim', document_type: 'Work Authorization', category: 'Identification', expires_at: '2026-04-15', status: 'expiring_soon' },
+// Document types we track for each employee
+const TRACKED_DOCUMENTS = [
+  { type: 'CPR Certification', category: 'Certification' },
+  { type: 'TB Test Results', category: 'Health' },
+  { type: 'HHA Certificate', category: 'Certification' },
+  { type: 'Driver\'s License', category: 'Identification' },
+  { type: 'Work Authorization', category: 'Identification' },
 ];
 
-const tabFilters = [
-  { value: 'all', label: 'All Alerts' },
-  { value: 'expiring_soon', label: 'Expiring Soon' },
-  { value: 'expired', label: 'Expired' },
-  { value: 'missing', label: 'Missing' },
-];
-
-const statusBadge: Record<string, 'warning' | 'error' | 'neutral'> = {
-  expiring_soon: 'warning',
-  expired: 'error',
-  missing: 'neutral',
+const statusConfig: Record<string, { variant: 'warning' | 'error' | 'neutral'; label: string }> = {
+  expiring_soon: { variant: 'warning', label: 'Expiring Soon' },
+  expired: { variant: 'error', label: 'Expired' },
+  missing: { variant: 'neutral', label: 'Missing' },
 };
 
 export function CompliancePage() {
-  const [filter, setFilter] = useState('all');
+  const [employees, setEmployees] = useState<Employee[]>([]);
+  const [loading, setLoading] = useState(true);
+  const [filter, setFilter] = useState<'all' | 'expiring_soon' | 'expired' | 'missing'>('all');
   const [search, setSearch] = useState('');
+  const [sortBy, setSortBy] = useState<'name' | 'expires'>('expires');
 
-  const filtered = mockAlerts.filter((a) => {
-    const matchFilter = filter === 'all' || a.status === filter;
-    const matchSearch = !search || a.employee_name.toLowerCase().includes(search.toLowerCase()) || a.document_type.toLowerCase().includes(search.toLowerCase());
-    return matchFilter && matchSearch;
-  });
+  // For now, generate alerts based on employees (will be replaced with real document data)
+  const [alerts, setAlerts] = useState<DocumentAlert[]>([]);
 
-  const expiredCount = mockAlerts.filter((a) => a.status === 'expired').length;
-  const expiringCount = mockAlerts.filter((a) => a.status === 'expiring_soon').length;
-  const missingCount = mockAlerts.filter((a) => a.status === 'missing').length;
+  useEffect(() => {
+    loadEmployees();
+  }, []);
+
+  const loadEmployees = async () => {
+    try {
+      setLoading(true);
+      const res = await api.get<{ employees: Employee[] }>('/admin/employees');
+      setEmployees(res.employees || []);
+      
+      // Generate sample alerts based on employees
+      // In production, this would come from the documents table
+      const sampleAlerts: DocumentAlert[] = [];
+      (res.employees || []).forEach((emp, idx) => {
+        // Add some variety - not every employee has issues
+        if (idx % 3 === 0) {
+          sampleAlerts.push({
+            id: `${emp.id}-cpr`,
+            employee_id: emp.id,
+            employee_name: `${emp.first_name} ${emp.last_name}`,
+            document_type: 'CPR Certification',
+            category: 'Certification',
+            expires_at: new Date(Date.now() + (7 + idx) * 24 * 60 * 60 * 1000).toISOString().split('T')[0],
+            status: 'expiring_soon',
+          });
+        }
+        if (idx % 4 === 0) {
+          sampleAlerts.push({
+            id: `${emp.id}-tb`,
+            employee_id: emp.id,
+            employee_name: `${emp.first_name} ${emp.last_name}`,
+            document_type: 'TB Test Results',
+            category: 'Health',
+            expires_at: new Date(Date.now() - (idx + 1) * 24 * 60 * 60 * 1000).toISOString().split('T')[0],
+            status: 'expired',
+          });
+        }
+        if (idx % 5 === 0) {
+          sampleAlerts.push({
+            id: `${emp.id}-dl`,
+            employee_id: emp.id,
+            employee_name: `${emp.first_name} ${emp.last_name}`,
+            document_type: 'Driver\'s License',
+            category: 'Identification',
+            status: 'missing',
+          });
+        }
+      });
+      setAlerts(sampleAlerts);
+    } catch (err) {
+      console.error('Error loading employees:', err);
+    } finally {
+      setLoading(false);
+    }
+  };
+
+  // Filter and sort
+  const filteredAlerts = alerts
+    .filter(a => {
+      const matchFilter = filter === 'all' || a.status === filter;
+      const matchSearch = !search || 
+        a.employee_name.toLowerCase().includes(search.toLowerCase()) || 
+        a.document_type.toLowerCase().includes(search.toLowerCase());
+      return matchFilter && matchSearch;
+    })
+    .sort((a, b) => {
+      if (sortBy === 'name') {
+        return a.employee_name.localeCompare(b.employee_name);
+      }
+      // Sort by expiration (missing docs last, then expired, then expiring soon)
+      if (!a.expires_at && !b.expires_at) return 0;
+      if (!a.expires_at) return 1;
+      if (!b.expires_at) return -1;
+      return new Date(a.expires_at).getTime() - new Date(b.expires_at).getTime();
+    });
+
+  // Counts for filter badges
+  const counts = {
+    all: alerts.length,
+    expiring_soon: alerts.filter(a => a.status === 'expiring_soon').length,
+    expired: alerts.filter(a => a.status === 'expired').length,
+    missing: alerts.filter(a => a.status === 'missing').length,
+  };
+
+  if (loading) {
+    return (
+      <div className="flex items-center justify-center py-12">
+        <svg className="h-8 w-8 animate-spin text-maroon" fill="none" viewBox="0 0 24 24">
+          <circle className="opacity-25" cx="12" cy="12" r="10" stroke="currentColor" strokeWidth="4" />
+          <path className="opacity-75" fill="currentColor" d="M4 12a8 8 0 018-8V0C5.373 0 0 5.373 0 12h4z" />
+        </svg>
+      </div>
+    );
+  }
 
   return (
     <div className="space-y-6">
+      {/* Header */}
       <div>
-        <h1 className="font-display text-2xl font-bold text-navy">Compliance Tracker</h1>
-        <p className="mt-1 text-sm text-gray">Monitor expiring, expired, and missing employee documents.</p>
+        <h1 className="font-display text-2xl font-bold text-navy">Documents</h1>
+        <p className="mt-1 text-sm text-gray">Track employee certifications and compliance documents</p>
       </div>
 
-      {expiredCount > 0 && (
-        <Alert variant="error" title="Expired Documents">
-          {expiredCount} document(s) have expired and need immediate attention.
-        </Alert>
-      )}
-
-      <div className="grid grid-cols-1 gap-4 sm:grid-cols-3">
-        <Card padding="sm">
-          <div className="flex items-center gap-3">
-            <div className="rounded-lg bg-warning-bg p-2">
-              <svg className="h-5 w-5 text-warning" fill="none" viewBox="0 0 24 24" stroke="currentColor">
-                <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M12 8v4l3 3m6-3a9 9 0 11-18 0 9 9 0 0118 0z" />
-              </svg>
-            </div>
-            <div>
-              <p className="text-2xl font-bold text-navy">{expiringCount}</p>
-              <p className="text-xs text-gray">Expiring Soon</p>
-            </div>
-          </div>
-        </Card>
-        <Card padding="sm">
-          <div className="flex items-center gap-3">
-            <div className="rounded-lg bg-error-bg p-2">
-              <svg className="h-5 w-5 text-error" fill="none" viewBox="0 0 24 24" stroke="currentColor">
-                <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M12 9v2m0 4h.01m-6.938 4h13.856c1.54 0 2.502-1.667 1.732-2.5L13.732 4c-.77-.833-1.964-.833-2.732 0L4.082 16.5c-.77.833.192 2.5 1.732 2.5z" />
-              </svg>
-            </div>
-            <div>
-              <p className="text-2xl font-bold text-navy">{expiredCount}</p>
-              <p className="text-xs text-gray">Expired</p>
-            </div>
-          </div>
-        </Card>
-        <Card padding="sm">
-          <div className="flex items-center gap-3">
-            <div className="rounded-lg bg-gray-100 p-2">
-              <svg className="h-5 w-5 text-gray" fill="none" viewBox="0 0 24 24" stroke="currentColor">
-                <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M9 12h6m-6 4h6m2 5H7a2 2 0 01-2-2V5a2 2 0 012-2h5.586a1 1 0 01.707.293l5.414 5.414a1 1 0 01.293.707V19a2 2 0 01-2 2z" />
-              </svg>
-            </div>
-            <div>
-              <p className="text-2xl font-bold text-navy">{missingCount}</p>
-              <p className="text-xs text-gray">Missing</p>
-            </div>
-          </div>
-        </Card>
-      </div>
-
-      <Card padding="none">
-        <div className="border-b border-border p-4">
-          <div className="flex flex-col gap-4 sm:flex-row sm:items-center sm:justify-between">
-            <div className="flex gap-2">
-              {tabFilters.map((t) => (
-                <button
-                  key={t.value}
-                  onClick={() => setFilter(t.value)}
-                  className={`rounded-lg border px-3 py-1.5 text-xs font-medium transition-colors ${
-                    filter === t.value ? 'border-maroon bg-maroon-subtle text-maroon' : 'border-border text-gray hover:bg-gray-50'
-                  }`}
-                >
-                  {t.label}
-                </button>
-              ))}
-            </div>
-            <input
-              type="text"
-              placeholder="Search..."
-              value={search}
-              onChange={(e) => setSearch(e.target.value)}
-              className="rounded-lg border border-border px-3 py-1.5 text-sm focus:border-maroon focus:outline-none focus:ring-2 focus:ring-maroon/20 sm:max-w-xs"
-            />
-          </div>
+      {/* Filters */}
+      <div className="flex flex-wrap items-center gap-3">
+        {/* Sort */}
+        <div className="flex items-center gap-2 bg-white border border-border rounded-lg px-3 py-2">
+          <span className="text-xs text-gray font-medium">Sort:</span>
+          <select 
+            value={sortBy} 
+            onChange={(e) => setSortBy(e.target.value as 'name' | 'expires')}
+            className="text-sm text-navy bg-transparent border-none focus:outline-none cursor-pointer"
+          >
+            <option value="expires">By Expiration</option>
+            <option value="name">By Name</option>
+          </select>
         </div>
 
-        <div className="overflow-x-auto">
-          <table className="w-full">
-            <thead>
-              <tr className="border-b border-border bg-gray-50/50">
-                <th className="px-4 py-3 text-left text-xs font-medium uppercase text-gray">Employee</th>
-                <th className="px-4 py-3 text-left text-xs font-medium uppercase text-gray">Document</th>
-                <th className="px-4 py-3 text-left text-xs font-medium uppercase text-gray">Category</th>
-                <th className="px-4 py-3 text-left text-xs font-medium uppercase text-gray">Status</th>
-                <th className="px-4 py-3 text-left text-xs font-medium uppercase text-gray">Expires</th>
-                <th className="px-4 py-3 text-right text-xs font-medium uppercase text-gray">Actions</th>
-              </tr>
-            </thead>
-            <tbody>
-              {filtered.map((item) => (
-                <tr key={item.id} className="border-b border-border last:border-0 hover:bg-gray-50/50">
-                  <td className="px-4 py-3">
-                    <Link to={`/admin/employee/${item.employee_id}`} className="text-sm font-medium text-maroon hover:underline">
-                      {item.employee_name}
-                    </Link>
-                  </td>
-                  <td className="px-4 py-3 text-sm text-slate">{item.document_type}</td>
-                  <td className="px-4 py-3 text-sm text-gray">{item.category}</td>
-                  <td className="px-4 py-3">
-                    <Badge variant={statusBadge[item.status]}>
-                      {item.status.replace(/_/g, ' ')}
-                    </Badge>
-                  </td>
-                  <td className="px-4 py-3 text-sm text-gray">
-                    {item.expires_at ? (
-                      <span className={daysUntil(item.expires_at) <= 0 ? 'font-medium text-error' : ''}>
-                        {formatDate(item.expires_at)}
-                        {daysUntil(item.expires_at) > 0 && (
-                          <span className="ml-1 text-xs">({daysUntil(item.expires_at)}d)</span>
-                        )}
-                      </span>
-                    ) : (
-                      '--'
-                    )}
-                  </td>
-                  <td className="px-4 py-3 text-right">
-                    <Button variant="ghost" size="sm">Notify</Button>
-                  </td>
-                </tr>
-              ))}
-              {filtered.length === 0 && (
-                <tr>
-                  <td colSpan={6} className="px-4 py-8 text-center text-sm text-gray">No compliance alerts found.</td>
-                </tr>
+        {/* Status Filter */}
+        <div className="flex items-center gap-1 bg-white border border-border rounded-lg p-1">
+          {(['all', 'expiring_soon', 'expired', 'missing'] as const).map((status) => (
+            <button
+              key={status}
+              onClick={() => setFilter(status)}
+              className={`flex items-center gap-1.5 px-3 py-1.5 rounded-md text-sm font-medium transition-colors ${
+                filter === status
+                  ? 'bg-navy text-white'
+                  : 'text-gray hover:bg-gray-100'
+              }`}
+            >
+              {status === 'all' ? 'All' : statusConfig[status].label}
+              {counts[status] > 0 && (
+                <span className={`text-xs px-1.5 py-0.5 rounded-full ${
+                  filter === status 
+                    ? 'bg-white/20' 
+                    : status === 'expired' 
+                      ? 'bg-error/10 text-error' 
+                      : status === 'expiring_soon'
+                        ? 'bg-warning/10 text-warning'
+                        : 'bg-gray-100'
+                }`}>
+                  {counts[status]}
+                </span>
               )}
-            </tbody>
-          </table>
+            </button>
+          ))}
         </div>
-      </Card>
+
+        {/* Search */}
+        <div className="flex-1 min-w-[200px] max-w-xs">
+          <input
+            type="text"
+            placeholder="Search employee or document..."
+            value={search}
+            onChange={(e) => setSearch(e.target.value)}
+            className="w-full rounded-lg border border-border px-3 py-2 text-sm focus:border-maroon focus:outline-none focus:ring-2 focus:ring-maroon/20"
+          />
+        </div>
+      </div>
+
+      {/* Table */}
+      <div className="bg-white rounded-xl border border-border overflow-hidden">
+        <table className="w-full">
+          <thead className="bg-gray-50 border-b border-border">
+            <tr>
+              <th className="text-left text-xs font-semibold text-gray uppercase tracking-wider px-6 py-3">Employee</th>
+              <th className="text-left text-xs font-semibold text-gray uppercase tracking-wider px-6 py-3">Document</th>
+              <th className="text-left text-xs font-semibold text-gray uppercase tracking-wider px-6 py-3">Category</th>
+              <th className="text-left text-xs font-semibold text-gray uppercase tracking-wider px-6 py-3">Status</th>
+              <th className="text-left text-xs font-semibold text-gray uppercase tracking-wider px-6 py-3">Expires</th>
+              <th className="text-right text-xs font-semibold text-gray uppercase tracking-wider px-6 py-3">Actions</th>
+            </tr>
+          </thead>
+          <tbody className="divide-y divide-border">
+            {filteredAlerts.length === 0 ? (
+              <tr>
+                <td colSpan={6} className="px-6 py-12 text-center text-gray">
+                  {alerts.length === 0 ? 'No document alerts' : 'No alerts match the current filters'}
+                </td>
+              </tr>
+            ) : (
+              filteredAlerts.map((item) => {
+                const days = item.expires_at ? daysUntil(item.expires_at) : null;
+                
+                return (
+                  <tr key={item.id} className="hover:bg-gray-50 transition-colors">
+                    <td className="px-6 py-4">
+                      <Link 
+                        to={`/admin/employee/${item.employee_id}`} 
+                        className="text-sm font-semibold text-maroon hover:underline"
+                      >
+                        {item.employee_name}
+                      </Link>
+                    </td>
+                    <td className="px-6 py-4 text-sm text-slate">{item.document_type}</td>
+                    <td className="px-6 py-4 text-sm text-gray">{item.category}</td>
+                    <td className="px-6 py-4">
+                      <Badge variant={statusConfig[item.status].variant}>
+                        {statusConfig[item.status].label}
+                      </Badge>
+                    </td>
+                    <td className="px-6 py-4 text-sm">
+                      {item.expires_at ? (
+                        <span className={days !== null && days <= 0 ? 'font-medium text-error' : 'text-gray'}>
+                          {formatDate(item.expires_at)}
+                          {days !== null && days > 0 && (
+                            <span className="ml-1 text-xs text-gray">({days}d)</span>
+                          )}
+                          {days !== null && days <= 0 && (
+                            <span className="ml-1 text-xs">({Math.abs(days)}d ago)</span>
+                          )}
+                        </span>
+                      ) : (
+                        <span className="text-gray">—</span>
+                      )}
+                    </td>
+                    <td className="px-6 py-4 text-right">
+                      <Button variant="ghost" size="sm">
+                        Notify
+                      </Button>
+                    </td>
+                  </tr>
+                );
+              })
+            )}
+          </tbody>
+        </table>
+      </div>
+
+      {/* Footer */}
+      <div className="text-center py-4">
+        <p className="text-[10px] text-gray-400">Powered by MediSVault</p>
+      </div>
     </div>
   );
 }
