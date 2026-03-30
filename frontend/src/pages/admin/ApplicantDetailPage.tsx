@@ -60,6 +60,13 @@ interface ApplicationData {
   }>;
 }
 
+// Helper to safely get string from step data
+function getStepString(data: Record<string, unknown> | null, key: string): string {
+  if (!data) return '';
+  const val = data[key];
+  return typeof val === 'string' ? val : '';
+}
+
 // Step name mapping
 const STEP_NAMES: Record<number, string> = {
   1: 'Position & Eligibility',
@@ -131,22 +138,22 @@ export function ApplicantDetailPage() {
       setData(res);
       
       // Initialize edit form with current values
-      const step2 = res.steps.find(s => s.step_number === 2)?.data || {};
-      const step3 = res.steps.find(s => s.step_number === 3)?.data || {};
+      const step2Data = res.steps.find(s => s.step_number === 2)?.data || {};
+      const step3Data = res.steps.find(s => s.step_number === 3)?.data || {};
       setEditForm({
         first_name: res.profile.first_name || '',
         last_name: res.profile.last_name || '',
         email: res.profile.email || '',
-        phone: res.profile.phone || (step2.phone as string) || '',
-        address_line1: (step2.address_line1 as string) || '',
-        address_line2: (step2.address_line2 as string) || '',
-        city: (step2.city as string) || '',
-        state: (step2.state as string) || '',
-        zip: (step2.zip as string) || '',
-        date_of_birth: (step2.date_of_birth as string) || '',
-        emergency_name: (step3.name as string) || '',
-        emergency_relationship: (step3.relationship as string) || '',
-        emergency_phone: (step3.phone as string) || '',
+        phone: res.profile.phone || getStepString(step2Data, 'phone'),
+        address_line1: getStepString(step2Data, 'address_line1'),
+        address_line2: getStepString(step2Data, 'address_line2'),
+        city: getStepString(step2Data, 'city'),
+        state: getStepString(step2Data, 'state'),
+        zip: getStepString(step2Data, 'zip'),
+        date_of_birth: getStepString(step2Data, 'date_of_birth'),
+        emergency_name: getStepString(step3Data, 'name'),
+        emergency_relationship: getStepString(step3Data, 'relationship'),
+        emergency_phone: getStepString(step3Data, 'phone'),
       });
     } catch (err) {
       setError(err instanceof Error ? err.message : 'Failed to load applicant');
@@ -213,9 +220,9 @@ export function ApplicantDetailPage() {
   }
 
   const { application, profile, steps, agreements, uploaded_files } = data;
-  const step2 = steps.find(s => s.step_number === 2)?.data || {};
-  const step3 = steps.find(s => s.step_number === 3)?.data || {};
-  const step1 = steps.find(s => s.step_number === 1)?.data || {};
+  const step2Data = steps.find(s => s.step_number === 2)?.data || {};
+  const step3Data = steps.find(s => s.step_number === 3)?.data || {};
+  const step1Data = steps.find(s => s.step_number === 1)?.data || {};
   
   const statusStyle = statusStyles[application.status] || { bg: 'bg-gray-100', text: 'text-gray-700' };
 
@@ -338,15 +345,15 @@ export function ApplicantDetailPage() {
                   </div>
                   <div>
                     <p className="text-xs font-medium text-gray uppercase tracking-wide">Phone</p>
-                    <p className="mt-1 text-slate">{profile.phone || step2.phone || '—'}</p>
+                    <p className="mt-1 text-slate">{profile.phone || getStepString(step2Data, 'phone') || '—'}</p>
                   </div>
                   <div>
                     <p className="text-xs font-medium text-gray uppercase tracking-wide">Date of Birth</p>
-                    <p className="mt-1 text-slate">{step2.date_of_birth ? formatDate(step2.date_of_birth as string) : '—'}</p>
+                    <p className="mt-1 text-slate">{getStepString(step2Data, 'date_of_birth') ? formatDate(getStepString(step2Data, 'date_of_birth')) : '—'}</p>
                   </div>
                   <div>
                     <p className="text-xs font-medium text-gray uppercase tracking-wide">Position Applied</p>
-                    <p className="mt-1 text-slate">{(step1.position_applied as string)?.toUpperCase() || '—'}</p>
+                    <p className="mt-1 text-slate">{getStepString(step1Data, 'position_applied').toUpperCase() || '—'}</p>
                   </div>
                 </div>
                 
@@ -354,19 +361,19 @@ export function ApplicantDetailPage() {
                   <div>
                     <p className="text-xs font-medium text-gray uppercase tracking-wide">Address</p>
                     <p className="mt-1 text-slate">
-                      {step2.address_line1 || '—'}
-                      {step2.address_line2 && <><br />{step2.address_line2}</>}
-                      {(step2.city || step2.state || step2.zip) && (
-                        <><br />{[step2.city, step2.state, step2.zip].filter(Boolean).join(', ')}</>
+                      {getStepString(step2Data, 'address_line1') || '—'}
+                      {getStepString(step2Data, 'address_line2') && <><br />{getStepString(step2Data, 'address_line2')}</>}
+                      {(getStepString(step2Data, 'city') || getStepString(step2Data, 'state') || getStepString(step2Data, 'zip')) && (
+                        <><br />{[getStepString(step2Data, 'city'), getStepString(step2Data, 'state'), getStepString(step2Data, 'zip')].filter(Boolean).join(', ')}</>
                       )}
                     </p>
                   </div>
                   <div>
                     <p className="text-xs font-medium text-gray uppercase tracking-wide">Emergency Contact</p>
                     <p className="mt-1 text-slate">
-                      {step3.name || '—'}
-                      {step3.relationship && <span className="text-gray"> ({step3.relationship})</span>}
-                      {step3.phone && <><br />{step3.phone}</>}
+                      {getStepString(step3Data, 'name') || '—'}
+                      {getStepString(step3Data, 'relationship') && <span className="text-gray"> ({getStepString(step3Data, 'relationship')})</span>}
+                      {getStepString(step3Data, 'phone') && <><br />{getStepString(step3Data, 'phone')}</>}
                     </p>
                   </div>
                   <div>
@@ -523,7 +530,8 @@ export function ApplicantDetailPage() {
               {Array.from({ length: 22 }, (_, i) => i + 1).map((stepNum) => {
                 const step = steps.find(s => s.step_number === stepNum);
                 const isCompleted = step?.status === 'completed';
-                const isSkipped = step?.data?.skip === true;
+                const stepData = step?.data || {};
+                const isSkipped = stepData.skip === true;
                 
                 return (
                   <div
@@ -640,7 +648,7 @@ export function ApplicantDetailPage() {
                         {AGREEMENT_NAMES[agreement.agreement_type] || agreement.agreement_type}
                       </p>
                       <p className="text-xs text-gray">
-                        Signed by "{agreement.signed_name}" on {formatDate(agreement.signed_at)}
+                        Signed by &quot;{agreement.signed_name}&quot; on {formatDate(agreement.signed_at)}
                       </p>
                     </div>
                   </div>
