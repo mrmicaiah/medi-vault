@@ -1,6 +1,5 @@
 import React, { useState, useEffect } from 'react';
 import { Link } from 'react-router-dom';
-import { Badge } from '../../components/ui/Badge';
 import { Button } from '../../components/ui/Button';
 import { Alert } from '../../components/ui/Alert';
 import { api } from '../../lib/api';
@@ -19,7 +18,6 @@ interface Applicant {
 }
 
 interface ApplicantDetail {
-  // Basic info
   city?: string;
   certifications?: string[];
   has_cpr_certification?: string;
@@ -31,7 +29,6 @@ interface ApplicantDetail {
   hours_per_week?: string;
   comfortable_with_smokers?: string;
   position_applied?: string;
-  // Onboarding status
   credentials_uploaded?: boolean;
   cpr_uploaded?: boolean;
   tb_uploaded?: boolean;
@@ -59,14 +56,16 @@ export function PipelinePage() {
     try {
       setLoading(true);
       setError(null);
+      console.log('[Applicants] Fetching pipeline...');
       const res = await api.get<PipelineResponse>('/admin/pipeline');
+      console.log('[Applicants] Response:', res);
       setApplicants(res.applications || []);
       
-      // Auto-select first applicant if available
       if (res.applications && res.applications.length > 0) {
         selectApplicant(res.applications[0]);
       }
     } catch (err) {
+      console.error('[Applicants] Error:', err);
       setError(err instanceof Error ? err.message : 'Failed to load applicants');
     } finally {
       setLoading(false);
@@ -78,12 +77,12 @@ export function PipelinePage() {
     setLoadingDetail(true);
     
     try {
-      // Fetch detailed applicant data
+      console.log('[Applicants] Fetching detail for:', applicant.id);
       const res = await api.get<{ steps: Array<{ step_number: number; data: Record<string, unknown> }> }>(
         `/admin/applicant/${applicant.id}`
       );
+      console.log('[Applicants] Detail response:', res);
       
-      // Extract data from steps
       const steps = res.steps || [];
       const step1 = steps.find(s => s.step_number === 1)?.data || {};
       const step2 = steps.find(s => s.step_number === 2)?.data || {};
@@ -108,11 +107,11 @@ export function PipelinePage() {
         credentials_uploaded: Boolean(step15.file_name),
         cpr_uploaded: Boolean(step16.file_name),
         tb_uploaded: Boolean(step17.file_name),
-        link_sent: false, // TODO: track this
-        onboarding_complete: false, // TODO: track this
+        link_sent: false,
+        onboarding_complete: false,
       });
     } catch (err) {
-      console.error('Failed to load applicant detail:', err);
+      console.error('[Applicants] Detail error:', err);
       setApplicantDetail(null);
     } finally {
       setLoadingDetail(false);
@@ -120,20 +119,12 @@ export function PipelinePage() {
   };
 
   const getPositionLabel = (position?: string) => {
-    const labels: Record<string, string> = {
-      pca: 'PCA',
-      hha: 'HHA',
-      cna: 'CNA',
-      lpn: 'LPN',
-      rn: 'RN',
-    };
+    const labels: Record<string, string> = { pca: 'PCA', hha: 'HHA', cna: 'CNA', lpn: 'LPN', rn: 'RN' };
     return labels[position || ''] || position?.toUpperCase() || '—';
   };
 
   const formatCertifications = (certs?: string[]) => {
-    if (!certs || certs.length === 0 || (certs.length === 1 && certs[0] === 'none')) {
-      return 'None';
-    }
+    if (!certs || certs.length === 0 || (certs.length === 1 && certs[0] === 'none')) return 'None';
     return certs.filter(c => c !== 'none').map(c => c.toUpperCase()).join(', ');
   };
 
@@ -151,12 +142,7 @@ export function PipelinePage() {
   };
 
   const formatHours = (hours?: string) => {
-    const labels: Record<string, string> = {
-      part_time: 'Part Time',
-      full_time: 'Full Time',
-      fill_in: 'Fill In',
-      live_in: 'Live-In',
-    };
+    const labels: Record<string, string> = { part_time: 'Part Time', full_time: 'Full Time', fill_in: 'Fill In', live_in: 'Live-In' };
     return labels[hours || ''] || '—';
   };
 
@@ -194,14 +180,15 @@ export function PipelinePage() {
         
         {error && (
           <div className="p-4">
-            <Alert variant="error" dismissible>{error}</Alert>
+            <Alert variant="error" dismissible onDismiss={() => setError(null)}>{error}</Alert>
           </div>
         )}
         
         <div className="flex-1 overflow-y-auto">
           {applicants.length === 0 ? (
             <div className="p-4 text-center text-sm text-gray">
-              No applicants yet
+              <p>No applicants yet</p>
+              <p className="text-xs mt-2">Debug: Check console for API response</p>
             </div>
           ) : (
             <div className="divide-y divide-border">
@@ -221,7 +208,7 @@ export function PipelinePage() {
                       <p className="text-sm font-semibold text-navy truncate">
                         {applicant.first_name} {applicant.last_name}
                       </p>
-                      <p className="text-xs text-gray truncate">{applicant.location_name}</p>
+                      <p className="text-xs text-gray truncate">{applicant.location_name || applicant.status}</p>
                     </div>
                   </div>
                 </button>
@@ -235,7 +222,6 @@ export function PipelinePage() {
       <div className="flex-1 bg-gray-50 overflow-y-auto">
         {selectedApplicant ? (
           <div className="p-6">
-            {/* Header */}
             <div className="flex items-start justify-between mb-6">
               <div>
                 <h2 className="font-display text-2xl font-bold text-navy">
@@ -243,10 +229,7 @@ export function PipelinePage() {
                   <span className="text-maroon ml-2">| {getPositionLabel(applicantDetail?.position_applied)}</span>
                 </h2>
               </div>
-              <button 
-                onClick={() => setSelectedApplicant(null)}
-                className="text-gray hover:text-slate"
-              >
+              <button onClick={() => setSelectedApplicant(null)} className="text-gray hover:text-slate">
                 <svg className="h-6 w-6" fill="none" viewBox="0 0 24 24" stroke="currentColor">
                   <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M6 18L18 6M6 6l12 12" />
                 </svg>
@@ -329,62 +312,29 @@ export function PipelinePage() {
 
                 {/* Onboarding Status */}
                 <div className="bg-white rounded-xl border border-border p-4 mb-6">
-                  <div className="flex items-center justify-between mb-3">
-                    <p className="text-sm font-medium text-gray">ONBOARDING STATUS</p>
-                  </div>
+                  <p className="text-sm font-medium text-gray mb-3">ONBOARDING STATUS</p>
                   <div className="flex flex-wrap gap-4">
-                    <label className="flex items-center gap-2">
-                      <input 
-                        type="checkbox" 
-                        checked={applicantDetail?.credentials_uploaded || false}
-                        readOnly
-                        className="h-4 w-4 rounded border-gray-300 text-success"
-                      />
-                      <span className="text-sm">Cred.</span>
-                    </label>
-                    <label className="flex items-center gap-2">
-                      <input 
-                        type="checkbox" 
-                        checked={applicantDetail?.cpr_uploaded || false}
-                        readOnly
-                        className="h-4 w-4 rounded border-gray-300 text-success"
-                      />
-                      <span className="text-sm">CPR</span>
-                    </label>
-                    <label className="flex items-center gap-2">
-                      <input 
-                        type="checkbox" 
-                        checked={applicantDetail?.tb_uploaded || false}
-                        readOnly
-                        className="h-4 w-4 rounded border-gray-300 text-success"
-                      />
-                      <span className="text-sm">TB</span>
-                    </label>
-                    <label className="flex items-center gap-2">
-                      <input 
-                        type="checkbox" 
-                        checked={applicantDetail?.link_sent || false}
-                        readOnly
-                        className="h-4 w-4 rounded border-gray-300 text-success"
-                      />
-                      <span className="text-sm">Link Sent</span>
-                    </label>
-                    <label className="flex items-center gap-2">
-                      <input 
-                        type="checkbox" 
-                        checked={applicantDetail?.onboarding_complete || false}
-                        readOnly
-                        className="h-4 w-4 rounded border-gray-300 text-success"
-                      />
-                      <span className="text-sm">Complete</span>
-                    </label>
+                    {[
+                      { key: 'credentials_uploaded', label: 'Cred.' },
+                      { key: 'cpr_uploaded', label: 'CPR' },
+                      { key: 'tb_uploaded', label: 'TB' },
+                      { key: 'link_sent', label: 'Link Sent' },
+                      { key: 'onboarding_complete', label: 'Complete' },
+                    ].map(item => (
+                      <label key={item.key} className="flex items-center gap-2">
+                        <input 
+                          type="checkbox" 
+                          checked={applicantDetail?.[item.key as keyof ApplicantDetail] as boolean || false}
+                          readOnly
+                          className="h-4 w-4 rounded border-gray-300 text-success"
+                        />
+                        <span className="text-sm">{item.label}</span>
+                      </label>
+                    ))}
                   </div>
                 </div>
 
-                {/* Upload Button */}
-                <Button variant="secondary" className="w-full">
-                  UPLOAD
-                </Button>
+                <Button variant="secondary" className="w-full">UPLOAD</Button>
               </>
             )}
           </div>
