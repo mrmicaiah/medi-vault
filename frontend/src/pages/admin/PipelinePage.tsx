@@ -30,7 +30,6 @@ interface ApplicantDetail {
   hours_per_week?: string;
   comfortable_with_smokers?: string;
   position_applied?: string;
-  // Document status flags
   id_front_uploaded?: boolean;
   id_back_uploaded?: boolean;
   ssn_card_uploaded?: boolean;
@@ -38,7 +37,6 @@ interface ApplicantDetail {
   credentials_uploaded?: boolean;
   cpr_uploaded?: boolean;
   tb_uploaded?: boolean;
-  // Personal info for edit mode
   first_name?: string;
   last_name?: string;
   email?: string;
@@ -65,16 +63,10 @@ const YesNo = ({ value }: { value: boolean | string | undefined }) => {
   );
 };
 
-const DocNode = ({ uploaded, label }: { uploaded: boolean; label: string }) => (
+const DocLight = ({ uploaded, label }: { uploaded: boolean; label: string }) => (
   <div className="flex items-center gap-1.5">
-    <div className={`w-4 h-4 rounded-full border-2 flex items-center justify-center text-[10px] ${
-      uploaded 
-        ? 'border-success bg-success text-white' 
-        : 'border-error bg-error text-white'
-    }`}>
-      {uploaded ? '✓' : '✕'}
-    </div>
-    <span className={`text-xs ${uploaded ? 'text-gray' : 'text-error font-medium'}`}>{label}</span>
+    <div className={`w-3 h-3 rounded-full ${uploaded ? 'bg-success' : 'bg-error'}`} />
+    <span className="text-xs text-gray">{label}</span>
   </div>
 );
 
@@ -193,7 +185,6 @@ export function PipelinePage() {
         available_days: step10.available_days as string[],
         hours_per_week: step10.hours_per_week as string,
         comfortable_with_smokers: step10.comfortable_with_smokers as string,
-        // Document uploads - check if file_url exists
         work_auth_uploaded: !!step11.file_url,
         id_front_uploaded: !!step12.file_url,
         id_back_uploaded: !!step13.file_url,
@@ -507,18 +498,22 @@ export function PipelinePage() {
             onClick={closePanel} 
           />
           <div className={`fixed top-0 right-0 h-full w-[420px] bg-white shadow-2xl z-50 flex flex-col transition-transform duration-250 ease-out ${panelOpen ? 'translate-x-0' : 'translate-x-full'}`}>
+            {/* Header */}
             <div className="px-6 py-5 bg-navy flex items-center justify-between">
-              <div>
-                <div className="flex items-center gap-3">
-                  <h2 className="text-lg font-semibold text-white">{editMode ? 'Edit Applicant' : `${selectedApplicant.first_name} ${selectedApplicant.last_name}`}</h2>
-                  {!editMode && applicantDetail?.position_applied && (
-                    <span className="text-sm font-bold text-white">{getPositionLabel(applicantDetail.position_applied)}</span>
-                  )}
-                </div>
+              <div className="flex items-center gap-3">
+                <h2 className="text-lg font-semibold text-white">
+                  {editMode ? 'Edit Applicant' : `${selectedApplicant.first_name} ${selectedApplicant.last_name}`}
+                </h2>
+                {!editMode && applicantDetail?.position_applied && (
+                  <span className="text-sm font-bold text-white bg-white/20 px-2 py-0.5 rounded">
+                    {getPositionLabel(applicantDetail.position_applied)}
+                  </span>
+                )}
               </div>
               <button onClick={closePanel} className="text-white/60 hover:text-white text-2xl leading-none p-1">×</button>
             </div>
 
+            {/* Content */}
             <div className="flex-1 overflow-y-auto p-5 bg-gray-50">
               {loadingDetail ? (
                 <div className="flex items-center justify-center py-12">
@@ -633,6 +628,7 @@ export function PipelinePage() {
                 </div>
               ) : (
                 <>
+                  {/* Info Table */}
                   <div className="bg-white rounded-lg shadow-sm overflow-hidden">
                     {[
                       { label: 'City', value: applicantDetail?.city || '—' },
@@ -652,24 +648,26 @@ export function PipelinePage() {
                     ))}
                   </div>
 
+                  {/* Action Buttons */}
                   <div className="grid grid-cols-3 gap-3 mt-5">
                     <button onClick={() => goToView(selectedApplicant.id)} className="py-3 bg-navy text-white text-sm font-semibold rounded-lg hover:bg-navy/90 transition-colors">Full Profile</button>
                     <button onClick={() => setEditMode(true)} className="py-3 bg-white border border-border text-navy text-sm font-semibold rounded-lg hover:bg-gray-50 transition-colors">Edit</button>
                     <button onClick={() => goToHire(selectedApplicant.id)} className="py-3 bg-success text-navy text-sm font-semibold rounded-lg hover:bg-success/90 transition-colors">Onboard</button>
                   </div>
 
+                  {/* Document Lights */}
                   <div className="bg-white rounded-lg shadow-sm p-4 mt-5">
                     <span className="text-[11px] font-semibold text-gray uppercase tracking-wide block mb-3">Documents</span>
-                    <div className="flex flex-wrap gap-x-4 gap-y-2">
-                      <DocNode uploaded={applicantDetail?.id_front_uploaded || false} label="ID Front" />
-                      <DocNode uploaded={applicantDetail?.id_back_uploaded || false} label="ID Back" />
-                      <DocNode uploaded={applicantDetail?.ssn_card_uploaded || false} label="SSN Card" />
-                      <DocNode uploaded={applicantDetail?.work_auth_uploaded || false} label="Work Auth" />
+                    <div className="flex flex-wrap gap-x-5 gap-y-2">
+                      <DocLight uploaded={applicantDetail?.id_front_uploaded || false} label="ID Front" />
+                      <DocLight uploaded={applicantDetail?.id_back_uploaded || false} label="ID Back" />
+                      <DocLight uploaded={applicantDetail?.ssn_card_uploaded || false} label="SSN Card" />
+                      <DocLight uploaded={applicantDetail?.work_auth_uploaded || false} label="Work Auth" />
                     </div>
-                    <div className="flex flex-wrap gap-x-4 gap-y-2 mt-2">
-                      <DocNode uploaded={applicantDetail?.credentials_uploaded || false} label="Credentials" />
-                      <DocNode uploaded={applicantDetail?.cpr_uploaded || false} label="CPR" />
-                      <DocNode uploaded={applicantDetail?.tb_uploaded || false} label="TB" />
+                    <div className="flex flex-wrap gap-x-5 gap-y-2 mt-2">
+                      <DocLight uploaded={applicantDetail?.credentials_uploaded || false} label="Credentials" />
+                      <DocLight uploaded={applicantDetail?.cpr_uploaded || false} label="CPR" />
+                      <DocLight uploaded={applicantDetail?.tb_uploaded || false} label="TB" />
                     </div>
                   </div>
 
