@@ -50,7 +50,7 @@ export function Header() {
             <img 
               src={agency.logo_url} 
               alt={agency.name} 
-              className="h-8 w-auto max-w-[120px] object-contain"
+              className="h-12 w-auto max-w-[200px] object-contain"
             />
           ) : (
             <>
