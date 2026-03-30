@@ -43,29 +43,19 @@ export function AuthProvider({ children }: { children: React.ReactNode }) {
     initialized: false,
   });
 
-  // Track if we already have a valid profile to avoid overwriting with null on timeout
-  const hasValidProfile = useRef(false);
   const fetchInProgress = useRef(false);
 
-  // Fetch profile with timeout - but don't overwrite valid profile with null
-  const fetchProfile = async (userId: string, isRetry = false): Promise<Profile | null> => {
-    // Don't fetch if another fetch is in progress
-    if (fetchInProgress.current && !isRetry) {
+  // Fetch profile - no timeout, just let it complete
+  const fetchProfile = async (userId: string): Promise<Profile | null> => {
+    if (fetchInProgress.current) {
       console.log('[Auth] Fetch already in progress, skipping');
-      return null;
+      return state.profile;
     }
     
     fetchInProgress.current = true;
     console.log('[Auth] Fetching profile for:', userId);
     
-    const timeoutPromise = new Promise<null>((resolve) => {
-      setTimeout(() => {
-        console.error('[Auth] Profile fetch timed out after 8s');
-        resolve(null);
-      }, 8000);
-    });
-
-    const fetchPromise = (async () => {
+    try {
       const { data, error } = await supabase
         .from('profiles')
         .select('*')
@@ -74,21 +64,18 @@ export function AuthProvider({ children }: { children: React.ReactNode }) {
       
       if (error) {
         console.error('[Auth] Profile fetch error:', error);
+        fetchInProgress.current = false;
         return null;
       }
+      
       console.log('[Auth] Profile fetched:', data?.role);
+      fetchInProgress.current = false;
       return data;
-    })();
-
-    const result = await Promise.race([fetchPromise, timeoutPromise]);
-    fetchInProgress.current = false;
-    
-    // If we got a valid profile, mark it
-    if (result) {
-      hasValidProfile.current = true;
+    } catch (err) {
+      console.error('[Auth] Profile fetch exception:', err);
+      fetchInProgress.current = false;
+      return null;
     }
-    
-    return result;
   };
 
   // Initialize auth on mount
@@ -130,30 +117,15 @@ export function AuthProvider({ children }: { children: React.ReactNode }) {
 
     initAuth();
 
-    // Listen for auth changes - but be careful not to clobber valid state
+    // Listen for auth changes
     const { data: { subscription } } = supabase.auth.onAuthStateChange(
       async (event, session) => {
         console.log('[Auth] Auth state change:', event);
         
         if (!mounted) return;
         
-        if (event === 'SIGNED_IN' && session?.user) {
-          // Only fetch if we don't already have a valid profile for this user
-          if (!hasValidProfile.current || state.user?.id !== session.user.id) {
-            const profile = await fetchProfile(session.user.id);
-            if (mounted && profile) {
-              setState({
-                user: session.user,
-                session,
-                profile,
-                role: (profile?.role as UserRole) || null,
-                loading: false,
-                initialized: true,
-              });
-            }
-          }
-        } else if (event === 'SIGNED_OUT') {
-          hasValidProfile.current = false;
+        // Only handle SIGNED_OUT - ignore other events since initAuth handles initial load
+        if (event === 'SIGNED_OUT') {
           setState({
             user: null,
             session: null,
@@ -162,14 +134,15 @@ export function AuthProvider({ children }: { children: React.ReactNode }) {
             loading: false,
             initialized: true,
           });
-        } else if (event === 'TOKEN_REFRESHED' && session?.user) {
-          // Just update the session, don't refetch profile
+        } else if (event === 'TOKEN_REFRESHED' && session) {
+          // Just update session, don't refetch profile
           setState(prev => ({
             ...prev,
             session,
             user: session.user,
           }));
         }
+        // Ignore SIGNED_IN and INITIAL_SESSION - initAuth already handles these
       }
     );
 
@@ -180,8 +153,21 @@ export function AuthProvider({ children }: { children: React.ReactNode }) {
   }, []);
 
   const signIn = async (email: string, password: string) => {
-    const { error } = await supabase.auth.signInWithPassword({ email, password });
+    const { error, data } = await supabase.auth.signInWithPassword({ email, password });
     if (error) throw error;
+    
+    // Manually fetch profile after sign in
+    if (data.user) {
+      const profile = await fetchProfile(data.user.id);
+      setState({
+        user: data.user,
+        session: data.session,
+        profile,
+        role: (profile?.role as UserRole) || null,
+        loading: false,
+        initialized: true,
+      });
+    }
   };
 
   const signUp = async (
@@ -208,7 +194,6 @@ export function AuthProvider({ children }: { children: React.ReactNode }) {
   };
 
   const signOut = async () => {
-    hasValidProfile.current = false;
     const { error } = await supabase.auth.signOut();
     if (error) throw error;
   };
@@ -222,7 +207,8 @@ export function AuthProvider({ children }: { children: React.ReactNode }) {
 
   const refetchProfile = async () => {
     if (state.user) {
-      const profile = await fetchProfile(state.user.id, true);
+      fetchInProgress.current = false; // Allow refetch
+      const profile = await fetchProfile(state.user.id);
       if (profile) {
         setState(prev => ({ ...prev, profile, role: (profile.role as UserRole) || null }));
       }
