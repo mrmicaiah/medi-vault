@@ -55,10 +55,9 @@ export function AuthProvider({ children }: { children: React.ReactNode }) {
       return cached;
     }
     
-    // If already fetching this user, wait for result
+    // If already fetching this user, wait briefly and check cache
     if (fetchingRef.current === userId) {
       console.log('[Auth] Already fetching profile for:', userId);
-      // Wait a bit and check cache
       await new Promise(r => setTimeout(r, 500));
       return profileCacheRef.current.get(userId) || null;
     }
@@ -67,26 +66,36 @@ export function AuthProvider({ children }: { children: React.ReactNode }) {
     console.log('[Auth] Fetching profile for:', userId);
     
     try {
-      const { data, error } = await supabase
-        .from('profiles')
-        .select('*')
-        .eq('id', userId)
-        .maybeSingle();
+      // Race between query and timeout
+      const result = await Promise.race([
+        supabase
+          .from('profiles')
+          .select('*')
+          .eq('id', userId)
+          .maybeSingle()
+          .then(({ data, error }) => {
+            if (error) {
+              console.error('[Auth] Profile fetch error:', error);
+              return null;
+            }
+            return data as Profile | null;
+          }),
+        new Promise<null>((resolve) => {
+          setTimeout(() => {
+            console.warn('[Auth] Profile fetch timed out after 8s');
+            resolve(null);
+          }, 8000);
+        })
+      ]);
       
-      if (error) {
-        console.error('[Auth] Profile fetch error:', error);
-        fetchingRef.current = null;
-        return null;
-      }
+      console.log('[Auth] Profile result:', result);
       
-      console.log('[Auth] Profile fetched:', data);
-      
-      if (data) {
-        profileCacheRef.current.set(userId, data as Profile);
+      if (result) {
+        profileCacheRef.current.set(userId, result);
       }
       
       fetchingRef.current = null;
-      return data as Profile | null;
+      return result;
     } catch (err) {
       console.error('[Auth] Profile fetch exception:', err);
       fetchingRef.current = null;
