@@ -33,6 +33,19 @@ interface ApplicantDetail {
   credentials_uploaded?: boolean;
   cpr_uploaded?: boolean;
   tb_uploaded?: boolean;
+  // Additional fields for editing
+  first_name?: string;
+  last_name?: string;
+  email?: string;
+  phone?: string;
+  address_line1?: string;
+  address_line2?: string;
+  state?: string;
+  zip?: string;
+  date_of_birth?: string;
+  emergency_name?: string;
+  emergency_relationship?: string;
+  emergency_phone?: string;
 }
 
 // Simple in-memory cache
@@ -70,6 +83,11 @@ export function PipelinePage() {
   const [loadingDetail, setLoadingDetail] = useState(false);
   const [panelOpen, setPanelOpen] = useState(false);
   
+  // Edit mode state
+  const [editMode, setEditMode] = useState(false);
+  const [editForm, setEditForm] = useState<Record<string, string>>({});
+  const [saving, setSaving] = useState(false);
+  
   // Upload state
   const [showUploadModal, setShowUploadModal] = useState(false);
   const [uploadType, setUploadType] = useState('');
@@ -97,11 +115,13 @@ export function PipelinePage() {
   const selectApplicant = async (applicant: Applicant) => {
     setSelectedApplicant(applicant);
     setPanelOpen(true);
+    setEditMode(false);
     
     // Check cache first
     const cached = detailCache.get(applicant.id);
     if (cached) {
       setApplicantDetail(cached);
+      initEditForm(cached, applicant);
       return;
     }
     
@@ -116,6 +136,7 @@ export function PipelinePage() {
       const steps = res.steps || [];
       const step1 = steps.find(s => s.step_number === 1)?.data || {};
       const step2 = steps.find(s => s.step_number === 2)?.data || {};
+      const step3 = steps.find(s => s.step_number === 3)?.data || {};
       const step4 = steps.find(s => s.step_number === 4)?.data || {};
       const step8 = steps.find(s => s.step_number === 8)?.data || {};
       const step15 = steps.find(s => s.step_number === 15)?.data || {};
@@ -137,11 +158,25 @@ export function PipelinePage() {
         credentials_uploaded: Boolean(step15.file_name),
         cpr_uploaded: Boolean(step16.file_name),
         tb_uploaded: Boolean(step17.file_name),
+        // Personal info for editing
+        first_name: applicant.first_name,
+        last_name: applicant.last_name,
+        email: applicant.email,
+        phone: step2.phone as string,
+        address_line1: step2.address_line1 as string,
+        address_line2: step2.address_line2 as string,
+        state: step2.state as string,
+        zip: step2.zip as string,
+        date_of_birth: step2.date_of_birth as string,
+        emergency_name: step3.name as string,
+        emergency_relationship: step3.relationship as string,
+        emergency_phone: step3.phone as string,
       };
       
       // Cache for fast re-access
       detailCache.set(applicant.id, detail);
       setApplicantDetail(detail);
+      initEditForm(detail, applicant);
     } catch (err) {
       console.error('Error loading applicant detail:', err);
     } finally {
@@ -149,8 +184,55 @@ export function PipelinePage() {
     }
   };
 
+  const initEditForm = (detail: ApplicantDetail, applicant: Applicant) => {
+    setEditForm({
+      first_name: detail.first_name || applicant.first_name || '',
+      last_name: detail.last_name || applicant.last_name || '',
+      email: detail.email || applicant.email || '',
+      phone: detail.phone || '',
+      city: detail.city || '',
+      address_line1: detail.address_line1 || '',
+      address_line2: detail.address_line2 || '',
+      state: detail.state || '',
+      zip: detail.zip || '',
+      date_of_birth: detail.date_of_birth || '',
+      emergency_name: detail.emergency_name || '',
+      emergency_relationship: detail.emergency_relationship || '',
+      emergency_phone: detail.emergency_phone || '',
+    });
+  };
+
+  const handleSaveEdit = async () => {
+    if (!selectedApplicant) return;
+    
+    setSaving(true);
+    try {
+      await api.patch(`/admin/applicants/${selectedApplicant.id}/profile`, editForm);
+      
+      // Update cache
+      const updatedDetail = { ...applicantDetail, ...editForm };
+      detailCache.set(selectedApplicant.id, updatedDetail as ApplicantDetail);
+      setApplicantDetail(updatedDetail as ApplicantDetail);
+      
+      // Update applicant in list (optimistic)
+      setApplicants(prev => prev.map(a => 
+        a.id === selectedApplicant.id 
+          ? { ...a, first_name: editForm.first_name, last_name: editForm.last_name, email: editForm.email }
+          : a
+      ));
+      setSelectedApplicant(prev => prev ? { ...prev, first_name: editForm.first_name, last_name: editForm.last_name, email: editForm.email } : null);
+      
+      setEditMode(false);
+    } catch (err) {
+      setError(err instanceof Error ? err.message : 'Failed to save changes');
+    } finally {
+      setSaving(false);
+    }
+  };
+
   const closePanel = () => {
     setPanelOpen(false);
+    setEditMode(false);
     setTimeout(() => {
       setSelectedApplicant(null);
       setApplicantDetail(null);
@@ -354,7 +436,7 @@ export function PipelinePage() {
             <div className="px-6 py-5 bg-navy flex items-center justify-between">
               <div>
                 <h2 className="text-lg font-semibold text-white">
-                  {selectedApplicant.first_name} {selectedApplicant.last_name}
+                  {editMode ? 'Edit Applicant' : `${selectedApplicant.first_name} ${selectedApplicant.last_name}`}
                 </h2>
                 <p className="text-sm text-maroon font-medium">{getPositionLabel(applicantDetail?.position_applied)}</p>
               </div>
@@ -375,7 +457,163 @@ export function PipelinePage() {
                     <path className="opacity-75" fill="currentColor" d="M4 12a8 8 0 018-8V0C5.373 0 0 5.373 0 12h4z" />
                   </svg>
                 </div>
+              ) : editMode ? (
+                /* Edit Mode */
+                <div className="space-y-4">
+                  <div className="bg-white rounded-lg shadow-sm p-4 space-y-3">
+                    <h3 className="text-xs font-semibold text-gray uppercase tracking-wide">Personal Info</h3>
+                    <div className="grid grid-cols-2 gap-3">
+                      <div>
+                        <label className="block text-xs text-gray mb-1">First Name</label>
+                        <input
+                          type="text"
+                          value={editForm.first_name}
+                          onChange={(e) => setEditForm({ ...editForm, first_name: e.target.value })}
+                          className="w-full px-3 py-2 border border-border rounded-lg text-sm focus:border-maroon focus:ring-1 focus:ring-maroon/20 outline-none"
+                        />
+                      </div>
+                      <div>
+                        <label className="block text-xs text-gray mb-1">Last Name</label>
+                        <input
+                          type="text"
+                          value={editForm.last_name}
+                          onChange={(e) => setEditForm({ ...editForm, last_name: e.target.value })}
+                          className="w-full px-3 py-2 border border-border rounded-lg text-sm focus:border-maroon focus:ring-1 focus:ring-maroon/20 outline-none"
+                        />
+                      </div>
+                    </div>
+                    <div>
+                      <label className="block text-xs text-gray mb-1">Email</label>
+                      <input
+                        type="email"
+                        value={editForm.email}
+                        onChange={(e) => setEditForm({ ...editForm, email: e.target.value })}
+                        className="w-full px-3 py-2 border border-border rounded-lg text-sm focus:border-maroon focus:ring-1 focus:ring-maroon/20 outline-none"
+                      />
+                    </div>
+                    <div>
+                      <label className="block text-xs text-gray mb-1">Phone</label>
+                      <input
+                        type="tel"
+                        value={editForm.phone}
+                        onChange={(e) => setEditForm({ ...editForm, phone: e.target.value })}
+                        className="w-full px-3 py-2 border border-border rounded-lg text-sm focus:border-maroon focus:ring-1 focus:ring-maroon/20 outline-none"
+                      />
+                    </div>
+                    <div>
+                      <label className="block text-xs text-gray mb-1">Date of Birth</label>
+                      <input
+                        type="date"
+                        value={editForm.date_of_birth}
+                        onChange={(e) => setEditForm({ ...editForm, date_of_birth: e.target.value })}
+                        className="w-full px-3 py-2 border border-border rounded-lg text-sm focus:border-maroon focus:ring-1 focus:ring-maroon/20 outline-none"
+                      />
+                    </div>
+                  </div>
+
+                  <div className="bg-white rounded-lg shadow-sm p-4 space-y-3">
+                    <h3 className="text-xs font-semibold text-gray uppercase tracking-wide">Address</h3>
+                    <div>
+                      <label className="block text-xs text-gray mb-1">Street Address</label>
+                      <input
+                        type="text"
+                        value={editForm.address_line1}
+                        onChange={(e) => setEditForm({ ...editForm, address_line1: e.target.value })}
+                        className="w-full px-3 py-2 border border-border rounded-lg text-sm focus:border-maroon focus:ring-1 focus:ring-maroon/20 outline-none"
+                      />
+                    </div>
+                    <div>
+                      <label className="block text-xs text-gray mb-1">Apt/Suite</label>
+                      <input
+                        type="text"
+                        value={editForm.address_line2}
+                        onChange={(e) => setEditForm({ ...editForm, address_line2: e.target.value })}
+                        className="w-full px-3 py-2 border border-border rounded-lg text-sm focus:border-maroon focus:ring-1 focus:ring-maroon/20 outline-none"
+                      />
+                    </div>
+                    <div className="grid grid-cols-3 gap-3">
+                      <div>
+                        <label className="block text-xs text-gray mb-1">City</label>
+                        <input
+                          type="text"
+                          value={editForm.city}
+                          onChange={(e) => setEditForm({ ...editForm, city: e.target.value })}
+                          className="w-full px-3 py-2 border border-border rounded-lg text-sm focus:border-maroon focus:ring-1 focus:ring-maroon/20 outline-none"
+                        />
+                      </div>
+                      <div>
+                        <label className="block text-xs text-gray mb-1">State</label>
+                        <input
+                          type="text"
+                          value={editForm.state}
+                          onChange={(e) => setEditForm({ ...editForm, state: e.target.value })}
+                          className="w-full px-3 py-2 border border-border rounded-lg text-sm focus:border-maroon focus:ring-1 focus:ring-maroon/20 outline-none"
+                        />
+                      </div>
+                      <div>
+                        <label className="block text-xs text-gray mb-1">ZIP</label>
+                        <input
+                          type="text"
+                          value={editForm.zip}
+                          onChange={(e) => setEditForm({ ...editForm, zip: e.target.value })}
+                          className="w-full px-3 py-2 border border-border rounded-lg text-sm focus:border-maroon focus:ring-1 focus:ring-maroon/20 outline-none"
+                        />
+                      </div>
+                    </div>
+                  </div>
+
+                  <div className="bg-white rounded-lg shadow-sm p-4 space-y-3">
+                    <h3 className="text-xs font-semibold text-gray uppercase tracking-wide">Emergency Contact</h3>
+                    <div>
+                      <label className="block text-xs text-gray mb-1">Name</label>
+                      <input
+                        type="text"
+                        value={editForm.emergency_name}
+                        onChange={(e) => setEditForm({ ...editForm, emergency_name: e.target.value })}
+                        className="w-full px-3 py-2 border border-border rounded-lg text-sm focus:border-maroon focus:ring-1 focus:ring-maroon/20 outline-none"
+                      />
+                    </div>
+                    <div className="grid grid-cols-2 gap-3">
+                      <div>
+                        <label className="block text-xs text-gray mb-1">Relationship</label>
+                        <input
+                          type="text"
+                          value={editForm.emergency_relationship}
+                          onChange={(e) => setEditForm({ ...editForm, emergency_relationship: e.target.value })}
+                          className="w-full px-3 py-2 border border-border rounded-lg text-sm focus:border-maroon focus:ring-1 focus:ring-maroon/20 outline-none"
+                        />
+                      </div>
+                      <div>
+                        <label className="block text-xs text-gray mb-1">Phone</label>
+                        <input
+                          type="tel"
+                          value={editForm.emergency_phone}
+                          onChange={(e) => setEditForm({ ...editForm, emergency_phone: e.target.value })}
+                          className="w-full px-3 py-2 border border-border rounded-lg text-sm focus:border-maroon focus:ring-1 focus:ring-maroon/20 outline-none"
+                        />
+                      </div>
+                    </div>
+                  </div>
+
+                  {/* Save / Cancel buttons */}
+                  <div className="grid grid-cols-2 gap-3 pt-2">
+                    <button 
+                      onClick={() => setEditMode(false)}
+                      className="py-3 bg-white border border-border text-navy text-sm font-semibold rounded-lg hover:bg-gray-50 transition-colors"
+                    >
+                      Cancel
+                    </button>
+                    <button 
+                      onClick={handleSaveEdit}
+                      disabled={saving}
+                      className="py-3 bg-maroon text-white text-sm font-semibold rounded-lg hover:bg-maroon/90 transition-colors disabled:opacity-50"
+                    >
+                      {saving ? 'Saving...' : 'Save Changes'}
+                    </button>
+                  </div>
+                </div>
               ) : (
+                /* View Mode */
                 <>
                   {/* Info Grid */}
                   <div className="bg-white rounded-lg shadow-sm overflow-hidden">
@@ -406,13 +644,19 @@ export function PipelinePage() {
                     ))}
                   </div>
 
-                  {/* Action Buttons */}
-                  <div className="grid grid-cols-2 gap-3 mt-5">
+                  {/* Action Buttons - 3 columns now */}
+                  <div className="grid grid-cols-3 gap-3 mt-5">
                     <button 
                       onClick={() => goToView(selectedApplicant.id)}
                       className="py-3 bg-navy text-white text-sm font-semibold rounded-lg hover:bg-navy/90 transition-colors"
                     >
-                      View Full Profile
+                      Full Profile
+                    </button>
+                    <button 
+                      onClick={() => setEditMode(true)}
+                      className="py-3 bg-white border border-border text-navy text-sm font-semibold rounded-lg hover:bg-gray-50 transition-colors"
+                    >
+                      Edit
                     </button>
                     <button 
                       onClick={() => goToHire(selectedApplicant.id)}
