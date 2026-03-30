@@ -1,6 +1,7 @@
 import React, { useState, useRef, useEffect } from 'react';
 import { useNavigate, useLocation } from 'react-router-dom';
 import { useAuth } from '../../hooks/useAuth';
+import { useAgency } from '../../contexts/AgencyContext';
 import { getInitials } from '../../lib/utils';
 import type { UserRole } from '../../types';
 
@@ -8,6 +9,7 @@ const STAFF_ROLES: UserRole[] = ['admin', 'superadmin', 'manager'];
 
 export function Header() {
   const { user, profile, role, signOut } = useAuth();
+  const { agency } = useAgency();
   const navigate = useNavigate();
   const location = useLocation();
   const [menuOpen, setMenuOpen] = useState(false);
@@ -32,7 +34,6 @@ export function Header() {
     navigate('/auth/login');
   };
 
-  // Get display name - fallback to email if no name
   const displayName = profile?.first_name && profile?.last_name 
     ? `${profile.first_name} ${profile.last_name}`
     : profile?.email?.split('@')[0] || user?.email?.split('@')[0] || 'User';
@@ -45,12 +46,22 @@ export function Header() {
     <header className="sticky top-0 z-30 flex h-16 items-center justify-between border-b border-border bg-white px-6">
       <div className="flex items-center gap-3">
         <div className="flex items-center gap-2">
-          <div className="flex h-8 w-8 items-center justify-center rounded-lg bg-maroon">
-            <span className="text-sm font-bold text-white">M</span>
-          </div>
-          <span className="font-display text-xl font-bold text-navy">
-            Medi<span className="text-maroon">Vault</span>
-          </span>
+          {agency?.logo_url ? (
+            <img 
+              src={agency.logo_url} 
+              alt={agency.name} 
+              className="h-8 w-auto max-w-[120px] object-contain"
+            />
+          ) : (
+            <>
+              <div className="flex h-8 w-8 items-center justify-center rounded-lg bg-maroon">
+                <span className="text-sm font-bold text-white">M</span>
+              </div>
+              <span className="font-display text-xl font-bold text-navy">
+                Medi<span className="text-maroon">Vault</span>
+              </span>
+            </>
+          )}
         </div>
 
         {/* Dev Mode Toggle - Only for staff */}
