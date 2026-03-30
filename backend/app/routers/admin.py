@@ -1,19 +1,58 @@
-from fastapi import APIRouter, Depends, HTTPException
+from fastapi import APIRouter, Depends, HTTPException, Header
 from supabase import Client
 from datetime import datetime, timedelta
 import logging
 
-from ..dependencies import get_supabase, require_staff
+from ..dependencies import get_supabase
 
 logger = logging.getLogger(__name__)
 
 router = APIRouter(prefix="/admin", tags=["admin"])
 
 
+async def get_staff_user(
+    authorization: str = Header(None),
+    supabase: Client = Depends(get_supabase),
+) -> dict:
+    """Validate JWT and require staff role. Returns user dict."""
+    if not authorization or not authorization.startswith("Bearer "):
+        raise HTTPException(status_code=401, detail="Missing or invalid authorization header")
+    
+    token = authorization.replace("Bearer ", "")
+    
+    try:
+        user_response = supabase.auth.get_user(token)
+        if not user_response or not user_response.user:
+            raise HTTPException(status_code=401, detail="Invalid or expired token")
+        auth_user = user_response.user
+    except HTTPException:
+        raise
+    except Exception as e:
+        logger.error(f"Token verification failed: {e}")
+        raise HTTPException(status_code=401, detail="Token verification failed")
+    
+    try:
+        profile_result = supabase.table("profiles").select("*").eq("id", str(auth_user.id)).single().execute()
+        if not profile_result.data:
+            raise HTTPException(status_code=404, detail="Profile not found")
+        profile = profile_result.data
+    except HTTPException:
+        raise
+    except Exception as e:
+        logger.error(f"Profile fetch failed: {e}")
+        raise HTTPException(status_code=500, detail="Failed to fetch profile")
+    
+    role = profile.get("role", "applicant")
+    if role not in ("admin", "superadmin", "manager"):
+        raise HTTPException(status_code=403, detail="Staff access required")
+    
+    return {"user_id": str(auth_user.id), "role": role, "profile": profile}
+
+
 @router.get("/dashboard")
 async def get_dashboard_stats(
     supabase: Client = Depends(get_supabase),
-    _user: dict = Depends(require_staff)
+    user: dict = Depends(get_staff_user)
 ):
     """Get dashboard statistics for admin users."""
     try:
@@ -57,8 +96,11 @@ async def get_dashboard_stats(
         try:
             recent_res = supabase.table("applications").select("*").gte("created_at", seven_days_ago).order("created_at", desc=True).limit(10).execute()
             for app in (recent_res.data or []):
-                profile_res = supabase.table("profiles").select("first_name, last_name, email").eq("id", app["user_id"]).single().execute()
-                profile = profile_res.data or {}
+                try:
+                    profile_res = supabase.table("profiles").select("first_name, last_name, email").eq("id", app["user_id"]).single().execute()
+                    profile = profile_res.data or {}
+                except:
+                    profile = {}
                 stats["recent_applications"].append({
                     "id": app["id"],
                     "status": app["status"],
@@ -79,7 +121,7 @@ async def get_dashboard_stats(
 @router.get("/pipeline")
 async def get_pipeline(
     supabase: Client = Depends(get_supabase),
-    _user: dict = Depends(require_staff)
+    user: dict = Depends(get_staff_user)
 ):
     """Get applicant pipeline for admin users."""
     try:
@@ -127,7 +169,7 @@ async def get_pipeline(
 async def get_applicant_detail(
     application_id: str,
     supabase: Client = Depends(get_supabase),
-    _user: dict = Depends(require_staff)
+    user: dict = Depends(get_staff_user)
 ):
     """Get detailed applicant information."""
     try:
@@ -142,8 +184,8 @@ async def get_applicant_detail(
         try:
             profile_res = supabase.table("profiles").select("*").eq("id", app["user_id"]).single().execute()
             profile = profile_res.data or {}
-        except:
-            pass
+        except Exception as e:
+            logger.warning(f"Failed to fetch profile: {e}")
         
         location_name = None
         if app.get("location_id"):
@@ -153,9 +195,19 @@ async def get_applicant_detail(
             except:
                 pass
         
-        steps_res = supabase.table("application_steps").select("step_number, step_name, status, data, completed_at").eq("application_id", application_id).order("step_number").execute()
+        steps = []
+        try:
+            steps_res = supabase.table("application_steps").select("step_number, step_name, status, data, completed_at").eq("application_id", application_id).order("step_number").execute()
+            steps = steps_res.data or []
+        except Exception as e:
+            logger.warning(f"Failed to fetch steps: {e}")
         
-        docs_res = supabase.table("documents").select("id, document_type, original_filename, expiration_date, created_at, storage_path").eq("user_id", app["user_id"]).execute()
+        docs = []
+        try:
+            docs_res = supabase.table("documents").select("id, document_type, original_filename, expiration_date, created_at, storage_path").eq("user_id", app["user_id"]).execute()
+            docs = docs_res.data or []
+        except Exception as e:
+            logger.warning(f"Failed to fetch documents: {e}")
         
         return {
             "application": {
@@ -163,11 +215,12 @@ async def get_applicant_detail(
                 "status": app["status"],
                 "created_at": app["created_at"],
                 "submitted_at": app.get("submitted_at"),
+                "location_id": app.get("location_id"),
                 "location_name": location_name
             },
             "profile": profile,
-            "steps": steps_res.data or [],
-            "documents": docs_res.data or []
+            "steps": steps,
+            "documents": docs
         }
         
     except HTTPException:
@@ -177,14 +230,14 @@ async def get_applicant_detail(
         raise HTTPException(status_code=500, detail=str(e))
 
 
-# Keep old endpoint for backward compatibility
 @router.get("/applicant/{application_id}")
 async def get_applicant_detail_old(
     application_id: str,
     supabase: Client = Depends(get_supabase),
-    _user: dict = Depends(require_staff)
+    user: dict = Depends(get_staff_user)
 ):
-    return await get_applicant_detail(application_id, supabase, _user)
+    """Backward compatible endpoint."""
+    return await get_applicant_detail(application_id, supabase, user)
 
 
 @router.post("/applicant/{application_id}/status")
@@ -192,7 +245,7 @@ async def update_application_status(
     application_id: str,
     status_update: dict,
     supabase: Client = Depends(get_supabase),
-    _user: dict = Depends(require_staff)
+    user: dict = Depends(get_staff_user)
 ):
     """Update application status."""
     try:
@@ -216,83 +269,4 @@ async def update_application_status(
         raise
     except Exception as e:
         logger.error(f"Status update error: {e}")
-        raise HTTPException(status_code=500, detail=str(e))
-
-
-@router.get("/training-leads")
-async def get_training_leads(
-    supabase: Client = Depends(get_supabase),
-    _user: dict = Depends(require_staff)
-):
-    """Get certification training program leads from applications."""
-    try:
-        steps_res = supabase.table("application_steps").select("application_id, data").eq("step_number", 4).execute()
-        
-        if not steps_res.data:
-            return {"hha_leads": [], "cpr_leads": [], "total_hha": 0, "total_cpr": 0}
-        
-        hha_app_ids = []
-        cpr_app_ids = []
-        step_data_map = {}
-        
-        for step in steps_res.data:
-            data = step.get("data") or {}
-            app_id = step["application_id"]
-            step_data_map[app_id] = data
-            
-            if data.get("interested_in_hha_certification") in ["yes", "maybe"]:
-                hha_app_ids.append(app_id)
-            if data.get("interested_in_cpr_certification") in ["yes", "maybe"]:
-                cpr_app_ids.append(app_id)
-        
-        all_app_ids = list(set(hha_app_ids + cpr_app_ids))
-        if not all_app_ids:
-            return {"hha_leads": [], "cpr_leads": [], "total_hha": 0, "total_cpr": 0}
-        
-        apps_res = supabase.table("applications").select("*").in_("id", all_app_ids).execute()
-        
-        personal_steps_res = supabase.table("application_steps").select("application_id, data").eq("step_number", 2).in_("application_id", all_app_ids).execute()
-        phone_map = {step["application_id"]: (step.get("data") or {}).get("phone") for step in (personal_steps_res.data or [])}
-        
-        def build_lead(app):
-            profile = {}
-            try:
-                profile_res = supabase.table("profiles").select("first_name, last_name, email").eq("id", app["user_id"]).single().execute()
-                profile = profile_res.data or {}
-            except:
-                pass
-            
-            location_name = None
-            if app.get("location_id"):
-                try:
-                    location_res = supabase.table("locations").select("name").eq("id", app["location_id"]).single().execute()
-                    location_name = location_res.data.get("name") if location_res.data else None
-                except:
-                    pass
-            
-            edu_data = step_data_map.get(app["id"]) or {}
-            return {
-                "application_id": app["id"],
-                "user_id": app["user_id"],
-                "first_name": profile.get("first_name") or "",
-                "last_name": profile.get("last_name") or "",
-                "email": profile.get("email") or "",
-                "phone": phone_map.get(app["id"]),
-                "location_name": location_name,
-                "interested_in_hha": edu_data.get("interested_in_hha_certification"),
-                "interested_in_cpr": edu_data.get("interested_in_cpr_certification"),
-                "has_cpr": edu_data.get("has_cpr_certification"),
-                "certifications": edu_data.get("certifications") or [],
-                "application_status": app["status"],
-                "submitted_at": app.get("submitted_at"),
-                "updated_at": app["updated_at"]
-            }
-        
-        hha_leads = [build_lead(app) for app in (apps_res.data or []) if app["id"] in hha_app_ids]
-        cpr_leads = [build_lead(app) for app in (apps_res.data or []) if app["id"] in cpr_app_ids]
-        
-        return {"hha_leads": hha_leads, "cpr_leads": cpr_leads, "total_hha": len(hha_leads), "total_cpr": len(cpr_leads)}
-        
-    except Exception as e:
-        logger.error(f"Training leads error: {e}")
         raise HTTPException(status_code=500, detail=str(e))
