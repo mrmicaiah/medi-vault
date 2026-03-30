@@ -143,14 +143,10 @@ export function PipelinePage() {
         ssn_last_four?: string;
       }>(`/admin/applicants/${applicant.id}`);
       
-      // DEBUG: Log the full API response
-      console.log('[Pipeline] API response:', JSON.stringify(res, null, 2));
-      console.log('[Pipeline] steps:', res.steps);
-      console.log('[Pipeline] profile:', res.profile);
+      console.log('[Pipeline] API response:', res);
       
       const stepsMap = new Map<number, Record<string, unknown>>();
       (res.steps || []).forEach(s => {
-        console.log(`[Pipeline] Step ${s.step_number} data:`, s.data);
         stepsMap.set(s.step_number, s.data || {});
       });
       
@@ -172,11 +168,22 @@ export function PipelinePage() {
       const step16 = stepsMap.get(16) || {};
       const step17 = stepsMap.get(17) || {};
       
-      // Also try to get data from profile if steps are empty
       const profile = res.profile || {};
       
+      // Get position - try multiple possible field names
+      const position = (step4.position_applying as string) || (step4.position as string) || (step4.position_applied as string) || '';
+      console.log('[Pipeline] Step 4 data:', step4);
+      console.log('[Pipeline] Position found:', position);
+      
+      // Get certifications - handle both array and string
+      let certifications: string[] = [];
+      if (Array.isArray(step4.certifications)) {
+        certifications = step4.certifications as string[];
+      } else if (typeof step4.certifications === 'string') {
+        certifications = [step4.certifications];
+      }
+      
       const detail: ApplicantDetail = {
-        // Try step data first, then fall back to profile
         first_name: (step1.first_name as string) || (profile.first_name as string),
         last_name: (step1.last_name as string) || (profile.last_name as string),
         email: (step1.email as string) || (profile.email as string),
@@ -187,8 +194,8 @@ export function PipelinePage() {
         state: step2.state as string,
         zip: step2.zip as string,
         date_of_birth: step2.date_of_birth as string,
-        certifications: step4.certifications as string[],
-        position_applied: step4.position_applying as string,
+        certifications: certifications,
+        position_applied: position,
         has_cpr_certification: step5.has_cpr_certification as string,
         has_tb_test: step6.has_tb_test as string,
         has_drivers_license: step7.has_drivers_license as string,
@@ -374,8 +381,9 @@ export function PipelinePage() {
   const goToHire = (id: string) => navigate(`/admin/hire/${id}`);
 
   const getPositionLabel = (position?: string) => {
+    if (!position) return '';
     const labels: Record<string, string> = { pca: 'PCA', hha: 'HHA', cna: 'CNA', lpn: 'LPN', rn: 'RN' };
-    return labels[position || ''] || position?.toUpperCase() || '';
+    return labels[position.toLowerCase()] || position.toUpperCase();
   };
 
   const formatCertifications = (certs?: string[]) => {
@@ -513,7 +521,7 @@ export function PipelinePage() {
           />
           <div className={`fixed top-0 right-0 h-full w-[420px] bg-white shadow-2xl z-50 flex flex-col transition-transform duration-250 ease-out ${panelOpen ? 'translate-x-0' : 'translate-x-full'}`}>
             {/* Header */}
-            <div className="px-6 py-5 bg-navy flex items-center justify-between">
+            <div className="px-6 py-5 bg-navy flex items-center justify-between flex-shrink-0">
               <div className="flex items-center gap-3">
                 <h2 className="text-lg font-semibold text-white">
                   {editMode ? 'Edit Applicant' : `${selectedApplicant.first_name} ${selectedApplicant.last_name}`}
@@ -521,6 +529,12 @@ export function PipelinePage() {
                 {!editMode && applicantDetail?.position_applied && (
                   <span className="text-sm font-bold text-white bg-white/20 px-2 py-0.5 rounded">
                     {getPositionLabel(applicantDetail.position_applied)}
+                  </span>
+                )}
+                {/* Fallback: show certifications if no position */}
+                {!editMode && !applicantDetail?.position_applied && applicantDetail?.certifications && applicantDetail.certifications.length > 0 && applicantDetail.certifications[0] !== 'none' && (
+                  <span className="text-sm font-bold text-white bg-white/20 px-2 py-0.5 rounded">
+                    {applicantDetail.certifications[0].toUpperCase()}
                   </span>
                 )}
               </div>
@@ -690,9 +704,9 @@ export function PipelinePage() {
               )}
             </div>
 
-            {/* Footer */}
-            <div className="px-6 py-3 border-t border-gray-100 bg-white">
-              <p className="text-[10px] text-gray-400 text-center">Powered by MediVault</p>
+            {/* Footer - Always visible */}
+            <div className="px-6 py-3 border-t border-gray-100 bg-white flex-shrink-0">
+              <p className="text-[10px] text-gray-400 text-center">Powered by MediSVault</p>
             </div>
           </div>
         </>
