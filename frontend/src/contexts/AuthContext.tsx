@@ -43,49 +43,53 @@ export function AuthProvider({ children }: { children: React.ReactNode }) {
     initialized: false,
   });
   
-  const retryCountRef = useRef(0);
-  const maxRetries = 3;
+  // Track in-flight profile fetch to prevent duplicates
+  const fetchingRef = useRef<string | null>(null);
+  const profileCacheRef = useRef<Map<string, Profile>>(new Map());
 
-  const fetchProfile = useCallback(async (userId: string, retryOnFail = true): Promise<Profile | null> => {
+  const fetchProfile = useCallback(async (userId: string): Promise<Profile | null> => {
+    // Check cache first
+    const cached = profileCacheRef.current.get(userId);
+    if (cached) {
+      console.log('[Auth] Using cached profile for:', userId);
+      return cached;
+    }
+    
+    // If already fetching this user, wait for result
+    if (fetchingRef.current === userId) {
+      console.log('[Auth] Already fetching profile for:', userId);
+      // Wait a bit and check cache
+      await new Promise(r => setTimeout(r, 500));
+      return profileCacheRef.current.get(userId) || null;
+    }
+    
+    fetchingRef.current = userId;
     console.log('[Auth] Fetching profile for:', userId);
     
     try {
-      // Longer timeout - 10 seconds
-      const timeoutPromise = new Promise<null>((resolve) => {
-        setTimeout(() => {
-          console.warn('[Auth] Profile fetch timed out');
-          resolve(null);
-        }, 10000);
-      });
-
-      const queryPromise = supabase
+      const { data, error } = await supabase
         .from('profiles')
         .select('*')
         .eq('id', userId)
-        .maybeSingle()
-        .then(({ data, error }) => {
-          if (error) {
-            console.error('[Auth] Profile fetch error:', error);
-            return null;
-          }
-          console.log('[Auth] Profile fetched:', data);
-          retryCountRef.current = 0; // Reset retry count on success
-          return data as Profile | null;
-        });
-
-      const result = await Promise.race([queryPromise, timeoutPromise]);
+        .maybeSingle();
       
-      // If failed and should retry, try again after a delay
-      if (!result && retryOnFail && retryCountRef.current < maxRetries) {
-        retryCountRef.current++;
-        console.log(`[Auth] Retrying profile fetch (attempt ${retryCountRef.current}/${maxRetries})...`);
-        await new Promise(r => setTimeout(r, 1000)); // Wait 1 second
-        return fetchProfile(userId, retryCountRef.current < maxRetries);
+      if (error) {
+        console.error('[Auth] Profile fetch error:', error);
+        fetchingRef.current = null;
+        return null;
       }
       
-      return result;
+      console.log('[Auth] Profile fetched:', data);
+      
+      if (data) {
+        profileCacheRef.current.set(userId, data as Profile);
+      }
+      
+      fetchingRef.current = null;
+      return data as Profile | null;
     } catch (err) {
       console.error('[Auth] Profile fetch exception:', err);
+      fetchingRef.current = null;
       return null;
     }
   }, []);
@@ -102,6 +106,8 @@ export function AuthProvider({ children }: { children: React.ReactNode }) {
         initialized: true,
       });
     } else {
+      // Clear cache on logout
+      profileCacheRef.current.clear();
       setState({
         user: null,
         session: null,
@@ -115,8 +121,11 @@ export function AuthProvider({ children }: { children: React.ReactNode }) {
 
   const refetchProfile = useCallback(async () => {
     if (state.user) {
-      retryCountRef.current = 0;
-      const profile = await fetchProfile(state.user.id, true);
+      // Clear cache to force refetch
+      profileCacheRef.current.delete(state.user.id);
+      fetchingRef.current = null;
+      
+      const profile = await fetchProfile(state.user.id);
       if (profile) {
         setState(prev => ({
           ...prev,
@@ -128,28 +137,34 @@ export function AuthProvider({ children }: { children: React.ReactNode }) {
   }, [state.user, fetchProfile]);
 
   useEffect(() => {
-    // Set up auth state listener FIRST
+    let mounted = true;
+    
+    // Set up auth state listener
     const { data: { subscription } } = supabase.auth.onAuthStateChange(
       async (event, session) => {
         console.log('[Auth] Auth state change:', event);
-        await setAuthState(session);
+        if (mounted) {
+          await setAuthState(session);
+        }
       }
     );
 
-    // Then get the initial session
+    // Get initial session
     supabase.auth.getSession().then(({ error }) => {
       if (error) {
         console.error('[Auth] getSession error:', error);
-        setState(prev => ({
-          ...prev,
-          loading: false,
-          initialized: true,
-        }));
+        if (mounted) {
+          setState(prev => ({
+            ...prev,
+            loading: false,
+            initialized: true,
+          }));
+        }
       }
-      // Let onAuthStateChange handle the state update
     });
 
     return () => {
+      mounted = false;
       subscription.unsubscribe();
     };
   }, [setAuthState]);
@@ -186,6 +201,7 @@ export function AuthProvider({ children }: { children: React.ReactNode }) {
   };
 
   const signOut = async () => {
+    profileCacheRef.current.clear();
     const { error } = await supabase.auth.signOut();
     if (error) throw error;
   };
