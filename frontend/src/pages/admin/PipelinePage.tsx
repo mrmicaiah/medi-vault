@@ -68,11 +68,13 @@ const YesNo = ({ value }: { value: boolean | string | undefined }) => {
 const DocNode = ({ uploaded, label }: { uploaded: boolean; label: string }) => (
   <div className="flex items-center gap-1.5">
     <div className={`w-4 h-4 rounded-full border-2 flex items-center justify-center text-[10px] ${
-      uploaded ? 'border-success bg-success text-white' : 'border-gray-300 bg-transparent'
+      uploaded 
+        ? 'border-success bg-success text-white' 
+        : 'border-error bg-error text-white'
     }`}>
-      {uploaded && '✓'}
+      {uploaded ? '✓' : '✕'}
     </div>
-    <span className="text-xs text-gray">{label}</span>
+    <span className={`text-xs ${uploaded ? 'text-gray' : 'text-error font-medium'}`}>{label}</span>
   </div>
 );
 
