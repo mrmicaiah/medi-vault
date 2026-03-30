@@ -33,6 +33,29 @@ interface AuthContextType extends AuthState {
 
 export const AuthContext = createContext<AuthContextType | undefined>(undefined);
 
+// Fetch profile outside component to avoid dependency issues
+async function fetchProfileFromDb(userId: string): Promise<Profile | null> {
+  console.log('[Auth] Fetching profile for:', userId);
+  try {
+    const { data, error } = await supabase
+      .from('profiles')
+      .select('*')
+      .eq('id', userId)
+      .maybeSingle();
+    
+    if (error) {
+      console.error('[Auth] Profile fetch error:', error);
+      return null;
+    }
+    
+    console.log('[Auth] Profile fetched:', data);
+    return data as Profile | null;
+  } catch (err) {
+    console.error('[Auth] Profile fetch exception:', err);
+    return null;
+  }
+}
+
 export function AuthProvider({ children }: { children: React.ReactNode }) {
   const [state, setState] = useState<AuthState>({
     user: null,
@@ -44,52 +67,15 @@ export function AuthProvider({ children }: { children: React.ReactNode }) {
   });
   
   // Simple cache
-  const profileCacheRef = useRef<Profile | null>(null);
-  const lastUserIdRef = useRef<string | null>(null);
-
-  const fetchProfile = useCallback(async (userId: string): Promise<Profile | null> => {
-    // Return cache if same user
-    if (lastUserIdRef.current === userId && profileCacheRef.current) {
-      console.log('[Auth] Using cached profile');
-      return profileCacheRef.current;
-    }
-    
-    console.log('[Auth] Fetching profile for:', userId);
-    
-    try {
-      const { data, error } = await supabase
-        .from('profiles')
-        .select('*')
-        .eq('id', userId)
-        .maybeSingle();
-      
-      if (error) {
-        console.error('[Auth] Profile fetch error:', error);
-        return null;
-      }
-      
-      console.log('[Auth] Profile fetched:', data);
-      
-      // Cache it
-      if (data) {
-        profileCacheRef.current = data as Profile;
-        lastUserIdRef.current = userId;
-      }
-      
-      return data as Profile | null;
-    } catch (err) {
-      console.error('[Auth] Profile fetch exception:', err);
-      return null;
-    }
-  }, []);
+  const profileCacheRef = useRef<{ userId: string; profile: Profile } | null>(null);
+  const initRef = useRef(false);
 
   const refetchProfile = useCallback(async () => {
     if (state.user) {
-      // Clear cache
       profileCacheRef.current = null;
-      
-      const profile = await fetchProfile(state.user.id);
+      const profile = await fetchProfileFromDb(state.user.id);
       if (profile) {
+        profileCacheRef.current = { userId: state.user.id, profile };
         setState(prev => ({
           ...prev,
           profile,
@@ -97,11 +83,14 @@ export function AuthProvider({ children }: { children: React.ReactNode }) {
         }));
       }
     }
-  }, [state.user, fetchProfile]);
+  }, [state.user]);
 
   useEffect(() => {
+    // Prevent double-init in React strict mode
+    if (initRef.current) return;
+    initRef.current = true;
+    
     let mounted = true;
-    let initialLoad = true;
     
     const handleAuthChange = async (event: string, session: Session | null) => {
       console.log('[Auth] Auth state change:', event);
@@ -109,13 +98,17 @@ export function AuthProvider({ children }: { children: React.ReactNode }) {
       if (!mounted) return;
       
       if (session?.user) {
-        // Only fetch profile on initial load or if user changed
-        const needsFetch = initialLoad || lastUserIdRef.current !== session.user.id;
-        initialLoad = false;
-        
-        const profile = needsFetch 
-          ? await fetchProfile(session.user.id)
-          : profileCacheRef.current;
+        // Check cache first
+        let profile: Profile | null = null;
+        if (profileCacheRef.current?.userId === session.user.id) {
+          console.log('[Auth] Using cached profile');
+          profile = profileCacheRef.current.profile;
+        } else {
+          profile = await fetchProfileFromDb(session.user.id);
+          if (profile) {
+            profileCacheRef.current = { userId: session.user.id, profile };
+          }
+        }
         
         if (mounted) {
           setState({
@@ -128,10 +121,7 @@ export function AuthProvider({ children }: { children: React.ReactNode }) {
           });
         }
       } else {
-        // Logged out
         profileCacheRef.current = null;
-        lastUserIdRef.current = null;
-        
         if (mounted) {
           setState({
             user: null,
@@ -148,22 +138,21 @@ export function AuthProvider({ children }: { children: React.ReactNode }) {
     // Set up auth state listener
     const { data: { subscription } } = supabase.auth.onAuthStateChange(handleAuthChange);
 
-    // Get initial session
-    supabase.auth.getSession().then(({ data, error }) => {
+    // Get initial session - this triggers onAuthStateChange
+    supabase.auth.getSession().then(({ error }) => {
       if (error) {
         console.error('[Auth] getSession error:', error);
         if (mounted) {
           setState(prev => ({ ...prev, loading: false, initialized: true }));
         }
       }
-      // onAuthStateChange will fire with the session
     });
 
     return () => {
       mounted = false;
       subscription.unsubscribe();
     };
-  }, [fetchProfile]);
+  }, []); // Empty dependency array - runs once
 
   const signIn = async (email: string, password: string) => {
     const { error } = await supabase.auth.signInWithPassword({ email, password });
@@ -196,7 +185,6 @@ export function AuthProvider({ children }: { children: React.ReactNode }) {
 
   const signOut = async () => {
     profileCacheRef.current = null;
-    lastUserIdRef.current = null;
     const { error } = await supabase.auth.signOut();
     if (error) throw error;
   };
