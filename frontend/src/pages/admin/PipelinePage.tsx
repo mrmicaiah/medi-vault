@@ -33,7 +33,6 @@ interface ApplicantDetail {
   credentials_uploaded?: boolean;
   cpr_uploaded?: boolean;
   tb_uploaded?: boolean;
-  // Additional fields for editing
   first_name?: string;
   last_name?: string;
   email?: string;
@@ -46,9 +45,9 @@ interface ApplicantDetail {
   emergency_name?: string;
   emergency_relationship?: string;
   emergency_phone?: string;
+  ssn_last_four?: string;
 }
 
-// Simple in-memory cache
 const detailCache = new Map<string, ApplicantDetail>();
 
 const YesNo = ({ value }: { value: boolean | string | undefined }) => {
@@ -83,12 +82,17 @@ export function PipelinePage() {
   const [loadingDetail, setLoadingDetail] = useState(false);
   const [panelOpen, setPanelOpen] = useState(false);
   
-  // Edit mode state
   const [editMode, setEditMode] = useState(false);
   const [editForm, setEditForm] = useState<Record<string, string>>({});
   const [saving, setSaving] = useState(false);
   
-  // Upload state
+  const [ssnRevealed, setSsnRevealed] = useState(false);
+  const [revealedSsn, setRevealedSsn] = useState<string | null>(null);
+  const [loadingSsn, setLoadingSsn] = useState(false);
+  const [editingSsn, setEditingSsn] = useState(false);
+  const [newSsn, setNewSsn] = useState('');
+  const [savingSsn, setSavingSsn] = useState(false);
+  
   const [showUploadModal, setShowUploadModal] = useState(false);
   const [uploadType, setUploadType] = useState('');
   const [uploading, setUploading] = useState(false);
@@ -116,8 +120,10 @@ export function PipelinePage() {
     setSelectedApplicant(applicant);
     setPanelOpen(true);
     setEditMode(false);
+    setSsnRevealed(false);
+    setRevealedSsn(null);
+    setEditingSsn(false);
     
-    // Check cache first
     const cached = detailCache.get(applicant.id);
     if (cached) {
       setApplicantDetail(cached);
@@ -129,9 +135,12 @@ export function PipelinePage() {
     setApplicantDetail(null);
     
     try {
-      const res = await api.get<{ application: unknown; profile: unknown; steps: Array<{ step_number: number; data: Record<string, unknown> }> }>(
-        `/admin/applicants/${applicant.id}`
-      );
+      const res = await api.get<{ 
+        application: unknown; 
+        profile: unknown; 
+        steps: Array<{ step_number: number; data: Record<string, unknown> }>;
+        ssn_last_four?: string;
+      }>(`/admin/applicants/${applicant.id}`);
       
       const steps = res.steps || [];
       const step1 = steps.find(s => s.step_number === 1)?.data || {};
@@ -158,7 +167,6 @@ export function PipelinePage() {
         credentials_uploaded: Boolean(step15.file_name),
         cpr_uploaded: Boolean(step16.file_name),
         tb_uploaded: Boolean(step17.file_name),
-        // Personal info for editing
         first_name: applicant.first_name,
         last_name: applicant.last_name,
         email: applicant.email,
@@ -171,9 +179,9 @@ export function PipelinePage() {
         emergency_name: step3.name as string,
         emergency_relationship: step3.relationship as string,
         emergency_phone: step3.phone as string,
+        ssn_last_four: res.ssn_last_four,
       };
       
-      // Cache for fast re-access
       detailCache.set(applicant.id, detail);
       setApplicantDetail(detail);
       initEditForm(detail, applicant);
@@ -202,26 +210,79 @@ export function PipelinePage() {
     });
   };
 
+  const handleRevealSsn = async () => {
+    if (!selectedApplicant) return;
+    setLoadingSsn(true);
+    try {
+      const res = await api.get<{ ssn: string; ssn_raw: string }>(`/admin/applicants/${selectedApplicant.id}/ssn`);
+      setRevealedSsn(res.ssn);
+      setSsnRevealed(true);
+    } catch (err) {
+      setError(err instanceof Error ? err.message : 'Failed to reveal SSN');
+    } finally {
+      setLoadingSsn(false);
+    }
+  };
+
+  const handleEditSsn = () => {
+    setEditingSsn(true);
+    if (revealedSsn) {
+      setNewSsn(revealedSsn.replace(/-/g, ''));
+    } else {
+      setNewSsn('');
+    }
+  };
+
+  const handleSaveSsn = async () => {
+    if (!selectedApplicant) return;
+    const cleanSsn = newSsn.replace(/\D/g, '');
+    if (cleanSsn.length !== 9) {
+      setError('SSN must be exactly 9 digits');
+      return;
+    }
+    setSavingSsn(true);
+    try {
+      const res = await api.put<{ success: boolean; ssn_last_four: string }>(
+        `/admin/applicants/${selectedApplicant.id}/ssn`,
+        { ssn: cleanSsn }
+      );
+      const formattedSsn = `${cleanSsn.slice(0, 3)}-${cleanSsn.slice(3, 5)}-${cleanSsn.slice(5)}`;
+      setRevealedSsn(formattedSsn);
+      setSsnRevealed(true);
+      setEditingSsn(false);
+      if (applicantDetail) {
+        const updated = { ...applicantDetail, ssn_last_four: res.ssn_last_four };
+        detailCache.set(selectedApplicant.id, updated);
+        setApplicantDetail(updated);
+      }
+    } catch (err) {
+      setError(err instanceof Error ? err.message : 'Failed to save SSN');
+    } finally {
+      setSavingSsn(false);
+    }
+  };
+
+  const formatSsnInput = (value: string) => {
+    const digits = value.replace(/\D/g, '').slice(0, 9);
+    if (digits.length <= 3) return digits;
+    if (digits.length <= 5) return `${digits.slice(0, 3)}-${digits.slice(3)}`;
+    return `${digits.slice(0, 3)}-${digits.slice(3, 5)}-${digits.slice(5)}`;
+  };
+
   const handleSaveEdit = async () => {
     if (!selectedApplicant) return;
-    
     setSaving(true);
     try {
       await api.patch(`/admin/applicants/${selectedApplicant.id}/profile`, editForm);
-      
-      // Update cache
       const updatedDetail = { ...applicantDetail, ...editForm };
       detailCache.set(selectedApplicant.id, updatedDetail as ApplicantDetail);
       setApplicantDetail(updatedDetail as ApplicantDetail);
-      
-      // Update applicant in list (optimistic)
       setApplicants(prev => prev.map(a => 
         a.id === selectedApplicant.id 
           ? { ...a, first_name: editForm.first_name, last_name: editForm.last_name, email: editForm.email }
           : a
       ));
       setSelectedApplicant(prev => prev ? { ...prev, first_name: editForm.first_name, last_name: editForm.last_name, email: editForm.email } : null);
-      
       setEditMode(false);
     } catch (err) {
       setError(err instanceof Error ? err.message : 'Failed to save changes');
@@ -233,6 +294,9 @@ export function PipelinePage() {
   const closePanel = () => {
     setPanelOpen(false);
     setEditMode(false);
+    setSsnRevealed(false);
+    setRevealedSsn(null);
+    setEditingSsn(false);
     setTimeout(() => {
       setSelectedApplicant(null);
       setApplicantDetail(null);
@@ -247,21 +311,13 @@ export function PipelinePage() {
   const handleFileSelect = async (e: React.ChangeEvent<HTMLInputElement>) => {
     const file = e.target.files?.[0];
     if (!file || !selectedApplicant || !uploadType) return;
-
     setUploading(true);
     setUploadError(null);
-
     try {
       const fileExt = file.name.split('.').pop();
       const fileName = `${selectedApplicant.user_id}/${uploadType}_${Date.now()}.${fileExt}`;
-      
-      const { error: uploadErr } = await supabase.storage
-        .from('documents')
-        .upload(fileName, file);
-
+      const { error: uploadErr } = await supabase.storage.from('documents').upload(fileName, file);
       if (uploadErr) throw uploadErr;
-
-      // Invalidate cache for this applicant
       detailCache.delete(selectedApplicant.id);
       await selectApplicant(selectedApplicant);
       setShowUploadModal(false);
@@ -274,13 +330,8 @@ export function PipelinePage() {
     }
   };
 
-  const goToView = (id: string) => {
-    navigate(`/admin/applicant/${id}`);
-  };
-
-  const goToHire = (id: string) => {
-    navigate(`/admin/hire/${id}`);
-  };
+  const goToView = (id: string) => navigate(`/admin/applicant/${id}`);
+  const goToHire = (id: string) => navigate(`/admin/hire/${id}`);
 
   const getPositionLabel = (position?: string) => {
     const labels: Record<string, string> = { pca: 'PCA', hha: 'HHA', cna: 'CNA', lpn: 'LPN', rn: 'RN' };
@@ -321,11 +372,7 @@ export function PipelinePage() {
       hired: { bg: 'bg-teal-50', text: 'text-teal-700', label: 'Hired' },
     };
     const s = config[status] || { bg: 'bg-gray-100', text: 'text-gray-600', label: status };
-    return (
-      <span className={`text-xs px-2.5 py-1 rounded-md font-medium ${s.bg} ${s.text}`}>
-        {s.label}
-      </span>
-    );
+    return <span className={`text-xs px-2.5 py-1 rounded-md font-medium ${s.bg} ${s.text}`}>{s.label}</span>;
   };
 
   if (loading) {
@@ -344,22 +391,16 @@ export function PipelinePage() {
 
   return (
     <div className="space-y-6">
-      {/* Header */}
       <div className="flex items-center justify-between">
         <div>
           <h1 className="font-display text-2xl font-bold text-navy">Applicants</h1>
-          <p className="text-sm text-gray mt-1">
-            {new Date().toLocaleDateString('en-US', { weekday: 'long', month: 'long', day: 'numeric', year: 'numeric' })}
-          </p>
+          <p className="text-sm text-gray mt-1">{new Date().toLocaleDateString('en-US', { weekday: 'long', month: 'long', day: 'numeric', year: 'numeric' })}</p>
         </div>
-        <Button onClick={() => window.open('/apply/eveready-homecare', '_blank')}>
-          <span className="mr-1">+</span> Add Applicant
-        </Button>
+        <Button onClick={() => window.open('/apply/eveready-homecare', '_blank')}><span className="mr-1">+</span> Add Applicant</Button>
       </div>
 
       {error && <Alert variant="error" dismissible onDismiss={() => setError(null)}>{error}</Alert>}
 
-      {/* Stats */}
       <div className="grid grid-cols-2 lg:grid-cols-4 gap-4">
         <div className="bg-white rounded-xl border border-border p-5">
           <p className="text-sm text-gray font-medium">Total</p>
@@ -379,7 +420,6 @@ export function PipelinePage() {
         </div>
       </div>
 
-      {/* Table */}
       <div className="bg-white rounded-xl border border-border overflow-hidden">
         <table className="w-full">
           <thead className="bg-gray-50 border-b border-border">
@@ -395,11 +435,7 @@ export function PipelinePage() {
               <tr><td colSpan={4} className="px-6 py-12 text-center text-gray">No applicants yet</td></tr>
             ) : (
               applicants.map((applicant) => (
-                <tr 
-                  key={applicant.id} 
-                  onClick={() => selectApplicant(applicant)} 
-                  className="hover:bg-gray-50 cursor-pointer transition-colors"
-                >
+                <tr key={applicant.id} onClick={() => selectApplicant(applicant)} className="hover:bg-gray-50 cursor-pointer transition-colors">
                   <td className="px-6 py-4">
                     <div className="flex items-center gap-3">
                       <div className="flex h-10 w-10 flex-shrink-0 items-center justify-center rounded-lg bg-navy text-sm font-semibold text-white">
@@ -421,34 +457,18 @@ export function PipelinePage() {
         </table>
       </div>
 
-      {/* Slide-out Panel */}
       {selectedApplicant && (
         <>
-          {/* Backdrop */}
-          <div 
-            className={`fixed inset-0 bg-black/20 z-40 transition-opacity duration-250 ${panelOpen ? 'opacity-100' : 'opacity-0 pointer-events-none'}`} 
-            onClick={closePanel} 
-          />
-          
-          {/* Panel */}
+          <div className={`fixed inset-0 bg-black/20 z-40 transition-opacity duration-250 ${panelOpen ? 'opacity-100' : 'opacity-0 pointer-events-none'}`} onClick={closePanel} />
           <div className={`fixed top-0 right-0 h-full w-[420px] bg-white shadow-2xl z-50 flex flex-col transition-transform duration-250 ease-out ${panelOpen ? 'translate-x-0' : 'translate-x-full'}`}>
-            {/* Header */}
             <div className="px-6 py-5 bg-navy flex items-center justify-between">
               <div>
-                <h2 className="text-lg font-semibold text-white">
-                  {editMode ? 'Edit Applicant' : `${selectedApplicant.first_name} ${selectedApplicant.last_name}`}
-                </h2>
+                <h2 className="text-lg font-semibold text-white">{editMode ? 'Edit Applicant' : `${selectedApplicant.first_name} ${selectedApplicant.last_name}`}</h2>
                 <p className="text-sm text-maroon font-medium">{getPositionLabel(applicantDetail?.position_applied)}</p>
               </div>
-              <button 
-                onClick={closePanel} 
-                className="text-white/60 hover:text-white text-2xl leading-none p-1"
-              >
-                ×
-              </button>
+              <button onClick={closePanel} className="text-white/60 hover:text-white text-2xl leading-none p-1">×</button>
             </div>
 
-            {/* Content */}
             <div className="flex-1 overflow-y-auto p-5 bg-gray-50">
               {loadingDetail ? (
                 <div className="flex items-center justify-center py-12">
@@ -458,106 +478,82 @@ export function PipelinePage() {
                   </svg>
                 </div>
               ) : editMode ? (
-                /* Edit Mode */
                 <div className="space-y-4">
                   <div className="bg-white rounded-lg shadow-sm p-4 space-y-3">
                     <h3 className="text-xs font-semibold text-gray uppercase tracking-wide">Personal Info</h3>
                     <div className="grid grid-cols-2 gap-3">
                       <div>
                         <label className="block text-xs text-gray mb-1">First Name</label>
-                        <input
-                          type="text"
-                          value={editForm.first_name}
-                          onChange={(e) => setEditForm({ ...editForm, first_name: e.target.value })}
-                          className="w-full px-3 py-2 border border-border rounded-lg text-sm focus:border-maroon focus:ring-1 focus:ring-maroon/20 outline-none"
-                        />
+                        <input type="text" value={editForm.first_name} onChange={(e) => setEditForm({ ...editForm, first_name: e.target.value })} className="w-full px-3 py-2 border border-border rounded-lg text-sm focus:border-maroon focus:ring-1 focus:ring-maroon/20 outline-none" />
                       </div>
                       <div>
                         <label className="block text-xs text-gray mb-1">Last Name</label>
-                        <input
-                          type="text"
-                          value={editForm.last_name}
-                          onChange={(e) => setEditForm({ ...editForm, last_name: e.target.value })}
-                          className="w-full px-3 py-2 border border-border rounded-lg text-sm focus:border-maroon focus:ring-1 focus:ring-maroon/20 outline-none"
-                        />
+                        <input type="text" value={editForm.last_name} onChange={(e) => setEditForm({ ...editForm, last_name: e.target.value })} className="w-full px-3 py-2 border border-border rounded-lg text-sm focus:border-maroon focus:ring-1 focus:ring-maroon/20 outline-none" />
                       </div>
                     </div>
                     <div>
                       <label className="block text-xs text-gray mb-1">Email</label>
-                      <input
-                        type="email"
-                        value={editForm.email}
-                        onChange={(e) => setEditForm({ ...editForm, email: e.target.value })}
-                        className="w-full px-3 py-2 border border-border rounded-lg text-sm focus:border-maroon focus:ring-1 focus:ring-maroon/20 outline-none"
-                      />
+                      <input type="email" value={editForm.email} onChange={(e) => setEditForm({ ...editForm, email: e.target.value })} className="w-full px-3 py-2 border border-border rounded-lg text-sm focus:border-maroon focus:ring-1 focus:ring-maroon/20 outline-none" />
                     </div>
                     <div>
                       <label className="block text-xs text-gray mb-1">Phone</label>
-                      <input
-                        type="tel"
-                        value={editForm.phone}
-                        onChange={(e) => setEditForm({ ...editForm, phone: e.target.value })}
-                        className="w-full px-3 py-2 border border-border rounded-lg text-sm focus:border-maroon focus:ring-1 focus:ring-maroon/20 outline-none"
-                      />
+                      <input type="tel" value={editForm.phone} onChange={(e) => setEditForm({ ...editForm, phone: e.target.value })} className="w-full px-3 py-2 border border-border rounded-lg text-sm focus:border-maroon focus:ring-1 focus:ring-maroon/20 outline-none" />
                     </div>
                     <div>
                       <label className="block text-xs text-gray mb-1">Date of Birth</label>
-                      <input
-                        type="date"
-                        value={editForm.date_of_birth}
-                        onChange={(e) => setEditForm({ ...editForm, date_of_birth: e.target.value })}
-                        className="w-full px-3 py-2 border border-border rounded-lg text-sm focus:border-maroon focus:ring-1 focus:ring-maroon/20 outline-none"
-                      />
+                      <input type="date" value={editForm.date_of_birth} onChange={(e) => setEditForm({ ...editForm, date_of_birth: e.target.value })} className="w-full px-3 py-2 border border-border rounded-lg text-sm focus:border-maroon focus:ring-1 focus:ring-maroon/20 outline-none" />
                     </div>
+                  </div>
+
+                  <div className="bg-white rounded-lg shadow-sm p-4 space-y-3">
+                    <h3 className="text-xs font-semibold text-gray uppercase tracking-wide">Social Security</h3>
+                    {editingSsn ? (
+                      <div className="space-y-2">
+                        <input type="text" value={formatSsnInput(newSsn)} onChange={(e) => setNewSsn(e.target.value.replace(/\D/g, '').slice(0, 9))} placeholder="XXX-XX-XXXX" className="w-full px-3 py-2 border border-border rounded-lg text-sm focus:border-maroon focus:ring-1 focus:ring-maroon/20 outline-none font-mono" />
+                        <p className="text-xs text-gray">Enter 9 digits. Leading zeros are preserved.</p>
+                        <div className="flex gap-2">
+                          <button onClick={() => setEditingSsn(false)} className="flex-1 py-2 text-sm border border-border rounded-lg hover:bg-gray-50">Cancel</button>
+                          <button onClick={handleSaveSsn} disabled={savingSsn || newSsn.replace(/\D/g, '').length !== 9} className="flex-1 py-2 text-sm bg-maroon text-white rounded-lg hover:bg-maroon/90 disabled:opacity-50">{savingSsn ? 'Saving...' : 'Save SSN'}</button>
+                        </div>
+                      </div>
+                    ) : ssnRevealed ? (
+                      <div className="flex items-center justify-between">
+                        <span className="font-mono text-sm">{revealedSsn}</span>
+                        <button onClick={handleEditSsn} className="text-xs text-maroon hover:underline">Edit</button>
+                      </div>
+                    ) : (
+                      <div className="flex items-center justify-between">
+                        <span className="text-sm text-slate">{applicantDetail?.ssn_last_four ? `***-**-${applicantDetail.ssn_last_four}` : 'Not on file'}</span>
+                        <div className="flex gap-2">
+                          {applicantDetail?.ssn_last_four && <button onClick={handleRevealSsn} disabled={loadingSsn} className="text-xs text-maroon hover:underline disabled:opacity-50">{loadingSsn ? 'Loading...' : 'Reveal'}</button>}
+                          <button onClick={handleEditSsn} className="text-xs text-maroon hover:underline">{applicantDetail?.ssn_last_four ? 'Edit' : 'Add'}</button>
+                        </div>
+                      </div>
+                    )}
                   </div>
 
                   <div className="bg-white rounded-lg shadow-sm p-4 space-y-3">
                     <h3 className="text-xs font-semibold text-gray uppercase tracking-wide">Address</h3>
                     <div>
                       <label className="block text-xs text-gray mb-1">Street Address</label>
-                      <input
-                        type="text"
-                        value={editForm.address_line1}
-                        onChange={(e) => setEditForm({ ...editForm, address_line1: e.target.value })}
-                        className="w-full px-3 py-2 border border-border rounded-lg text-sm focus:border-maroon focus:ring-1 focus:ring-maroon/20 outline-none"
-                      />
+                      <input type="text" value={editForm.address_line1} onChange={(e) => setEditForm({ ...editForm, address_line1: e.target.value })} className="w-full px-3 py-2 border border-border rounded-lg text-sm focus:border-maroon focus:ring-1 focus:ring-maroon/20 outline-none" />
                     </div>
                     <div>
                       <label className="block text-xs text-gray mb-1">Apt/Suite</label>
-                      <input
-                        type="text"
-                        value={editForm.address_line2}
-                        onChange={(e) => setEditForm({ ...editForm, address_line2: e.target.value })}
-                        className="w-full px-3 py-2 border border-border rounded-lg text-sm focus:border-maroon focus:ring-1 focus:ring-maroon/20 outline-none"
-                      />
+                      <input type="text" value={editForm.address_line2} onChange={(e) => setEditForm({ ...editForm, address_line2: e.target.value })} className="w-full px-3 py-2 border border-border rounded-lg text-sm focus:border-maroon focus:ring-1 focus:ring-maroon/20 outline-none" />
                     </div>
                     <div className="grid grid-cols-3 gap-3">
                       <div>
                         <label className="block text-xs text-gray mb-1">City</label>
-                        <input
-                          type="text"
-                          value={editForm.city}
-                          onChange={(e) => setEditForm({ ...editForm, city: e.target.value })}
-                          className="w-full px-3 py-2 border border-border rounded-lg text-sm focus:border-maroon focus:ring-1 focus:ring-maroon/20 outline-none"
-                        />
+                        <input type="text" value={editForm.city} onChange={(e) => setEditForm({ ...editForm, city: e.target.value })} className="w-full px-3 py-2 border border-border rounded-lg text-sm focus:border-maroon focus:ring-1 focus:ring-maroon/20 outline-none" />
                       </div>
                       <div>
                         <label className="block text-xs text-gray mb-1">State</label>
-                        <input
-                          type="text"
-                          value={editForm.state}
-                          onChange={(e) => setEditForm({ ...editForm, state: e.target.value })}
-                          className="w-full px-3 py-2 border border-border rounded-lg text-sm focus:border-maroon focus:ring-1 focus:ring-maroon/20 outline-none"
-                        />
+                        <input type="text" value={editForm.state} onChange={(e) => setEditForm({ ...editForm, state: e.target.value })} className="w-full px-3 py-2 border border-border rounded-lg text-sm focus:border-maroon focus:ring-1 focus:ring-maroon/20 outline-none" />
                       </div>
                       <div>
                         <label className="block text-xs text-gray mb-1">ZIP</label>
-                        <input
-                          type="text"
-                          value={editForm.zip}
-                          onChange={(e) => setEditForm({ ...editForm, zip: e.target.value })}
-                          className="w-full px-3 py-2 border border-border rounded-lg text-sm focus:border-maroon focus:ring-1 focus:ring-maroon/20 outline-none"
-                        />
+                        <input type="text" value={editForm.zip} onChange={(e) => setEditForm({ ...editForm, zip: e.target.value })} className="w-full px-3 py-2 border border-border rounded-lg text-sm focus:border-maroon focus:ring-1 focus:ring-maroon/20 outline-none" />
                       </div>
                     </div>
                   </div>
@@ -566,67 +562,33 @@ export function PipelinePage() {
                     <h3 className="text-xs font-semibold text-gray uppercase tracking-wide">Emergency Contact</h3>
                     <div>
                       <label className="block text-xs text-gray mb-1">Name</label>
-                      <input
-                        type="text"
-                        value={editForm.emergency_name}
-                        onChange={(e) => setEditForm({ ...editForm, emergency_name: e.target.value })}
-                        className="w-full px-3 py-2 border border-border rounded-lg text-sm focus:border-maroon focus:ring-1 focus:ring-maroon/20 outline-none"
-                      />
+                      <input type="text" value={editForm.emergency_name} onChange={(e) => setEditForm({ ...editForm, emergency_name: e.target.value })} className="w-full px-3 py-2 border border-border rounded-lg text-sm focus:border-maroon focus:ring-1 focus:ring-maroon/20 outline-none" />
                     </div>
                     <div className="grid grid-cols-2 gap-3">
                       <div>
                         <label className="block text-xs text-gray mb-1">Relationship</label>
-                        <input
-                          type="text"
-                          value={editForm.emergency_relationship}
-                          onChange={(e) => setEditForm({ ...editForm, emergency_relationship: e.target.value })}
-                          className="w-full px-3 py-2 border border-border rounded-lg text-sm focus:border-maroon focus:ring-1 focus:ring-maroon/20 outline-none"
-                        />
+                        <input type="text" value={editForm.emergency_relationship} onChange={(e) => setEditForm({ ...editForm, emergency_relationship: e.target.value })} className="w-full px-3 py-2 border border-border rounded-lg text-sm focus:border-maroon focus:ring-1 focus:ring-maroon/20 outline-none" />
                       </div>
                       <div>
                         <label className="block text-xs text-gray mb-1">Phone</label>
-                        <input
-                          type="tel"
-                          value={editForm.emergency_phone}
-                          onChange={(e) => setEditForm({ ...editForm, emergency_phone: e.target.value })}
-                          className="w-full px-3 py-2 border border-border rounded-lg text-sm focus:border-maroon focus:ring-1 focus:ring-maroon/20 outline-none"
-                        />
+                        <input type="tel" value={editForm.emergency_phone} onChange={(e) => setEditForm({ ...editForm, emergency_phone: e.target.value })} className="w-full px-3 py-2 border border-border rounded-lg text-sm focus:border-maroon focus:ring-1 focus:ring-maroon/20 outline-none" />
                       </div>
                     </div>
                   </div>
 
-                  {/* Save / Cancel buttons */}
                   <div className="grid grid-cols-2 gap-3 pt-2">
-                    <button 
-                      onClick={() => setEditMode(false)}
-                      className="py-3 bg-white border border-border text-navy text-sm font-semibold rounded-lg hover:bg-gray-50 transition-colors"
-                    >
-                      Cancel
-                    </button>
-                    <button 
-                      onClick={handleSaveEdit}
-                      disabled={saving}
-                      className="py-3 bg-maroon text-white text-sm font-semibold rounded-lg hover:bg-maroon/90 transition-colors disabled:opacity-50"
-                    >
-                      {saving ? 'Saving...' : 'Save Changes'}
-                    </button>
+                    <button onClick={() => setEditMode(false)} className="py-3 bg-white border border-border text-navy text-sm font-semibold rounded-lg hover:bg-gray-50 transition-colors">Cancel</button>
+                    <button onClick={handleSaveEdit} disabled={saving} className="py-3 bg-maroon text-white text-sm font-semibold rounded-lg hover:bg-maroon/90 transition-colors disabled:opacity-50">{saving ? 'Saving...' : 'Save Changes'}</button>
                   </div>
                 </div>
               ) : (
-                /* View Mode */
                 <>
-                  {/* Info Grid */}
                   <div className="bg-white rounded-lg shadow-sm overflow-hidden">
                     {[
                       { label: 'City', value: applicantDetail?.city || '—' },
+                      { label: 'SSN', value: applicantDetail?.ssn_last_four ? `***-**-${applicantDetail.ssn_last_four}` : 'Not on file' },
                       { label: 'Certifications', value: formatCertifications(applicantDetail?.certifications) },
-                      { label: 'CPR / TB', value: (
-                        <>
-                          <YesNo value={applicantDetail?.has_cpr_certification} />
-                          <span className="mx-2 text-gray-300">|</span>
-                          <YesNo value={applicantDetail?.has_tb_test} />
-                        </>
-                      )},
+                      { label: 'CPR / TB', value: (<><YesNo value={applicantDetail?.has_cpr_certification} /><span className="mx-2 text-gray-300">|</span><YesNo value={applicantDetail?.has_tb_test} /></>) },
                       { label: 'Drivers Lic.', value: <YesNo value={applicantDetail?.has_drivers_license} /> },
                       { label: 'Travel 30min', value: <YesNo value={applicantDetail?.will_travel_30_min} /> },
                       { label: 'Bed Bound', value: <YesNo value={applicantDetail?.will_work_bed_bound} /> },
@@ -634,39 +596,19 @@ export function PipelinePage() {
                       { label: 'Hours', value: formatHours(applicantDetail?.hours_per_week) },
                       { label: 'Smokers?', value: formatSmokerPref(applicantDetail?.comfortable_with_smokers) },
                     ].map((row, i, arr) => (
-                      <div 
-                        key={i} 
-                        className={`grid grid-cols-[110px_1fr] px-4 py-3 items-center ${i < arr.length - 1 ? 'border-b border-gray-100' : ''}`}
-                      >
+                      <div key={i} className={`grid grid-cols-[110px_1fr] px-4 py-3 items-center ${i < arr.length - 1 ? 'border-b border-gray-100' : ''}`}>
                         <span className="text-xs font-semibold text-navy">{row.label}</span>
                         <span className="text-sm text-slate">{row.value}</span>
                       </div>
                     ))}
                   </div>
 
-                  {/* Action Buttons - 3 columns now */}
                   <div className="grid grid-cols-3 gap-3 mt-5">
-                    <button 
-                      onClick={() => goToView(selectedApplicant.id)}
-                      className="py-3 bg-navy text-white text-sm font-semibold rounded-lg hover:bg-navy/90 transition-colors"
-                    >
-                      Full Profile
-                    </button>
-                    <button 
-                      onClick={() => setEditMode(true)}
-                      className="py-3 bg-white border border-border text-navy text-sm font-semibold rounded-lg hover:bg-gray-50 transition-colors"
-                    >
-                      Edit
-                    </button>
-                    <button 
-                      onClick={() => goToHire(selectedApplicant.id)}
-                      className="py-3 bg-success text-navy text-sm font-semibold rounded-lg hover:bg-success/90 transition-colors"
-                    >
-                      Onboard
-                    </button>
+                    <button onClick={() => goToView(selectedApplicant.id)} className="py-3 bg-navy text-white text-sm font-semibold rounded-lg hover:bg-navy/90 transition-colors">Full Profile</button>
+                    <button onClick={() => setEditMode(true)} className="py-3 bg-white border border-border text-navy text-sm font-semibold rounded-lg hover:bg-gray-50 transition-colors">Edit</button>
+                    <button onClick={() => goToHire(selectedApplicant.id)} className="py-3 bg-success text-navy text-sm font-semibold rounded-lg hover:bg-success/90 transition-colors">Onboard</button>
                   </div>
 
-                  {/* Onboarding Status */}
                   <div className="bg-white rounded-lg shadow-sm p-4 mt-5">
                     <div className="flex items-center justify-between">
                       <span className="text-[11px] font-semibold text-gray uppercase tracking-wide">Documents</span>
@@ -678,13 +620,7 @@ export function PipelinePage() {
                     </div>
                   </div>
 
-                  {/* Upload Button */}
-                  <button 
-                    onClick={handleUploadClick}
-                    className="w-full mt-5 py-3 bg-white border border-border text-navy text-sm font-medium rounded-lg hover:bg-gray-50 transition-colors"
-                  >
-                    Upload Document
-                  </button>
+                  <button onClick={handleUploadClick} className="w-full mt-5 py-3 bg-white border border-border text-navy text-sm font-medium rounded-lg hover:bg-gray-50 transition-colors">Upload Document</button>
                 </>
               )}
             </div>
@@ -692,27 +628,16 @@ export function PipelinePage() {
         </>
       )}
 
-      {/* Upload Modal */}
       {showUploadModal && selectedApplicant && (
         <>
           <div className="fixed inset-0 bg-black/40 z-[60]" onClick={() => setShowUploadModal(false)} />
           <div className="fixed top-1/2 left-1/2 -translate-x-1/2 -translate-y-1/2 w-full max-w-md bg-white rounded-xl shadow-2xl z-[70] p-6">
             <h3 className="text-lg font-semibold text-navy mb-4">Upload Document</h3>
-            <p className="text-sm text-gray mb-4">
-              Upload a document for {selectedApplicant.first_name} {selectedApplicant.last_name}
-            </p>
-            
-            {uploadError && (
-              <Alert variant="error" className="mb-4">{uploadError}</Alert>
-            )}
-
+            <p className="text-sm text-gray mb-4">Upload a document for {selectedApplicant.first_name} {selectedApplicant.last_name}</p>
+            {uploadError && <Alert variant="error" className="mb-4">{uploadError}</Alert>}
             <div className="mb-4">
               <label className="block text-sm font-medium text-slate mb-1">Document Type</label>
-              <select
-                value={uploadType}
-                onChange={(e) => setUploadType(e.target.value)}
-                className="w-full rounded-lg border border-border px-3 py-2 text-sm focus:border-maroon focus:outline-none focus:ring-2 focus:ring-maroon/20"
-              >
+              <select value={uploadType} onChange={(e) => setUploadType(e.target.value)} className="w-full rounded-lg border border-border px-3 py-2 text-sm focus:border-maroon focus:outline-none focus:ring-2 focus:ring-maroon/20">
                 <option value="">Select type...</option>
                 <option value="credentials">Professional Credentials</option>
                 <option value="cpr">CPR Certification</option>
@@ -724,31 +649,10 @@ export function PipelinePage() {
                 <option value="other">Other</option>
               </select>
             </div>
-
-            <input
-              ref={fileInputRef}
-              type="file"
-              accept=".pdf,.jpg,.jpeg,.png"
-              onChange={handleFileSelect}
-              className="hidden"
-            />
-
+            <input ref={fileInputRef} type="file" accept=".pdf,.jpg,.jpeg,.png" onChange={handleFileSelect} className="hidden" />
             <div className="flex gap-3">
-              <Button 
-                variant="secondary" 
-                className="flex-1"
-                onClick={() => setShowUploadModal(false)}
-              >
-                Cancel
-              </Button>
-              <Button 
-                className="flex-1"
-                disabled={!uploadType || uploading}
-                loading={uploading}
-                onClick={() => fileInputRef.current?.click()}
-              >
-                Select File
-              </Button>
+              <Button variant="secondary" className="flex-1" onClick={() => setShowUploadModal(false)}>Cancel</Button>
+              <Button className="flex-1" disabled={!uploadType || uploading} loading={uploading} onClick={() => fileInputRef.current?.click()}>Select File</Button>
             </div>
           </div>
         </>
