@@ -2,6 +2,7 @@
 
 import os
 import traceback
+import logging
 from fastapi import FastAPI, Request
 from fastapi.middleware.cors import CORSMiddleware
 from fastapi.responses import JSONResponse
@@ -21,16 +22,20 @@ from app.routers import (
     agencies,
 )
 
+# Configure logging
+logging.basicConfig(level=logging.INFO)
+logger = logging.getLogger(__name__)
+
 settings = get_settings()
 
 # Debug: Print CORS origins on startup
-print(f"[CORS] Raw CORS_ORIGINS env: {os.getenv('CORS_ORIGINS', 'NOT SET')}")
-print(f"[CORS] Parsed origins list: {settings.cors_origin_list}")
+logger.info(f"[CORS] Raw CORS_ORIGINS env: {os.getenv('CORS_ORIGINS', 'NOT SET')}")
+logger.info(f"[CORS] Parsed origins list: {settings.cors_origin_list}")
 
 app = FastAPI(
     title="MediVault API",
     description="Home care agency applicant-to-employee management platform",
-    version="1.0.0",
+    version="1.0.1",
     docs_url="/api/docs",
     redoc_url="/api/redoc",
     openapi_url="/api/openapi.json",
@@ -65,8 +70,8 @@ async def global_exception_handler(request: Request, exc: Exception):
     error_traceback = traceback.format_exc()
     
     # Log the full error
-    print(f"[ERROR] Unhandled exception: {error_detail}")
-    print(f"[ERROR] Traceback:\n{error_traceback}")
+    logger.error(f"Unhandled exception on {request.url.path}: {error_detail}")
+    logger.error(f"Traceback:\n{error_traceback}")
     
     # Get origin from request
     origin = request.headers.get("origin", "")
@@ -95,7 +100,7 @@ async def health_check():
     return {
         "status": "healthy", 
         "service": "medivault-api", 
-        "version": "1.0.0",
+        "version": "1.0.1",
         "cors_origins": ALLOWED_ORIGINS,
     }
 
