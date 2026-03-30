@@ -116,3 +116,15 @@ async def require_staff(
             detail="Staff access required",
         )
     return user
+
+
+async def require_superadmin(
+    user: UserProfile = Depends(get_current_user),
+) -> UserProfile:
+    """Require the current user to have superadmin role."""
+    if user.role != UserRole.SUPERADMIN:
+        raise HTTPException(
+            status_code=status.HTTP_403_FORBIDDEN,
+            detail="Superadmin access required",
+        )
+    return user

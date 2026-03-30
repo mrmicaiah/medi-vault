@@ -1,4 +1,4 @@
-import React, { useState } from 'react';
+import React from 'react';
 import { Routes, Route, Navigate } from 'react-router-dom';
 import { useAuth } from '../hooks/useAuth';
 import type { UserRole } from '../types';
@@ -26,6 +26,7 @@ import { CompliancePage } from '../pages/admin/CompliancePage';
 import { HirePage } from '../pages/admin/HirePage';
 import { UsersPage } from '../pages/admin/UsersPage';
 import { TrainingLeadsPage } from '../pages/admin/TrainingLeadsPage';
+import { SettingsPage } from '../pages/admin/SettingsPage';
 
 const STAFF_ROLES: UserRole[] = ['admin', 'superadmin', 'manager'];
 
@@ -58,20 +59,6 @@ function ProtectedRoute({ children }: { children: React.ReactNode }) {
 }
 
 function ProfileErrorScreen() {
-  const { refetchProfile } = useAuth();
-  const [retrying, setRetrying] = useState(false);
-
-  const handleRetry = async () => {
-    setRetrying(true);
-    try {
-      await refetchProfile();
-      // If successful, the component will re-render with profile
-    } catch {
-      // Failed, will stay on this screen
-    }
-    setRetrying(false);
-  };
-
   const handleSignOut = () => {
     localStorage.clear();
     sessionStorage.clear();
@@ -82,15 +69,14 @@ function ProfileErrorScreen() {
     <div className="flex h-screen items-center justify-center bg-bg">
       <div className="text-center max-w-md px-4">
         <h1 className="font-display text-2xl font-bold text-navy">Profile Error</h1>
-        <p className="mt-2 text-gray">Unable to load your profile. This may be a temporary connection issue.</p>
-        <p className="mt-4 text-sm text-gray">Try again or sign out and back in.</p>
+        <p className="mt-2 text-gray">Unable to load your profile. This may be a permissions issue.</p>
+        <p className="mt-4 text-sm text-gray">Try refreshing or signing out and back in.</p>
         <div className="mt-6 flex gap-3 justify-center">
           <button 
-            onClick={handleRetry}
-            disabled={retrying}
-            className="px-4 py-2 bg-navy text-white rounded-lg text-sm font-medium disabled:opacity-50"
+            onClick={() => window.location.reload()} 
+            className="px-4 py-2 bg-navy text-white rounded-lg text-sm font-medium"
           >
-            {retrying ? 'Retrying...' : 'Try Again'}
+            Refresh
           </button>
           <button 
             onClick={handleSignOut}
@@ -210,6 +196,7 @@ export function RouterConfig() {
         <Route path="/admin/hire/:id" element={<HirePage />} />
         <Route path="/admin/users" element={<UsersPage />} />
         <Route path="/admin/training-leads" element={<TrainingLeadsPage />} />
+        <Route path="/admin/settings" element={<SettingsPage />} />
       </Route>
 
       {/* Root redirect */}
