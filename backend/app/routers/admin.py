@@ -1,407 +1,333 @@
-"""Admin dashboard and applicant management endpoints."""
-
-from datetime import datetime, timezone, timedelta
-
-from fastapi import APIRouter, Depends, HTTPException, status
+from fastapi import APIRouter, Depends, HTTPException
 from supabase import Client
+from datetime import datetime, timedelta
+import logging
 
-from app.dependencies import get_supabase, require_admin, require_staff
-from app.models.application import ApplicationStatus
-from app.models.user import UserProfile
-from app.schemas.admin import (
-    ApplicantDetail,
-    DashboardStats,
-    PipelineResponse,
-    PipelineStage,
-    ReviewRequest,
-)
-from app.schemas.common import SuccessResponse
+from ..dependencies import get_supabase, require_staff
 
-router = APIRouter(prefix="/admin", tags=["Admin"])
+logger = logging.getLogger(__name__)
+
+router = APIRouter(prefix="/admin", tags=["admin"])
 
 
-def get_user_agency_id(supabase: Client, user_id: str) -> str | None:
-    """Get the agency_id for a user."""
-    try:
-        result = (
-            supabase.table("profiles")
-            .select("agency_id")
-            .eq("id", user_id)
-            .single()
-            .execute()
-        )
-        return result.data.get("agency_id") if result.data else None
-    except Exception as e:
-        print(f"[WARN] Could not get agency_id for user {user_id}: {e}")
-        return None
-
-
-@router.get("/dashboard", response_model=DashboardStats)
-async def get_dashboard(
-    staff: UserProfile = Depends(require_staff),
+@router.get("/dashboard")
+async def get_dashboard_stats(
     supabase: Client = Depends(get_supabase),
+    _user: dict = Depends(require_staff)
 ):
-    """Get admin dashboard statistics for the user's agency."""
-    print(f"[DEBUG] Dashboard request from user {staff.id} with role {staff.role}")
-    
-    agency_id = get_user_agency_id(supabase, staff.id)
-    print(f"[DEBUG] User agency_id: {agency_id}")
-    
-    # Count applications by status (filtered by agency if user has one)
-    statuses = ["in_progress", "submitted", "under_review", "approved", "rejected", "hired"]
-    counts = {}
-    
-    for s in statuses:
+    """Get dashboard statistics for admin users."""
+    try:
+        now = datetime.utcnow()
+        thirty_days_ago = (now - timedelta(days=30)).isoformat()
+        seven_days_ago = (now - timedelta(days=7)).isoformat()
+        
+        stats = {
+            "total_applicants": 0,
+            "pending_review": 0,
+            "approved_this_month": 0,
+            "expiring_documents": 0,
+            "recent_applications": [],
+            "expiring_docs": []
+        }
+        
+        # Total applicants
         try:
-            query = (
-                supabase.table("applications")
-                .select("id", count="exact")
-                .eq("status", s)
-            )
-            if agency_id:
-                query = query.eq("agency_id", agency_id)
-            result = query.execute()
-            counts[s] = result.count or 0
+            apps_res = supabase.table("applications").select("id", count="exact").execute()
+            stats["total_applicants"] = apps_res.count or 0
         except Exception as e:
-            print(f"[WARN] Error counting {s} applications: {e}")
-            counts[s] = 0
-
-    # Total applicants
-    try:
-        query = supabase.table("applications").select("user_id", count="exact")
-        if agency_id:
-            query = query.eq("agency_id", agency_id)
-        total_apps = query.execute()
-        total_applicants = total_apps.count or 0
+            logger.warning(f"Failed to get total applicants: {e}")
+        
+        # Pending review
+        try:
+            pending_res = supabase.table("applications").select("id", count="exact").in_("status", ["submitted", "under_review"]).execute()
+            stats["pending_review"] = pending_res.count or 0
+        except Exception as e:
+            logger.warning(f"Failed to get pending review count: {e}")
+        
+        # Approved this month
+        try:
+            approved_res = supabase.table("applications").select("id", count="exact").eq("status", "approved").gte("updated_at", thirty_days_ago).execute()
+            stats["approved_this_month"] = approved_res.count or 0
+        except Exception as e:
+            logger.warning(f"Failed to get approved count: {e}")
+        
+        # Expiring documents (next 30 days)
+        try:
+            thirty_days_future = (now + timedelta(days=30)).isoformat()
+            docs_res = supabase.table("documents").select("id", count="exact").lt("expiration_date", thirty_days_future).gt("expiration_date", now.isoformat()).execute()
+            stats["expiring_documents"] = docs_res.count or 0
+        except Exception as e:
+            logger.warning(f"Failed to get expiring docs count: {e}")
+        
+        # Recent applications (last 7 days)
+        try:
+            recent_res = supabase.table("applications").select(
+                "id, status, created_at, user_id, profiles(first_name, last_name, email)"
+            ).gte("created_at", seven_days_ago).order("created_at", desc=True).limit(10).execute()
+            
+            stats["recent_applications"] = [
+                {
+                    "id": app["id"],
+                    "status": app["status"],
+                    "created_at": app["created_at"],
+                    "applicant_name": f"{app['profiles']['first_name'] or ''} {app['profiles']['last_name'] or ''}".strip() if app.get("profiles") else "Unknown",
+                    "email": app["profiles"]["email"] if app.get("profiles") else None
+                }
+                for app in (recent_res.data or [])
+            ]
+        except Exception as e:
+            logger.warning(f"Failed to get recent applications: {e}")
+        
+        # Expiring documents details
+        try:
+            thirty_days_future = (now + timedelta(days=30)).isoformat()
+            exp_docs_res = supabase.table("documents").select(
+                "id, document_type, expiration_date, original_filename, user_id, profiles(first_name, last_name)"
+            ).lt("expiration_date", thirty_days_future).gt("expiration_date", now.isoformat()).order("expiration_date").limit(10).execute()
+            
+            stats["expiring_docs"] = [
+                {
+                    "id": doc["id"],
+                    "type": doc["document_type"],
+                    "expires": doc["expiration_date"],
+                    "file_name": doc["original_filename"],
+                    "employee_name": f"{doc['profiles']['first_name'] or ''} {doc['profiles']['last_name'] or ''}".strip() if doc.get("profiles") else "Unknown"
+                }
+                for doc in (exp_docs_res.data or [])
+            ]
+        except Exception as e:
+            logger.warning(f"Failed to get expiring docs details: {e}")
+        
+        return stats
+        
     except Exception as e:
-        print(f"[WARN] Error counting total applications: {e}")
-        total_applicants = 0
-
-    # Employee counts
-    try:
-        total_emp = (
-            supabase.table("employees")
-            .select("id", count="exact")
-            .execute()
-        )
-        total_employees = total_emp.count or 0
-    except Exception as e:
-        print(f"[WARN] Error counting employees: {e}")
-        total_employees = 0
-    
-    try:
-        active_emp = (
-            supabase.table("employees")
-            .select("id", count="exact")
-            .eq("status", "active")
-            .execute()
-        )
-        active_employees = active_emp.count or 0
-    except Exception as e:
-        print(f"[WARN] Error counting active employees: {e}")
-        active_employees = 0
-
-    # Expiring documents (next 30 days)
-    # Note: The schema uses 'expiration_date' (DATE) not 'expires_at' (TIMESTAMPTZ)
-    now = datetime.now(timezone.utc)
-    cutoff_30 = (now + timedelta(days=30)).date().isoformat()
-    today = now.date().isoformat()
-    
-    try:
-        expiring = (
-            supabase.table("documents")
-            .select("id", count="exact")
-            .eq("is_current", True)
-            .not_.is_("expiration_date", "null")
-            .lte("expiration_date", cutoff_30)
-            .gte("expiration_date", today)
-            .execute()
-        )
-        expiring_documents = expiring.count or 0
-    except Exception as e:
-        print(f"[WARN] Error counting expiring documents: {e}")
-        expiring_documents = 0
-    
-    try:
-        expired = (
-            supabase.table("documents")
-            .select("id", count="exact")
-            .eq("is_current", True)
-            .not_.is_("expiration_date", "null")
-            .lt("expiration_date", today)
-            .execute()
-        )
-        expired_documents = expired.count or 0
-    except Exception as e:
-        print(f"[WARN] Error counting expired documents: {e}")
-        expired_documents = 0
-
-    return DashboardStats(
-        total_applicants=total_applicants,
-        in_progress=counts.get("in_progress", 0),
-        submitted=counts.get("submitted", 0),
-        under_review=counts.get("under_review", 0),
-        approved=counts.get("approved", 0),
-        rejected=counts.get("rejected", 0),
-        hired=counts.get("hired", 0),
-        total_employees=total_employees,
-        active_employees=active_employees,
-        expiring_documents=expiring_documents,
-        expired_documents=expired_documents,
-    )
+        logger.error(f"Dashboard error: {e}")
+        raise HTTPException(status_code=500, detail=str(e))
 
 
-@router.get("/pipeline", response_model=PipelineResponse)
+@router.get("/pipeline")
 async def get_pipeline(
-    staff: UserProfile = Depends(require_staff),
     supabase: Client = Depends(get_supabase),
+    _user: dict = Depends(require_staff)
 ):
-    """Get the full applicant pipeline for the user's agency."""
-    agency_id = get_user_agency_id(supabase, staff.id)
-    
-    pipeline_statuses = [
-        "in_progress",
-        "submitted",
-        "under_review",
-        "approved",
-        "rejected",
-        "hired",
-    ]
-
-    stages = []
-    total = 0
-
-    for s in pipeline_statuses:
-        try:
-            query = (
-                supabase.table("applications")
-                .select("*, profiles(first_name, last_name, email), locations(name)")
-                .eq("status", s)
-                .order("updated_at", desc=True)
-            )
-            
-            if agency_id:
-                query = query.eq("agency_id", agency_id)
-            
-            result = query.execute()
-
-            applicants = []
-            for app in result.data or []:
-                profile = app.get("profiles", {}) or {}
-                location = app.get("locations", {}) or {}
-                
-                applicants.append(
-                    {
-                        "application_id": app["id"],
-                        "user_id": app["user_id"],
-                        "first_name": profile.get("first_name", ""),
-                        "last_name": profile.get("last_name", ""),
-                        "email": profile.get("email", ""),
-                        "current_step": app.get("current_step", 1),
-                        "completed_steps": app.get("completed_steps", 0),
-                        "submitted_at": app.get("submitted_at"),
-                        "updated_at": app.get("updated_at"),
-                        "location_name": location.get("name"),
-                    }
-                )
-
-            stages.append(PipelineStage(status=s, count=len(applicants), applicants=applicants))
-            total += len(applicants)
-        except Exception as e:
-            print(f"[WARN] Error fetching pipeline stage {s}: {e}")
-            stages.append(PipelineStage(status=s, count=0, applicants=[]))
-
-    return PipelineResponse(stages=stages, total=total)
+    """Get applicant pipeline for admin users."""
+    try:
+        # Get all applications with profile info
+        res = supabase.table("applications").select(
+            "id, status, created_at, submitted_at, updated_at, user_id, location_id, "
+            "profiles(first_name, last_name, email), "
+            "locations(name)"
+        ).order("created_at", desc=True).execute()
+        
+        applications = []
+        for app in (res.data or []):
+            profile = app.get("profiles") or {}
+            location = app.get("locations") or {}
+            applications.append({
+                "id": app["id"],
+                "user_id": app["user_id"],
+                "status": app["status"],
+                "created_at": app["created_at"],
+                "submitted_at": app.get("submitted_at"),
+                "updated_at": app["updated_at"],
+                "first_name": profile.get("first_name") or "",
+                "last_name": profile.get("last_name") or "",
+                "email": profile.get("email") or "",
+                "location_name": location.get("name") or "Unknown"
+            })
+        
+        return {"applications": applications}
+        
+    except Exception as e:
+        logger.error(f"Pipeline error: {e}")
+        raise HTTPException(status_code=500, detail=str(e))
 
 
-@router.get("/applicants/{app_id}", response_model=ApplicantDetail)
+@router.get("/applicant/{application_id}")
 async def get_applicant_detail(
-    app_id: str,
-    staff: UserProfile = Depends(require_staff),
+    application_id: str,
     supabase: Client = Depends(get_supabase),
+    _user: dict = Depends(require_staff)
 ):
-    """Get detailed view of an applicant for review."""
-    agency_id = get_user_agency_id(supabase, staff.id)
-    
-    # Get application with profile
-    query = (
-        supabase.table("applications")
-        .select("*, profiles(first_name, last_name, email, phone), locations(name)")
-        .eq("id", app_id)
-    )
-    
-    # Only filter by agency if user has one (superadmins might not)
-    if agency_id:
-        query = query.eq("agency_id", agency_id)
-    
-    app_result = query.single().execute()
-
-    if not app_result.data:
-        raise HTTPException(
-            status_code=status.HTTP_404_NOT_FOUND,
-            detail="Application not found",
-        )
-
-    app = app_result.data
-    profile = app.get("profiles", {}) or {}
-    location = app.get("locations", {}) or {}
-    user_id = app["user_id"]
-
-    # Get steps
-    steps_result = (
-        supabase.table("application_steps")
-        .select("*")
-        .eq("application_id", app_id)
-        .order("step_number")
-        .execute()
-    )
-
-    # Get documents (using correct column names from schema)
-    docs_result = (
-        supabase.table("documents")
-        .select("id, document_type, original_filename, created_at, expiration_date, is_current")
-        .eq("user_id", user_id)
-        .eq("is_current", True)
-        .execute()
-    )
-    
-    # Normalize document data to expected format
-    documents = []
-    for doc in docs_result.data or []:
-        documents.append({
-            "id": doc["id"],
-            "document_type": doc["document_type"],
-            "file_name": doc.get("original_filename", ""),
-            "created_at": doc["created_at"],
-            "expires_at": doc.get("expiration_date"),  # Map to expected field name
-            "is_current": doc["is_current"],
-        })
-
-    # Get agreements
-    agreements_result = (
-        supabase.table("agreements")
-        .select("id, agreement_type, signed_at, pdf_storage_path")
-        .eq("application_id", app_id)
-        .execute()
-    )
-    
-    # Normalize agreement data
-    agreements = []
-    for agr in agreements_result.data or []:
-        agreements.append({
-            "id": agr["id"],
-            "agreement_type": agr["agreement_type"],
-            "signed_at": agr["signed_at"],
-            "pdf_path": agr.get("pdf_storage_path"),
-        })
-
-    return ApplicantDetail(
-        user_id=user_id,
-        email=profile.get("email", ""),
-        first_name=profile.get("first_name", ""),
-        last_name=profile.get("last_name", ""),
-        phone=profile.get("phone"),
-        application_id=app_id,
-        status=app["status"],
-        current_step=app.get("current_step", 1),
-        completed_steps=app.get("completed_steps", 0),
-        total_steps=app.get("total_steps", 22),
-        submitted_at=app.get("submitted_at"),
-        location_name=location.get("name"),
-        steps=steps_result.data or [],
-        documents=documents,
-        agreements=agreements,
-    )
-
-
-@router.post("/applicants/{app_id}/approve", response_model=SuccessResponse)
-async def approve_applicant(
-    app_id: str,
-    review: ReviewRequest,
-    admin: UserProfile = Depends(require_admin),
-    supabase: Client = Depends(get_supabase),
-):
-    """Approve an applicant's application. Admins only."""
-    agency_id = get_user_agency_id(supabase, admin.id)
-    
-    # Verify application is in reviewable state and belongs to agency
-    query = (
-        supabase.table("applications")
-        .select("id, status, agency_id")
-        .eq("id", app_id)
-    )
-    if agency_id:
-        query = query.eq("agency_id", agency_id)
-    
-    app_result = query.single().execute()
-
-    if not app_result.data:
-        raise HTTPException(
-            status_code=status.HTTP_404_NOT_FOUND,
-            detail="Application not found",
-        )
-
-    if app_result.data["status"] not in ("submitted", "under_review"):
-        raise HTTPException(
-            status_code=status.HTTP_400_BAD_REQUEST,
-            detail=f"Cannot approve application with status '{app_result.data['status']}'",
-        )
-
-    now = datetime.now(timezone.utc).isoformat()
-    supabase.table("applications").update(
-        {
-            "status": ApplicationStatus.APPROVED.value,
-            "reviewed_at": now,
-            "reviewed_by": admin.id,
-            "notes": review.notes,
-            "updated_at": now,
+    """Get detailed applicant information."""
+    try:
+        # Get application with profile
+        app_res = supabase.table("applications").select(
+            "*, profiles(first_name, last_name, email), locations(name)"
+        ).eq("id", application_id).single().execute()
+        
+        if not app_res.data:
+            raise HTTPException(status_code=404, detail="Application not found")
+        
+        app = app_res.data
+        
+        # Get all application steps
+        steps_res = supabase.table("application_steps").select(
+            "step_number, step_name, status, data, completed_at"
+        ).eq("application_id", application_id).order("step_number").execute()
+        
+        # Get documents
+        docs_res = supabase.table("documents").select(
+            "id, document_type, original_filename, expiration_date, created_at, storage_path"
+        ).eq("user_id", app["user_id"]).execute()
+        
+        return {
+            "application": {
+                "id": app["id"],
+                "status": app["status"],
+                "created_at": app["created_at"],
+                "submitted_at": app.get("submitted_at"),
+                "location_name": app.get("locations", {}).get("name") if app.get("locations") else None
+            },
+            "profile": app.get("profiles") or {},
+            "steps": steps_res.data or [],
+            "documents": docs_res.data or []
         }
-    ).eq("id", app_id).execute()
+        
+    except HTTPException:
+        raise
+    except Exception as e:
+        logger.error(f"Applicant detail error: {e}")
+        raise HTTPException(status_code=500, detail=str(e))
 
-    return SuccessResponse(message="Application approved", data={"application_id": app_id})
 
-
-@router.post("/applicants/{app_id}/reject", response_model=SuccessResponse)
-async def reject_applicant(
-    app_id: str,
-    review: ReviewRequest,
-    admin: UserProfile = Depends(require_admin),
+@router.post("/applicant/{application_id}/status")
+async def update_application_status(
+    application_id: str,
+    status_update: dict,
     supabase: Client = Depends(get_supabase),
+    _user: dict = Depends(require_staff)
 ):
-    """Reject an applicant's application. Admins only."""
-    agency_id = get_user_agency_id(supabase, admin.id)
-    
-    query = (
-        supabase.table("applications")
-        .select("id, status, agency_id")
-        .eq("id", app_id)
-    )
-    if agency_id:
-        query = query.eq("agency_id", agency_id)
-    
-    app_result = query.single().execute()
+    """Update application status."""
+    try:
+        new_status = status_update.get("status")
+        valid_statuses = ["draft", "submitted", "under_review", "approved", "rejected", "hired"]
+        
+        if new_status not in valid_statuses:
+            raise HTTPException(status_code=400, detail=f"Invalid status. Must be one of: {valid_statuses}")
+        
+        res = supabase.table("applications").update({
+            "status": new_status,
+            "updated_at": datetime.utcnow().isoformat()
+        }).eq("id", application_id).execute()
+        
+        if not res.data:
+            raise HTTPException(status_code=404, detail="Application not found")
+        
+        return {"success": True, "status": new_status}
+        
+    except HTTPException:
+        raise
+    except Exception as e:
+        logger.error(f"Status update error: {e}")
+        raise HTTPException(status_code=500, detail=str(e))
 
-    if not app_result.data:
-        raise HTTPException(
-            status_code=status.HTTP_404_NOT_FOUND,
-            detail="Application not found",
-        )
 
-    if app_result.data["status"] not in ("submitted", "under_review"):
-        raise HTTPException(
-            status_code=status.HTTP_400_BAD_REQUEST,
-            detail=f"Cannot reject application with status '{app_result.data['status']}'",
-        )
-
-    now = datetime.now(timezone.utc).isoformat()
-    supabase.table("applications").update(
-        {
-            "status": ApplicationStatus.REJECTED.value,
-            "reviewed_at": now,
-            "reviewed_by": admin.id,
-            "notes": review.notes,
-            "updated_at": now,
+@router.get("/training-leads")
+async def get_training_leads(
+    supabase: Client = Depends(get_supabase),
+    _user: dict = Depends(require_staff)
+):
+    """Get certification training program leads from applications."""
+    try:
+        # Get step 4 (Education) data which contains certification interest
+        steps_res = supabase.table("application_steps").select(
+            "application_id, data"
+        ).eq("step_number", 4).execute()
+        
+        if not steps_res.data:
+            return {
+                "hha_leads": [],
+                "cpr_leads": [],
+                "total_hha": 0,
+                "total_cpr": 0
+            }
+        
+        # Filter for leads who expressed interest
+        hha_app_ids = []
+        cpr_app_ids = []
+        step_data_map = {}
+        
+        for step in steps_res.data:
+            data = step.get("data") or {}
+            app_id = step["application_id"]
+            step_data_map[app_id] = data
+            
+            # Check HHA interest
+            if data.get("interested_in_hha_certification") in ["yes", "maybe"]:
+                hha_app_ids.append(app_id)
+            
+            # Check CPR interest
+            if data.get("interested_in_cpr_certification") in ["yes", "maybe"]:
+                cpr_app_ids.append(app_id)
+        
+        # Get application and profile info for these leads
+        all_app_ids = list(set(hha_app_ids + cpr_app_ids))
+        
+        if not all_app_ids:
+            return {
+                "hha_leads": [],
+                "cpr_leads": [],
+                "total_hha": 0,
+                "total_cpr": 0
+            }
+        
+        apps_res = supabase.table("applications").select(
+            "id, user_id, status, submitted_at, updated_at, location_id, "
+            "profiles(first_name, last_name, email), "
+            "locations(name)"
+        ).in_("id", all_app_ids).execute()
+        
+        # Also get step 2 (Personal Info) for phone numbers
+        personal_steps_res = supabase.table("application_steps").select(
+            "application_id, data"
+        ).eq("step_number", 2).in_("application_id", all_app_ids).execute()
+        
+        phone_map = {}
+        for step in (personal_steps_res.data or []):
+            data = step.get("data") or {}
+            phone_map[step["application_id"]] = data.get("phone")
+        
+        # Build lead objects
+        def build_lead(app):
+            profile = app.get("profiles") or {}
+            location = app.get("locations") or {}
+            edu_data = step_data_map.get(app["id"]) or {}
+            
+            return {
+                "application_id": app["id"],
+                "user_id": app["user_id"],
+                "first_name": profile.get("first_name") or "",
+                "last_name": profile.get("last_name") or "",
+                "email": profile.get("email") or "",
+                "phone": phone_map.get(app["id"]),
+                "location_name": location.get("name"),
+                "interested_in_hha": edu_data.get("interested_in_hha_certification"),
+                "interested_in_cpr": edu_data.get("interested_in_cpr_certification"),
+                "has_cpr": edu_data.get("has_cpr_certification"),
+                "certifications": edu_data.get("certifications") or [],
+                "application_status": app["status"],
+                "submitted_at": app.get("submitted_at"),
+                "updated_at": app["updated_at"]
+            }
+        
+        hha_leads = []
+        cpr_leads = []
+        
+        for app in (apps_res.data or []):
+            lead = build_lead(app)
+            if app["id"] in hha_app_ids:
+                hha_leads.append(lead)
+            if app["id"] in cpr_app_ids:
+                cpr_leads.append(lead)
+        
+        return {
+            "hha_leads": hha_leads,
+            "cpr_leads": cpr_leads,
+            "total_hha": len(hha_leads),
+            "total_cpr": len(cpr_leads)
         }
-    ).eq("id", app_id).execute()
-
-    return SuccessResponse(message="Application rejected", data={"application_id": app_id})
+        
+    except Exception as e:
+        logger.error(f"Training leads error: {e}")
+        raise HTTPException(status_code=500, detail=str(e))

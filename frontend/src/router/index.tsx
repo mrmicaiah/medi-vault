@@ -25,6 +25,7 @@ import { EmployeeDetailPage } from '../pages/admin/EmployeeDetailPage';
 import { CompliancePage } from '../pages/admin/CompliancePage';
 import { HirePage } from '../pages/admin/HirePage';
 import { UsersPage } from '../pages/admin/UsersPage';
+import { TrainingLeadsPage } from '../pages/admin/TrainingLeadsPage';
 
 const STAFF_ROLES: UserRole[] = ['admin', 'superadmin', 'manager'];
 
@@ -125,6 +126,7 @@ export function RouterConfig() {
         <Route path="/admin/compliance" element={<CompliancePage />} />
         <Route path="/admin/hire/:id" element={<HirePage />} />
         <Route path="/admin/users" element={<UsersPage />} />
+        <Route path="/admin/training-leads" element={<TrainingLeadsPage />} />
       </Route>
 
       {/* Root redirect */}
