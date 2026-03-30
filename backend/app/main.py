@@ -34,13 +34,11 @@ app = FastAPI(
     openapi_url="/api/openapi.json",
 )
 
-# CORS middleware - use parsed list from settings
-cors_origins = settings.cors_origin_list
-print(f"[CORS] Adding middleware with origins: {cors_origins}")
-
+# CORS middleware - allow all origins for now to debug
+# TODO: Restrict back to settings.cors_origin_list after debugging
 app.add_middleware(
     CORSMiddleware,
-    allow_origins=cors_origins,
+    allow_origins=["*"],  # Allow all temporarily
     allow_credentials=True,
     allow_methods=["*"],
     allow_headers=["*"],
