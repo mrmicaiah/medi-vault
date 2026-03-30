@@ -1,4 +1,5 @@
 import React, { useState, useEffect, useRef } from 'react';
+import { useNavigate } from 'react-router-dom';
 import { Button } from '../../components/ui/Button';
 import { Alert } from '../../components/ui/Alert';
 import { api } from '../../lib/api';
@@ -34,6 +35,9 @@ interface ApplicantDetail {
   tb_uploaded?: boolean;
 }
 
+// Simple in-memory cache
+const detailCache = new Map<string, ApplicantDetail>();
+
 const YesNo = ({ value }: { value: boolean | string | undefined }) => {
   const isYes = value === true || value === 'yes';
   return (
@@ -55,6 +59,7 @@ const CheckCircle = ({ checked, label }: { checked: boolean; label: string }) =>
 );
 
 export function PipelinePage() {
+  const navigate = useNavigate();
   const fileInputRef = useRef<HTMLInputElement>(null);
   
   const [applicants, setApplicants] = useState<Applicant[]>([]);
@@ -92,11 +97,19 @@ export function PipelinePage() {
   const selectApplicant = async (applicant: Applicant) => {
     setSelectedApplicant(applicant);
     setPanelOpen(true);
+    
+    // Check cache first
+    const cached = detailCache.get(applicant.id);
+    if (cached) {
+      setApplicantDetail(cached);
+      return;
+    }
+    
     setLoadingDetail(true);
     setApplicantDetail(null);
     
     try {
-      const res = await api.get<{ application: any; profile: any; steps: Array<{ step_number: number; data: Record<string, unknown> }> }>(
+      const res = await api.get<{ application: unknown; profile: unknown; steps: Array<{ step_number: number; data: Record<string, unknown> }> }>(
         `/admin/applicants/${applicant.id}`
       );
       
@@ -109,7 +122,7 @@ export function PipelinePage() {
       const step16 = steps.find(s => s.step_number === 16)?.data || {};
       const step17 = steps.find(s => s.step_number === 17)?.data || {};
       
-      setApplicantDetail({
+      const detail: ApplicantDetail = {
         city: step2.city as string,
         certifications: step4.certifications as string[],
         has_cpr_certification: step4.has_cpr_certification as string,
@@ -124,7 +137,11 @@ export function PipelinePage() {
         credentials_uploaded: Boolean(step15.file_name),
         cpr_uploaded: Boolean(step16.file_name),
         tb_uploaded: Boolean(step17.file_name),
-      });
+      };
+      
+      // Cache for fast re-access
+      detailCache.set(applicant.id, detail);
+      setApplicantDetail(detail);
     } catch (err) {
       console.error('Error loading applicant detail:', err);
     } finally {
@@ -162,6 +179,8 @@ export function PipelinePage() {
 
       if (uploadErr) throw uploadErr;
 
+      // Invalidate cache for this applicant
+      detailCache.delete(selectedApplicant.id);
       await selectApplicant(selectedApplicant);
       setShowUploadModal(false);
       setUploadType('');
@@ -174,11 +193,11 @@ export function PipelinePage() {
   };
 
   const goToView = (id: string) => {
-    window.location.href = `/admin/applicant/${id}`;
+    navigate(`/admin/applicant/${id}`);
   };
 
   const goToHire = (id: string) => {
-    window.location.href = `/admin/hire/${id}`;
+    navigate(`/admin/hire/${id}`);
   };
 
   const getPositionLabel = (position?: string) => {
