@@ -143,10 +143,11 @@ export function PersonalInfo({ data, onSave, onChange }: StepProps) {
             onChange={(e) => handleChange('first_name', e.target.value)} 
           />
           <Input 
-            label="Middle Name" 
+            label="Middle Name / Initial" 
+            required
             value={form.middle_name} 
             onChange={(e) => handleChange('middle_name', e.target.value)}
-            helperText="Or middle initial"
+            helperText="Required for I-9 form (at minimum, provide middle initial)"
           />
           <Input 
             label="Last Name" 
