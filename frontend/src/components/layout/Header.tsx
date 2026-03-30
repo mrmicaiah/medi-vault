@@ -1,13 +1,21 @@
 import React, { useState, useRef, useEffect } from 'react';
-import { useNavigate } from 'react-router-dom';
+import { useNavigate, useLocation } from 'react-router-dom';
 import { useAuth } from '../../hooks/useAuth';
 import { getInitials } from '../../lib/utils';
+import type { UserRole } from '../../types';
+
+const STAFF_ROLES: UserRole[] = ['admin', 'superadmin', 'manager'];
 
 export function Header() {
-  const { profile, signOut } = useAuth();
+  const { profile, role, signOut } = useAuth();
   const navigate = useNavigate();
+  const location = useLocation();
   const [menuOpen, setMenuOpen] = useState(false);
   const menuRef = useRef<HTMLDivElement>(null);
+
+  const isStaff = role !== null && STAFF_ROLES.includes(role);
+  const isOnAdminPage = location.pathname.startsWith('/admin');
+  const isOnApplicantPage = location.pathname.startsWith('/applicant');
 
   useEffect(() => {
     const handleClick = (e: MouseEvent) => {
@@ -35,43 +43,78 @@ export function Header() {
             Medi<span className="text-maroon">Vault</span>
           </span>
         </div>
-      </div>
 
-      <div className="relative" ref={menuRef}>
-        <button
-          onClick={() => setMenuOpen(!menuOpen)}
-          className="flex items-center gap-2 rounded-lg p-1.5 hover:bg-gray-50"
-        >
-          <div className="flex h-8 w-8 items-center justify-center rounded-full bg-maroon-subtle text-sm font-medium text-maroon">
-            {profile ? getInitials(profile.first_name, profile.last_name) : '?'}
-          </div>
-          <span className="hidden text-sm font-medium text-slate sm:block">
-            {profile ? `${profile.first_name} ${profile.last_name}` : 'User'}
-          </span>
-          <svg className="h-4 w-4 text-gray" fill="none" viewBox="0 0 24 24" stroke="currentColor">
-            <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M19 9l-7 7-7-7" />
-          </svg>
-        </button>
-
-        {menuOpen && (
-          <div className="absolute right-0 mt-2 w-48 rounded-lg border border-border bg-white py-1 shadow-lg">
-            <div className="border-b border-border px-4 py-2">
-              <p className="text-sm font-medium text-navy">
-                {profile?.first_name} {profile?.last_name}
-              </p>
-              <p className="text-xs text-gray">{profile?.email}</p>
-            </div>
+        {/* Dev Mode Toggle - Only for staff */}
+        {isStaff && (
+          <div className="ml-6 flex items-center gap-1 rounded-lg bg-gray-100 p-1">
             <button
-              onClick={handleSignOut}
-              className="flex w-full items-center gap-2 px-4 py-2 text-sm text-slate hover:bg-gray-50"
+              onClick={() => navigate('/admin')}
+              className={`px-3 py-1 text-xs font-medium rounded-md transition-colors ${
+                isOnAdminPage
+                  ? 'bg-white text-maroon shadow-sm'
+                  : 'text-gray hover:text-slate'
+              }`}
             >
-              <svg className="h-4 w-4" fill="none" viewBox="0 0 24 24" stroke="currentColor">
-                <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M17 16l4-4m0 0l-4-4m4 4H7m6 4v1a3 3 0 01-3 3H6a3 3 0 01-3-3V7a3 3 0 013-3h4a3 3 0 013 3v1" />
-              </svg>
-              Sign Out
+              Admin View
+            </button>
+            <button
+              onClick={() => navigate('/applicant')}
+              className={`px-3 py-1 text-xs font-medium rounded-md transition-colors ${
+                isOnApplicantPage
+                  ? 'bg-white text-maroon shadow-sm'
+                  : 'text-gray hover:text-slate'
+              }`}
+            >
+              Applicant View
             </button>
           </div>
         )}
+      </div>
+
+      <div className="flex items-center gap-4">
+        {/* Role Badge */}
+        {isStaff && (
+          <span className="px-2 py-0.5 text-xs font-medium rounded-full bg-maroon-subtle text-maroon capitalize">
+            {role}
+          </span>
+        )}
+
+        <div className="relative" ref={menuRef}>
+          <button
+            onClick={() => setMenuOpen(!menuOpen)}
+            className="flex items-center gap-2 rounded-lg p-1.5 hover:bg-gray-50"
+          >
+            <div className="flex h-8 w-8 items-center justify-center rounded-full bg-maroon-subtle text-sm font-medium text-maroon">
+              {profile ? getInitials(profile.first_name, profile.last_name) : '?'}
+            </div>
+            <span className="hidden text-sm font-medium text-slate sm:block">
+              {profile ? `${profile.first_name} ${profile.last_name}` : 'User'}
+            </span>
+            <svg className="h-4 w-4 text-gray" fill="none" viewBox="0 0 24 24" stroke="currentColor">
+              <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M19 9l-7 7-7-7" />
+            </svg>
+          </button>
+
+          {menuOpen && (
+            <div className="absolute right-0 mt-2 w-48 rounded-lg border border-border bg-white py-1 shadow-lg">
+              <div className="border-b border-border px-4 py-2">
+                <p className="text-sm font-medium text-navy">
+                  {profile?.first_name} {profile?.last_name}
+                </p>
+                <p className="text-xs text-gray">{profile?.email}</p>
+              </div>
+              <button
+                onClick={handleSignOut}
+                className="flex w-full items-center gap-2 px-4 py-2 text-sm text-slate hover:bg-gray-50"
+              >
+                <svg className="h-4 w-4" fill="none" viewBox="0 0 24 24" stroke="currentColor">
+                  <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M17 16l4-4m0 0l-4-4m4 4H7m6 4v1a3 3 0 01-3 3H6a3 3 0 01-3-3V7a3 3 0 013-3h4a3 3 0 013 3v1" />
+                </svg>
+                Sign Out
+              </button>
+            </div>
+          )}
+        </div>
       </div>
     </header>
   );
