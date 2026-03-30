@@ -1,5 +1,5 @@
 import React, { useState, useEffect } from 'react';
-import { useParams, Link } from 'react-router-dom';
+import { useParams, Link, useNavigate } from 'react-router-dom';
 import { Button } from '../../components/ui/Button';
 import { Badge } from '../../components/ui/Badge';
 import { Alert } from '../../components/ui/Alert';
@@ -115,6 +115,7 @@ const statusStyles: Record<string, { bg: string; text: string }> = {
 
 export function ApplicantDetailPage() {
   const { id } = useParams();
+  const navigate = useNavigate();
   const [data, setData] = useState<ApplicationData | null>(null);
   const [loading, setLoading] = useState(true);
   const [error, setError] = useState<string | null>(null);
@@ -136,25 +137,7 @@ export function ApplicantDetailPage() {
       setError(null);
       const res = await api.get<ApplicationData>(`/admin/applicants/${id}`);
       setData(res);
-      
-      // Initialize edit form with current values
-      const step2Data = res.steps.find(s => s.step_number === 2)?.data || {};
-      const step3Data = res.steps.find(s => s.step_number === 3)?.data || {};
-      setEditForm({
-        first_name: res.profile.first_name || '',
-        last_name: res.profile.last_name || '',
-        email: res.profile.email || '',
-        phone: res.profile.phone || getStepString(step2Data, 'phone'),
-        address_line1: getStepString(step2Data, 'address_line1'),
-        address_line2: getStepString(step2Data, 'address_line2'),
-        city: getStepString(step2Data, 'city'),
-        state: getStepString(step2Data, 'state'),
-        zip: getStepString(step2Data, 'zip'),
-        date_of_birth: getStepString(step2Data, 'date_of_birth'),
-        emergency_name: getStepString(step3Data, 'name'),
-        emergency_relationship: getStepString(step3Data, 'relationship'),
-        emergency_phone: getStepString(step3Data, 'phone'),
-      });
+      initEditForm(res);
     } catch (err) {
       setError(err instanceof Error ? err.message : 'Failed to load applicant');
     } finally {
@@ -162,27 +145,76 @@ export function ApplicantDetailPage() {
     }
   };
 
+  const initEditForm = (res: ApplicationData) => {
+    const step2Data = res.steps.find(s => s.step_number === 2)?.data || {};
+    const step3Data = res.steps.find(s => s.step_number === 3)?.data || {};
+    setEditForm({
+      first_name: res.profile.first_name || '',
+      last_name: res.profile.last_name || '',
+      email: res.profile.email || '',
+      phone: res.profile.phone || getStepString(step2Data, 'phone'),
+      address_line1: getStepString(step2Data, 'address_line1'),
+      address_line2: getStepString(step2Data, 'address_line2'),
+      city: getStepString(step2Data, 'city'),
+      state: getStepString(step2Data, 'state'),
+      zip: getStepString(step2Data, 'zip'),
+      date_of_birth: getStepString(step2Data, 'date_of_birth'),
+      emergency_name: getStepString(step3Data, 'name'),
+      emergency_relationship: getStepString(step3Data, 'relationship'),
+      emergency_phone: getStepString(step3Data, 'phone'),
+    });
+  };
+
   const handleSaveProfile = async () => {
-    if (!id) return;
+    if (!id || !data) return;
+    
+    // Optimistic update - update UI immediately
+    const updatedData = {
+      ...data,
+      profile: {
+        ...data.profile,
+        first_name: editForm.first_name,
+        last_name: editForm.last_name,
+        email: editForm.email,
+        phone: editForm.phone,
+      }
+    };
+    setData(updatedData);
+    setEditing(false);
+    
+    // Save in background
+    setSaving(true);
     try {
-      setSaving(true);
       await api.patch(`/admin/applicants/${id}/profile`, editForm);
-      await loadData();
-      setEditing(false);
     } catch (err) {
+      // Revert on error
       setError(err instanceof Error ? err.message : 'Failed to save changes');
+      setData(data); // Revert to original
+      setEditing(true);
     } finally {
       setSaving(false);
     }
   };
 
   const handleStatusChange = async (newStatus: string) => {
-    if (!id) return;
+    if (!id || !data) return;
+    
+    // Optimistic update
+    const oldStatus = data.application.status;
+    setData({
+      ...data,
+      application: { ...data.application, status: newStatus }
+    });
+    
     try {
       await api.post(`/admin/applicant/${id}/status`, { status: newStatus });
-      await loadData();
     } catch (err) {
+      // Revert on error
       setError(err instanceof Error ? err.message : 'Failed to update status');
+      setData({
+        ...data,
+        application: { ...data.application, status: oldStatus }
+      });
     }
   };
 
@@ -190,7 +222,7 @@ export function ApplicantDetailPage() {
     if (url) {
       window.open(url, '_blank');
     } else {
-      alert('Document not available');
+      setError('Document not available - no signed URL');
     }
   };
 
@@ -231,11 +263,11 @@ export function ApplicantDetailPage() {
       {/* Header */}
       <div className="flex items-start justify-between">
         <div className="flex items-center gap-4">
-          <Link to="/admin/applicants" className="rounded-lg p-2 hover:bg-gray-100 transition-colors">
+          <button onClick={() => navigate('/admin/applicants')} className="rounded-lg p-2 hover:bg-gray-100 transition-colors">
             <svg className="h-5 w-5 text-gray" fill="none" viewBox="0 0 24 24" stroke="currentColor">
               <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M15 19l-7-7 7-7" />
             </svg>
-          </Link>
+          </button>
           <div className="flex items-center gap-4">
             <div className="flex h-14 w-14 items-center justify-center rounded-xl bg-navy text-xl font-bold text-white">
               {profile.first_name?.[0]}{profile.last_name?.[0]}
@@ -266,9 +298,9 @@ export function ApplicantDetailPage() {
           )}
           
           {application.status === 'approved' && (
-            <Link to={`/admin/hire/${application.id}`}>
-              <Button size="sm">Hire</Button>
-            </Link>
+            <Button size="sm" onClick={() => navigate(`/admin/hire/${application.id}`)}>
+              Hire
+            </Button>
           )}
         </div>
       </div>
@@ -322,7 +354,7 @@ export function ApplicantDetailPage() {
                 </Button>
               ) : (
                 <div className="flex gap-2">
-                  <Button variant="secondary" size="sm" onClick={() => setEditing(false)}>
+                  <Button variant="secondary" size="sm" onClick={() => { setEditing(false); initEditForm(data); }}>
                     Cancel
                   </Button>
                   <Button size="sm" onClick={handleSaveProfile} loading={saving}>
@@ -580,7 +612,7 @@ export function ApplicantDetailPage() {
                 >
                   <div className="flex items-center gap-3">
                     <div className={`flex h-10 w-10 items-center justify-center rounded-lg ${
-                      file.skipped ? 'bg-gray-100' : file.file_name ? 'bg-maroon-subtle' : 'bg-gray-100'
+                      file.skipped ? 'bg-gray-100' : file.file_name ? 'bg-maroon/10' : 'bg-gray-100'
                     }`}>
                       <svg className={`h-5 w-5 ${file.skipped ? 'text-gray' : file.file_name ? 'text-maroon' : 'text-gray'}`} fill="none" viewBox="0 0 24 24" stroke="currentColor">
                         <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M7 21h10a2 2 0 002-2V9.414a1 1 0 00-.293-.707l-5.414-5.414A1 1 0 0012.586 3H7a2 2 0 00-2 2v14a2 2 0 002 2z" />
