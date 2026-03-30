@@ -19,6 +19,10 @@ export function Education({ data, onSave }: StepProps) {
     // Certifications (multi-select)
     certifications: (data.certifications as string[]) || [],
     
+    // Certification Interest (for leads)
+    interested_in_hha_certification: (data.interested_in_hha_certification as string) || '',
+    interested_in_cpr_certification: (data.interested_in_cpr_certification as string) || '',
+    
     // License & Eligibility
     has_cpr_certification: (data.has_cpr_certification as string) || '',
     has_drivers_license: (data.has_drivers_license as string) || '',
@@ -67,7 +71,12 @@ export function Education({ data, onSave }: StepProps) {
     handleChange('certifications', updated);
   };
 
-  const RadioGroup = ({ name, label, value, required = false }: { name: string; label: string; value: string; required?: boolean }) => (
+  // Check if user has no certifications or no HHA specifically
+  const hasNoCertifications = form.certifications.includes('none');
+  const hasNoHHA = !form.certifications.includes('hha') && !form.certifications.includes('cna') && !form.certifications.includes('lpn') && !form.certifications.includes('rn');
+  const hasNoCPR = form.has_cpr_certification === 'no';
+
+  const RadioGroup = ({ name, label, value, required = false, helperText }: { name: string; label: string; value: string; required?: boolean; helperText?: string }) => (
     <div>
       <label className="block text-sm font-medium text-slate mb-2">
         {label} {required && <span className="text-error">*</span>}
@@ -87,6 +96,7 @@ export function Education({ data, onSave }: StepProps) {
           </label>
         ))}
       </div>
+      {helperText && <p className="mt-1 text-xs text-gray">{helperText}</p>}
     </div>
   );
 
@@ -162,12 +172,74 @@ export function Education({ data, onSave }: StepProps) {
           </div>
         </div>
 
+        {/* HHA Certification Interest - Show if no certifications or no HHA-level cert */}
+        {(hasNoCertifications || hasNoHHA) && form.certifications.length > 0 && (
+          <div className="p-4 rounded-lg border-2 border-maroon-subtle bg-maroon-subtle/20">
+            <label className="block text-sm font-medium text-slate mb-2">
+              Would you be interested in getting certified through our agency's HHA training program?
+            </label>
+            <p className="text-xs text-gray mb-3">
+              We offer HHA certification classes for aides who want to advance their careers. Training is provided at no cost for qualifying candidates.
+            </p>
+            <div className="flex gap-4">
+              {[
+                { value: 'yes', label: 'Yes, I\'m interested!' },
+                { value: 'maybe', label: 'Maybe, tell me more' },
+                { value: 'no', label: 'No, not at this time' },
+              ].map((opt) => (
+                <label key={opt.value} className="flex items-center gap-2 cursor-pointer">
+                  <input
+                    type="radio"
+                    name="interested_in_hha_certification"
+                    value={opt.value}
+                    checked={form.interested_in_hha_certification === opt.value}
+                    onChange={(e) => handleChange('interested_in_hha_certification', e.target.value)}
+                    className="h-4 w-4 text-maroon focus:ring-maroon"
+                  />
+                  <span className="text-sm text-slate">{opt.label}</span>
+                </label>
+              ))}
+            </div>
+          </div>
+        )}
+
         <RadioGroup 
           name="has_cpr_certification" 
           label="Do you hold CPR certification?" 
           value={form.has_cpr_certification}
           required
         />
+
+        {/* CPR Certification Interest - Show if they don't have CPR */}
+        {hasNoCPR && (
+          <div className="p-4 rounded-lg border-2 border-maroon-subtle bg-maroon-subtle/20">
+            <label className="block text-sm font-medium text-slate mb-2">
+              Would you be interested in getting CPR certified through our agency?
+            </label>
+            <p className="text-xs text-gray mb-3">
+              We offer CPR certification classes for our aides. This is often required for client assignments.
+            </p>
+            <div className="flex gap-4">
+              {[
+                { value: 'yes', label: 'Yes, I\'m interested!' },
+                { value: 'maybe', label: 'Maybe, tell me more' },
+                { value: 'no', label: 'No, not at this time' },
+              ].map((opt) => (
+                <label key={opt.value} className="flex items-center gap-2 cursor-pointer">
+                  <input
+                    type="radio"
+                    name="interested_in_cpr_certification"
+                    value={opt.value}
+                    checked={form.interested_in_cpr_certification === opt.value}
+                    onChange={(e) => handleChange('interested_in_cpr_certification', e.target.value)}
+                    className="h-4 w-4 text-maroon focus:ring-maroon"
+                  />
+                  <span className="text-sm text-slate">{opt.label}</span>
+                </label>
+              ))}
+            </div>
+          </div>
+        )}
 
         <RadioGroup 
           name="has_tb_test" 
