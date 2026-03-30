@@ -64,7 +64,7 @@ class ComplianceService:
             # Get current documents for this employee
             docs_result = (
                 self.supabase.table("documents")
-                .select("document_type, expires_at")
+                .select("document_type, expiration_date")
                 .eq("user_id", user_id)
                 .eq("is_current", True)
                 .execute()
@@ -81,8 +81,8 @@ class ComplianceService:
             emp_expired = 0
             emp_expiring = 0
             for d in docs:
-                if d.get("expires_at"):
-                    exp_dt = d["expires_at"]
+                if d.get("expiration_date"):
+                    exp_dt = d["expiration_date"]
                     if exp_dt < now.isoformat():
                         emp_expired += 1
                         total_expired += 1
@@ -142,17 +142,17 @@ class ComplianceService:
             self.supabase.table("documents")
             .select("*, profiles(first_name, last_name, email)")
             .eq("is_current", True)
-            .not_.is_("expires_at", "null")
-            .lte("expires_at", cutoff)
-            .gte("expires_at", now.isoformat())
-            .order("expires_at")
+            .not_.is_("expiration_date", "null")
+            .lte("expiration_date", cutoff)
+            .gte("expiration_date", now.isoformat())
+            .order("expiration_date")
             .execute()
         )
 
         items = []
         for d in result.data or []:
             profile = d.get("profiles", {}) or {}
-            exp_date = datetime.fromisoformat(d["expires_at"].replace("Z", "+00:00"))
+            exp_date = datetime.fromisoformat(d["expiration_date"].replace("Z", "+00:00"))
             items.append(
                 {
                     "id": d["id"],
@@ -160,8 +160,8 @@ class ComplianceService:
                     "employee_name": f"{profile.get('first_name', '')} {profile.get('last_name', '')}".strip(),
                     "email": profile.get("email"),
                     "document_type": d["document_type"],
-                    "file_name": d["file_name"],
-                    "expires_at": d["expires_at"],
+                    "file_name": d["original_filename"],
+                    "expiration_date": d["expiration_date"],
                     "days_until_expiry": (exp_date - now).days,
                 }
             )
@@ -176,9 +176,9 @@ class ComplianceService:
             self.supabase.table("documents")
             .select("*, profiles(first_name, last_name, email)")
             .eq("is_current", True)
-            .not_.is_("expires_at", "null")
-            .lt("expires_at", now)
-            .order("expires_at")
+            .not_.is_("expiration_date", "null")
+            .lt("expiration_date", now)
+            .order("expiration_date")
             .execute()
         )
 
@@ -192,8 +192,8 @@ class ComplianceService:
                     "employee_name": f"{profile.get('first_name', '')} {profile.get('last_name', '')}".strip(),
                     "email": profile.get("email"),
                     "document_type": d["document_type"],
-                    "file_name": d["file_name"],
-                    "expires_at": d["expires_at"],
+                    "file_name": d["original_filename"],
+                    "expiration_date": d["expiration_date"],
                 }
             )
 
@@ -280,13 +280,13 @@ class ComplianceService:
             dt = d["document_type"]
             if dt not in doc_status:
                 expired = False
-                if d.get("expires_at") and d["expires_at"] < ref_date:
+                if d.get("expiration_date") and d["expiration_date"] < ref_date:
                     expired = True
                 doc_status[dt] = {
                     "document_type": dt,
-                    "file_name": d["file_name"],
+                    "file_name": d["original_filename"],
                     "uploaded_at": d["created_at"],
-                    "expires_at": d.get("expires_at"),
+                    "expiration_date": d.get("expiration_date"),
                     "was_expired": expired,
                     "version": d["version"],
                 }
