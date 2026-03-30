@@ -1,11 +1,16 @@
 from fastapi import APIRouter, Depends, HTTPException, Header
+from fastapi.responses import Response
 from supabase import Client
 from datetime import datetime, timedelta
 from typing import Optional, Dict, List
+from jinja2 import Environment, FileSystemLoader
+from weasyprint import HTML, CSS
 import logging
+import os
 
 from ..dependencies import get_supabase
 from ..services.encryption_service import encryption_service
+from ..services.pdf_service import pdf_service
 
 logger = logging.getLogger(__name__)
 
@@ -91,7 +96,6 @@ async def get_dashboard_stats(
     try:
         now = datetime.utcnow()
         thirty_days_ago = (now - timedelta(days=30)).isoformat()
-        seven_days_ago = (now - timedelta(days=7)).isoformat()
         
         stats = {
             "total_applicants": 0,
@@ -217,7 +221,7 @@ async def get_applicant_detail(
         signed_urls_map = generate_signed_urls_batch(supabase, all_storage_paths)
         
         documents = []
-        for doc in (docs_res.data if docs_res else []):
+        for doc in (docs_res.data if 'docs_res' in dir() and docs_res else []):
             documents.append({
                 "id": doc.get("id"),
                 "document_type": doc.get("document_type"),
@@ -551,9 +555,6 @@ async def update_application_status(
 # PDF Generation Endpoints
 # =============================================================================
 
-from ..services.pdf_service import pdf_service
-from fastapi.responses import Response
-
 @router.get("/applicants/{application_id}/pdf/application")
 async def generate_application_pdf(
     application_id: str,
@@ -732,10 +733,6 @@ async def generate_agreement_pdf(
         
         template_name = template_map.get(agreement_type)
         
-        from jinja2 import Environment, FileSystemLoader
-        from weasyprint import HTML, CSS
-        import os
-        
         templates_dir = os.path.join(os.path.dirname(__file__), '..', 'templates')
         jinja_env = Environment(loader=FileSystemLoader(templates_dir), autoescape=True)
         template = jinja_env.get_template(template_name)
@@ -859,7 +856,6 @@ async def get_applicant_documents_summary(
             raise HTTPException(status_code=404, detail="Application not found")
         
         application = app_res.data
-        user_id = application.get("user_id")
         profile = application.get("profiles") or {}
         
         documents = {
