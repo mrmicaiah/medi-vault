@@ -43,27 +43,47 @@ export function AuthProvider({ children }: { children: React.ReactNode }) {
     initialized: false,
   });
 
-  // Fetch profile - simple and direct
+  // Fetch profile with timeout
   const fetchProfile = async (userId: string): Promise<Profile | null> => {
-    const { data, error } = await supabase
-      .from('profiles')
-      .select('*')
-      .eq('id', userId)
-      .single();
+    console.log('[Auth] Fetching profile for:', userId);
     
-    if (error) {
-      console.error('Profile fetch error:', error);
-      return null;
-    }
-    return data;
+    const timeoutPromise = new Promise<null>((resolve) => {
+      setTimeout(() => {
+        console.error('[Auth] Profile fetch timed out after 5s');
+        resolve(null);
+      }, 5000);
+    });
+
+    const fetchPromise = (async () => {
+      const { data, error } = await supabase
+        .from('profiles')
+        .select('*')
+        .eq('id', userId)
+        .single();
+      
+      if (error) {
+        console.error('[Auth] Profile fetch error:', error);
+        return null;
+      }
+      console.log('[Auth] Profile fetched:', data);
+      return data;
+    })();
+
+    return Promise.race([fetchPromise, timeoutPromise]);
   };
 
   // Initialize auth on mount
   useEffect(() => {
+    console.log('[Auth] Initializing...');
+    
     // Get initial session
     supabase.auth.getSession().then(async ({ data: { session } }) => {
+      console.log('[Auth] Got session:', session ? 'yes' : 'no');
+      
       if (session?.user) {
+        console.log('[Auth] User ID:', session.user.id);
         const profile = await fetchProfile(session.user.id);
+        console.log('[Auth] Setting state with profile:', profile?.role);
         setState({
           user: session.user,
           session,
@@ -73,8 +93,12 @@ export function AuthProvider({ children }: { children: React.ReactNode }) {
           initialized: true,
         });
       } else {
+        console.log('[Auth] No session, setting initialized');
         setState(prev => ({ ...prev, loading: false, initialized: true }));
       }
+    }).catch(err => {
+      console.error('[Auth] getSession error:', err);
+      setState(prev => ({ ...prev, loading: false, initialized: true }));
     });
 
     // Listen for auth changes
