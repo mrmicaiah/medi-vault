@@ -138,13 +138,21 @@ export function PipelinePage() {
     try {
       const res = await api.get<{ 
         application: unknown; 
-        profile: unknown; 
+        profile: Record<string, unknown>;
         steps: Array<{ step_number: number; data: Record<string, unknown> }>;
         ssn_last_four?: string;
       }>(`/admin/applicants/${applicant.id}`);
       
+      // DEBUG: Log the full API response
+      console.log('[Pipeline] API response:', JSON.stringify(res, null, 2));
+      console.log('[Pipeline] steps:', res.steps);
+      console.log('[Pipeline] profile:', res.profile);
+      
       const stepsMap = new Map<number, Record<string, unknown>>();
-      (res.steps || []).forEach(s => stepsMap.set(s.step_number, s.data || {}));
+      (res.steps || []).forEach(s => {
+        console.log(`[Pipeline] Step ${s.step_number} data:`, s.data);
+        stepsMap.set(s.step_number, s.data || {});
+      });
       
       const step1 = stepsMap.get(1) || {};
       const step2 = stepsMap.get(2) || {};
@@ -164,11 +172,15 @@ export function PipelinePage() {
       const step16 = stepsMap.get(16) || {};
       const step17 = stepsMap.get(17) || {};
       
+      // Also try to get data from profile if steps are empty
+      const profile = res.profile || {};
+      
       const detail: ApplicantDetail = {
-        first_name: step1.first_name as string,
-        last_name: step1.last_name as string,
-        email: step1.email as string,
-        phone: step1.phone as string,
+        // Try step data first, then fall back to profile
+        first_name: (step1.first_name as string) || (profile.first_name as string),
+        last_name: (step1.last_name as string) || (profile.last_name as string),
+        email: (step1.email as string) || (profile.email as string),
+        phone: (step1.phone as string) || (profile.phone as string),
         city: step2.city as string,
         address_line1: step2.address_line1 as string,
         address_line2: step2.address_line2 as string,
@@ -185,18 +197,20 @@ export function PipelinePage() {
         available_days: step10.available_days as string[],
         hours_per_week: step10.hours_per_week as string,
         comfortable_with_smokers: step10.comfortable_with_smokers as string,
-        work_auth_uploaded: !!step11.file_url,
-        id_front_uploaded: !!step12.file_url,
-        id_back_uploaded: !!step13.file_url,
-        ssn_card_uploaded: !!step14.file_url,
-        credentials_uploaded: !!step15.file_url,
-        cpr_uploaded: !!step16.file_url,
-        tb_uploaded: !!step17.file_url,
+        work_auth_uploaded: !!(step11.file_url || step11.storage_path),
+        id_front_uploaded: !!(step12.file_url || step12.storage_path),
+        id_back_uploaded: !!(step13.file_url || step13.storage_path),
+        ssn_card_uploaded: !!(step14.file_url || step14.storage_path),
+        credentials_uploaded: !!(step15.file_url || step15.storage_path),
+        cpr_uploaded: !!(step16.file_url || step16.storage_path),
+        tb_uploaded: !!(step17.file_url || step17.storage_path),
         emergency_name: step3.name as string,
         emergency_relationship: step3.relationship as string,
         emergency_phone: step3.phone as string,
         ssn_last_four: res.ssn_last_four,
       };
+      
+      console.log('[Pipeline] Parsed detail:', detail);
       
       detailCache.set(applicant.id, detail);
       setApplicantDetail(detail);
