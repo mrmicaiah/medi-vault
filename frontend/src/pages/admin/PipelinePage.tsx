@@ -34,6 +34,26 @@ interface ApplicantDetail {
   tb_uploaded?: boolean;
 }
 
+const YesNo = ({ value }: { value: boolean | string | undefined }) => {
+  const isYes = value === true || value === 'yes';
+  return (
+    <span className={`font-semibold ${isYes ? 'text-success' : 'text-error'}`}>
+      {isYes ? 'YES' : 'NO'}
+    </span>
+  );
+};
+
+const CheckCircle = ({ checked, label }: { checked: boolean; label: string }) => (
+  <div className="flex items-center gap-1.5">
+    <div className={`w-4 h-4 rounded-full border-2 flex items-center justify-center text-[10px] ${
+      checked ? 'border-success bg-success text-white' : 'border-gray-300 bg-transparent'
+    }`}>
+      {checked && '✓'}
+    </div>
+    <span className="text-xs text-gray">{label}</span>
+  </div>
+);
+
 export function PipelinePage() {
   const [applicants, setApplicants] = useState<Applicant[]>([]);
   const [loading, setLoading] = useState(true);
@@ -109,7 +129,7 @@ export function PipelinePage() {
     setTimeout(() => {
       setSelectedApplicant(null);
       setApplicantDetail(null);
-    }, 300);
+    }, 250);
   };
 
   const getPositionLabel = (position?: string) => {
@@ -122,17 +142,11 @@ export function PipelinePage() {
     return certs.filter(c => c !== 'none').map(c => c.toUpperCase()).join(', ');
   };
 
-  const formatYesNo = (value?: string) => {
-    if (value === 'yes') return <span className="text-success font-medium">YES</span>;
-    if (value === 'no') return <span className="text-error font-medium">NO</span>;
-    return <span className="text-gray">—</span>;
-  };
-
   const formatAvailability = (days?: string[]) => {
     if (!days || days.length === 0) return '—';
     if (days.length === 7) return 'Any Day';
     if (days.length >= 5) return 'Most Days';
-    return days.slice(0, 3).join(', ') + (days.length > 3 ? '...' : '');
+    return days.slice(0, 3).map(d => d.charAt(0).toUpperCase() + d.slice(1, 3)).join(', ') + (days.length > 3 ? '...' : '');
   };
 
   const formatHours = (hours?: string) => {
@@ -148,25 +162,18 @@ export function PipelinePage() {
   };
 
   const getStatusBadge = (status: string) => {
-    const styles: Record<string, string> = {
-      in_progress: 'bg-blue-100 text-blue-700',
-      submitted: 'bg-yellow-100 text-yellow-700',
-      under_review: 'bg-purple-100 text-purple-700',
-      approved: 'bg-green-100 text-green-700',
-      rejected: 'bg-red-100 text-red-700',
-      hired: 'bg-emerald-100 text-emerald-700',
+    const config: Record<string, { bg: string; text: string; label: string }> = {
+      in_progress: { bg: 'bg-blue-50', text: 'text-blue-700', label: 'In Progress' },
+      submitted: { bg: 'bg-amber-50', text: 'text-amber-700', label: 'Submitted' },
+      under_review: { bg: 'bg-purple-50', text: 'text-purple-700', label: 'Under Review' },
+      approved: { bg: 'bg-emerald-50', text: 'text-emerald-700', label: 'Approved' },
+      rejected: { bg: 'bg-red-50', text: 'text-red-700', label: 'Rejected' },
+      hired: { bg: 'bg-teal-50', text: 'text-teal-700', label: 'Hired' },
     };
-    const labels: Record<string, string> = {
-      in_progress: 'In Progress',
-      submitted: 'Submitted',
-      under_review: 'Under Review',
-      approved: 'Approved',
-      rejected: 'Rejected',
-      hired: 'Hired',
-    };
+    const s = config[status] || { bg: 'bg-gray-100', text: 'text-gray-600', label: status };
     return (
-      <span className={`text-xs px-2 py-0.5 rounded-full font-medium ${styles[status] || 'bg-gray-100 text-gray-700'}`}>
-        {labels[status] || status}
+      <span className={`text-xs px-2.5 py-1 rounded-md font-medium ${s.bg} ${s.text}`}>
+        {s.label}
       </span>
     );
   };
@@ -187,42 +194,50 @@ export function PipelinePage() {
 
   return (
     <div className="space-y-6">
-      <div>
-        <h1 className="font-display text-2xl font-bold text-navy">Applicants</h1>
-        <p className="text-sm text-gray mt-1">
-          {new Date().toLocaleDateString('en-US', { weekday: 'long', month: 'long', day: 'numeric', year: 'numeric' })}
-        </p>
+      {/* Header */}
+      <div className="flex items-center justify-between">
+        <div>
+          <h1 className="font-display text-2xl font-bold text-navy">Applicants</h1>
+          <p className="text-sm text-gray mt-1">
+            {new Date().toLocaleDateString('en-US', { weekday: 'long', month: 'long', day: 'numeric', year: 'numeric' })}
+          </p>
+        </div>
+        <Button>
+          <span className="mr-1">+</span> Add Applicant
+        </Button>
       </div>
 
       {error && <Alert variant="error" dismissible onDismiss={() => setError(null)}>{error}</Alert>}
 
+      {/* Stats */}
       <div className="grid grid-cols-2 lg:grid-cols-4 gap-4">
-        <div className="bg-white rounded-xl border border-border p-4">
-          <p className="text-sm text-gray">Total</p>
+        <div className="bg-white rounded-xl border border-border p-5">
+          <p className="text-sm text-gray font-medium">Total</p>
           <p className="text-3xl font-bold text-navy mt-1">{applicants.length}</p>
         </div>
-        <div className="bg-white rounded-xl border border-border p-4">
-          <p className="text-sm text-gray">Submitted</p>
+        <div className="bg-white rounded-xl border border-border p-5">
+          <p className="text-sm text-gray font-medium">Submitted</p>
           <p className="text-3xl font-bold text-warning mt-1">{applicants.filter(a => a.status === 'submitted').length}</p>
         </div>
-        <div className="bg-white rounded-xl border border-border p-4">
-          <p className="text-sm text-gray">In Progress</p>
+        <div className="bg-white rounded-xl border border-border p-5">
+          <p className="text-sm text-gray font-medium">In Progress</p>
           <p className="text-3xl font-bold text-info mt-1">{applicants.filter(a => a.status === 'in_progress').length}</p>
         </div>
-        <div className="bg-white rounded-xl border border-border p-4">
-          <p className="text-sm text-gray">Approved</p>
+        <div className="bg-white rounded-xl border border-border p-5">
+          <p className="text-sm text-gray font-medium">Approved</p>
           <p className="text-3xl font-bold text-success mt-1">{applicants.filter(a => a.status === 'approved').length}</p>
         </div>
       </div>
 
+      {/* Table */}
       <div className="bg-white rounded-xl border border-border overflow-hidden">
         <table className="w-full">
           <thead className="bg-gray-50 border-b border-border">
             <tr>
-              <th className="text-left text-xs font-medium text-gray uppercase tracking-wider px-6 py-3">Applicant</th>
-              <th className="text-left text-xs font-medium text-gray uppercase tracking-wider px-6 py-3">Location</th>
-              <th className="text-left text-xs font-medium text-gray uppercase tracking-wider px-6 py-3">Status</th>
-              <th className="text-left text-xs font-medium text-gray uppercase tracking-wider px-6 py-3">Date</th>
+              <th className="text-left text-xs font-semibold text-gray uppercase tracking-wider px-6 py-3">Applicant</th>
+              <th className="text-left text-xs font-semibold text-gray uppercase tracking-wider px-6 py-3">Location</th>
+              <th className="text-left text-xs font-semibold text-gray uppercase tracking-wider px-6 py-3">Status</th>
+              <th className="text-left text-xs font-semibold text-gray uppercase tracking-wider px-6 py-3">Applied</th>
             </tr>
           </thead>
           <tbody className="divide-y divide-border">
@@ -230,14 +245,18 @@ export function PipelinePage() {
               <tr><td colSpan={4} className="px-6 py-12 text-center text-gray">No applicants yet</td></tr>
             ) : (
               applicants.map((applicant) => (
-                <tr key={applicant.id} onClick={() => selectApplicant(applicant)} className="hover:bg-gray-50 cursor-pointer transition-colors">
+                <tr 
+                  key={applicant.id} 
+                  onClick={() => selectApplicant(applicant)} 
+                  className="hover:bg-gray-50 cursor-pointer transition-colors"
+                >
                   <td className="px-6 py-4">
                     <div className="flex items-center gap-3">
-                      <div className="flex h-10 w-10 flex-shrink-0 items-center justify-center rounded-full bg-navy text-sm font-medium text-white">
+                      <div className="flex h-10 w-10 flex-shrink-0 items-center justify-center rounded-lg bg-navy text-sm font-semibold text-white">
                         {applicant.first_name?.[0] || ''}{applicant.last_name?.[0] || ''}
                       </div>
                       <div>
-                        <p className="text-sm font-medium text-navy">{applicant.first_name} {applicant.last_name}</p>
+                        <p className="text-sm font-semibold text-navy">{applicant.first_name} {applicant.last_name}</p>
                         <p className="text-xs text-gray">{applicant.email}</p>
                       </div>
                     </div>
@@ -252,59 +271,108 @@ export function PipelinePage() {
         </table>
       </div>
 
+      {/* Slide-out Panel */}
       {selectedApplicant && (
         <>
-          <div className={`fixed inset-0 bg-black/20 z-40 transition-opacity duration-300 ${panelOpen ? 'opacity-100' : 'opacity-0 pointer-events-none'}`} onClick={closePanel} />
-          <div className={`fixed top-0 right-0 h-full w-[450px] bg-white shadow-2xl z-50 overflow-y-auto transition-transform duration-300 ${panelOpen ? 'translate-x-0' : 'translate-x-full'}`}>
-            <div className="sticky top-0 bg-white border-b border-border px-6 py-4 flex items-center justify-between">
+          {/* Backdrop */}
+          <div 
+            className={`fixed inset-0 bg-black/20 z-40 transition-opacity duration-250 ${panelOpen ? 'opacity-100' : 'opacity-0 pointer-events-none'}`} 
+            onClick={closePanel} 
+          />
+          
+          {/* Panel */}
+          <div className={`fixed top-0 right-0 h-full w-[420px] bg-white shadow-2xl z-50 flex flex-col transition-transform duration-250 ease-out ${panelOpen ? 'translate-x-0' : 'translate-x-full'}`}>
+            {/* Header */}
+            <div className="px-6 py-5 bg-navy flex items-center justify-between">
               <div>
-                <h2 className="font-display text-xl font-bold text-navy">{selectedApplicant.first_name} {selectedApplicant.last_name}</h2>
+                <h2 className="text-lg font-semibold text-white">
+                  {selectedApplicant.first_name} {selectedApplicant.last_name}
+                </h2>
                 <p className="text-sm text-maroon font-medium">{getPositionLabel(applicantDetail?.position_applied)}</p>
               </div>
-              <button onClick={closePanel} className="text-gray hover:text-slate p-1">
-                <svg className="h-6 w-6" fill="none" viewBox="0 0 24 24" stroke="currentColor"><path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M6 18L18 6M6 6l12 12" /></svg>
+              <button 
+                onClick={closePanel} 
+                className="text-white/60 hover:text-white text-2xl leading-none p-1"
+              >
+                ×
               </button>
             </div>
-            <div className="p-6">
+
+            {/* Content */}
+            <div className="flex-1 overflow-y-auto p-5 bg-gray-50">
               {loadingDetail ? (
                 <div className="flex items-center justify-center py-12">
-                  <svg className="h-6 w-6 animate-spin text-maroon" fill="none" viewBox="0 0 24 24"><circle className="opacity-25" cx="12" cy="12" r="10" stroke="currentColor" strokeWidth="4" /><path className="opacity-75" fill="currentColor" d="M4 12a8 8 0 018-8V0C5.373 0 0 5.373 0 12h4z" /></svg>
+                  <svg className="h-6 w-6 animate-spin text-maroon" fill="none" viewBox="0 0 24 24">
+                    <circle className="opacity-25" cx="12" cy="12" r="10" stroke="currentColor" strokeWidth="4" />
+                    <path className="opacity-75" fill="currentColor" d="M4 12a8 8 0 018-8V0C5.373 0 0 5.373 0 12h4z" />
+                  </svg>
                 </div>
               ) : (
                 <>
-                  <div className="border border-border rounded-lg divide-y divide-border mb-6">
-                    <div className="grid grid-cols-2 divide-x divide-border">
-                      <div className="p-3"><p className="text-xs text-gray">City</p><p className="text-sm font-medium text-navy">{applicantDetail?.city || '—'}</p></div>
-                      <div className="p-3"><p className="text-xs text-gray">Certifications</p><p className="text-sm font-medium text-navy">{formatCertifications(applicantDetail?.certifications)}</p></div>
-                    </div>
-                    <div className="grid grid-cols-2 divide-x divide-border">
-                      <div className="p-3"><p className="text-xs text-gray">CPR / TB</p><p className="text-sm">{formatYesNo(applicantDetail?.has_cpr_certification)}<span className="mx-1 text-gray">|</span>{formatYesNo(applicantDetail?.has_tb_test)}</p></div>
-                      <div className="p-3"><p className="text-xs text-gray">Drivers Lic.</p><p className="text-sm">{formatYesNo(applicantDetail?.has_drivers_license)}</p></div>
-                    </div>
-                    <div className="grid grid-cols-2 divide-x divide-border">
-                      <div className="p-3"><p className="text-xs text-gray">Travel 30min</p><p className="text-sm">{formatYesNo(applicantDetail?.will_travel_30_min)}</p></div>
-                      <div className="p-3"><p className="text-xs text-gray">Bed Bound</p><p className="text-sm">{formatYesNo(applicantDetail?.will_work_bed_bound)}</p></div>
-                    </div>
-                    <div className="grid grid-cols-2 divide-x divide-border">
-                      <div className="p-3"><p className="text-xs text-gray">Availability</p><p className="text-sm font-medium text-navy">{formatAvailability(applicantDetail?.available_days)}</p></div>
-                      <div className="p-3"><p className="text-xs text-gray">Hours</p><p className="text-sm font-medium text-navy">{formatHours(applicantDetail?.hours_per_week)}</p></div>
-                    </div>
-                    <div className="p-3"><p className="text-xs text-gray">Smokers?</p><p className="text-sm font-medium text-navy">{formatSmokerPref(applicantDetail?.comfortable_with_smokers)}</p></div>
+                  {/* Info Grid */}
+                  <div className="bg-white rounded-lg shadow-sm overflow-hidden">
+                    {[
+                      { label: 'City', value: applicantDetail?.city || '—' },
+                      { label: 'Certifications', value: formatCertifications(applicantDetail?.certifications) },
+                      { label: 'CPR / TB', value: (
+                        <>
+                          <YesNo value={applicantDetail?.has_cpr_certification} />
+                          <span className="mx-2 text-gray-300">|</span>
+                          <YesNo value={applicantDetail?.has_tb_test} />
+                        </>
+                      )},
+                      { label: 'Drivers Lic.', value: <YesNo value={applicantDetail?.has_drivers_license} /> },
+                      { label: 'Travel 30min', value: <YesNo value={applicantDetail?.will_travel_30_min} /> },
+                      { label: 'Bed Bound', value: <YesNo value={applicantDetail?.will_work_bed_bound} /> },
+                      { label: 'Availability', value: formatAvailability(applicantDetail?.available_days) },
+                      { label: 'Hours', value: formatHours(applicantDetail?.hours_per_week) },
+                      { label: 'Smokers?', value: formatSmokerPref(applicantDetail?.comfortable_with_smokers) },
+                    ].map((row, i, arr) => (
+                      <div 
+                        key={i} 
+                        className={`grid grid-cols-[110px_1fr] px-4 py-3 items-center ${i < arr.length - 1 ? 'border-b border-gray-100' : ''}`}
+                      >
+                        <span className="text-xs font-semibold text-navy">{row.label}</span>
+                        <span className="text-sm text-slate">{row.value}</span>
+                      </div>
+                    ))}
                   </div>
-                  <div className="flex gap-2 mb-6">
-                    <Link to={`/admin/applicant/${selectedApplicant.id}`} className="flex-1"><Button variant="secondary" className="w-full">VIEW</Button></Link>
-                    <Link to={`/admin/applicant/${selectedApplicant.id}`} className="flex-1"><Button variant="secondary" className="w-full">EDIT</Button></Link>
-                    <Link to={`/admin/hire/${selectedApplicant.id}`} className="flex-1"><Button className="w-full">ONBOARD</Button></Link>
+
+                  {/* Action Buttons */}
+                  <div className="grid grid-cols-3 mt-5 rounded-lg overflow-hidden shadow-sm">
+                    <Link to={`/admin/applicant/${selectedApplicant.id}`} className="block">
+                      <button className="w-full py-3.5 bg-navy text-white text-xs font-semibold hover:bg-navy/90 transition-colors">
+                        VIEW
+                      </button>
+                    </Link>
+                    <Link to={`/admin/applicant/${selectedApplicant.id}`} className="block">
+                      <button className="w-full py-3.5 bg-navy/80 text-white text-xs font-semibold hover:bg-navy/70 transition-colors">
+                        EDIT
+                      </button>
+                    </Link>
+                    <Link to={`/admin/hire/${selectedApplicant.id}`} className="block">
+                      <button className="w-full py-3.5 bg-success text-navy text-xs font-semibold hover:bg-success/90 transition-colors">
+                        ONBOARD
+                      </button>
+                    </Link>
                   </div>
-                  <div className="border border-border rounded-lg p-4 mb-6">
-                    <p className="text-xs font-medium text-gray uppercase mb-3">Onboarding Status</p>
-                    <div className="flex flex-wrap gap-3">
-                      <label className="flex items-center gap-2"><input type="checkbox" checked={applicantDetail?.credentials_uploaded || false} readOnly className="h-4 w-4 rounded border-gray-300 text-success" /><span className="text-sm">Cred.</span></label>
-                      <label className="flex items-center gap-2"><input type="checkbox" checked={applicantDetail?.cpr_uploaded || false} readOnly className="h-4 w-4 rounded border-gray-300 text-success" /><span className="text-sm">CPR</span></label>
-                      <label className="flex items-center gap-2"><input type="checkbox" checked={applicantDetail?.tb_uploaded || false} readOnly className="h-4 w-4 rounded border-gray-300 text-success" /><span className="text-sm">TB</span></label>
+
+                  {/* Onboarding Status */}
+                  <div className="bg-white rounded-lg shadow-sm p-4 mt-5">
+                    <div className="flex items-center justify-between mb-3">
+                      <span className="text-[11px] font-semibold text-gray uppercase tracking-wide">Onboarding Status</span>
+                      <div className="flex gap-4">
+                        <CheckCircle checked={applicantDetail?.credentials_uploaded || false} label="Cred." />
+                        <CheckCircle checked={applicantDetail?.cpr_uploaded || false} label="CPR" />
+                        <CheckCircle checked={applicantDetail?.tb_uploaded || false} label="TB" />
+                      </div>
                     </div>
                   </div>
-                  <Button variant="secondary" className="w-full">UPLOAD DOCUMENT</Button>
+
+                  {/* Upload Button */}
+                  <button className="w-full mt-5 py-3.5 bg-navy text-white text-xs font-semibold rounded-lg hover:bg-navy/90 transition-colors tracking-wide">
+                    UPLOAD DOCUMENT
+                  </button>
                 </>
               )}
             </div>
