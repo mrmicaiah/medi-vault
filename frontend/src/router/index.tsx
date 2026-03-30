@@ -119,11 +119,13 @@ export function RouterConfig() {
         }
       >
         <Route path="/admin" element={<AdminDashboardPage />} />
-        <Route path="/admin/pipeline" element={<PipelinePage />} />
+        <Route path="/admin/applicants" element={<PipelinePage />} />
+        <Route path="/admin/pipeline" element={<Navigate to="/admin/applicants" replace />} />
         <Route path="/admin/applicant/:id" element={<ApplicantDetailPage />} />
         <Route path="/admin/employees" element={<EmployeesPage />} />
         <Route path="/admin/employee/:id" element={<EmployeeDetailPage />} />
-        <Route path="/admin/compliance" element={<CompliancePage />} />
+        <Route path="/admin/documents" element={<CompliancePage />} />
+        <Route path="/admin/compliance" element={<Navigate to="/admin/documents" replace />} />
         <Route path="/admin/hire/:id" element={<HirePage />} />
         <Route path="/admin/users" element={<UsersPage />} />
         <Route path="/admin/training-leads" element={<TrainingLeadsPage />} />
