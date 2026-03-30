@@ -18,7 +18,7 @@ import { ApplicationPage } from '../pages/applicant/ApplicationPage';
 import { DocumentsPage } from '../pages/applicant/DocumentsPage';
 
 import { AdminDashboardPage } from '../pages/admin/DashboardPage';
-import { PipelinePage } from '../pages/admin/PipelinePage';
+import { ApplicantsPage } from '../pages/admin/ApplicantsPage';
 import { ApplicantDetailPage } from '../pages/admin/ApplicantDetailPage';
 import { EmployeesPage } from '../pages/admin/EmployeesPage';
 import { EmployeeDetailPage } from '../pages/admin/EmployeeDetailPage';
@@ -120,7 +120,6 @@ function ApplicantRoute({ children }: { children: React.ReactNode }) {
     return <ProfileErrorScreen />;
   }
 
-  // Staff should NOT see applicant pages - redirect to admin
   if (isStaffRole(role)) {
     return <Navigate to="/admin" replace />;
   }
@@ -186,7 +185,7 @@ export function RouterConfig() {
         }
       >
         <Route path="/admin" element={<AdminDashboardPage />} />
-        <Route path="/admin/applicants" element={<PipelinePage />} />
+        <Route path="/admin/applicants" element={<ApplicantsPage />} />
         <Route path="/admin/pipeline" element={<Navigate to="/admin/applicants" replace />} />
         <Route path="/admin/applicant/:id" element={<ApplicantDetailPage />} />
         <Route path="/admin/employees" element={<EmployeesPage />} />
