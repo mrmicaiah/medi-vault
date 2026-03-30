@@ -21,7 +21,7 @@ MediVault is a proprietary software platform for home care agency management, be
 
 | Layer | Technology | Hosting | URL |
 |-------|------------|---------|-----|
-| Frontend | React 18 + TypeScript + Vite + Tailwind CSS | Cloudflare Pages | https://medi-vault.pages.dev |
+| Frontend | React 18 + TypeScript + Vite + Tailwind CSS | Cloudflare Pages | https://medisvault.com |
 | Backend | Python 3.11 + FastAPI | Render | https://medi-vault-api.onrender.com |
 | Database | PostgreSQL | Supabase | (Supabase Dashboard) |
 | Auth | Supabase Auth | Supabase | Integrated |
@@ -36,6 +36,7 @@ medi-vault/
 │   │   ├── components/
 │   │   │   ├── application/        # Wizard steps, shell, read-only view
 │   │   │   ├── applicant/          # DocumentUploadModal
+│   │   │   ├── admin/              # ApplicantDetailPanel (slide-out)
 │   │   │   ├── layout/             # Sidebar, Header, AppLayout, AuthLayout
 │   │   │   └── ui/                 # Button, Card, Badge, Alert, Input, etc.
 │   │   ├── contexts/
@@ -50,7 +51,8 @@ medi-vault/
 │   │   ├── pages/
 │   │   │   ├── applicant/          # DashboardPage, ApplicationPage, DocumentsPage
 │   │   │   ├── admin/              # Admin pages (Dashboard, Pipeline, etc.)
-│   │   │   └── auth/               # Login, Signup, ResetPassword
+│   │   │   ├── auth/               # Login, Signup, ResetPassword
+│   │   │   └── public/             # ApplyPage (multi-step signup)
 │   │   ├── router/
 │   │   │   └── index.tsx           # Route definitions
 │   │   └── types/
@@ -63,6 +65,7 @@ medi-vault/
 │   │   ├── dependencies.py         # get_supabase, get_current_user
 │   │   ├── routers/
 │   │   │   ├── applications.py     # /api/applications endpoints
+│   │   │   ├── admin.py            # /api/admin/dashboard, /api/admin/pipeline
 │   │   │   └── sensitive_data.py   # /api/sensitive (SSN encryption)
 │   │   ├── services/
 │   │   │   ├── application_service.py  # Application CRUD, step management
@@ -77,36 +80,11 @@ medi-vault/
 ├── supabase/
 │   └── migrations/
 │       ├── 001_initial_schema.sql
-│       ├── 002_indexes.sql
-│       ├── 003_rls_policies.sql
-│       ├── 004_functions.sql
-│       ├── 005_triggers.sql
-│       ├── 006_storage.sql         # Documents & agreements buckets + RLS
-│       ├── 007_seed_data.sql
-│       ├── 008_sensitive_data.sql
-│       └── 009_fix_rls_recursion.sql  # IMPORTANT: Fixes auth spinning issue
+│       ├── ...
+│       └── 010c_invitations_rls.sql
 └── Session/
-    └── CONTEXT.md                  # This file
-```
-
----
-
-## Environment Variables
-
-### Cloudflare Pages
-```
-VITE_SUPABASE_URL=https://xxxxx.supabase.co
-VITE_SUPABASE_ANON_KEY=eyJhbGci...
-VITE_API_URL=https://medi-vault-api.onrender.com/api
-```
-
-### Render (Backend)
-```
-SUPABASE_URL=https://xxxxx.supabase.co
-SUPABASE_SERVICE_KEY=eyJhbGci...
-SUPABASE_ANON_KEY=eyJhbGci...
-CORS_ORIGINS=https://medi-vault.pages.dev
-ENCRYPTION_KEY=<generated-fernet-key>
+    ├── CONTEXT.md                  # This file
+    └── LOG.md                      # Development log
 ```
 
 ---
@@ -119,241 +97,161 @@ ENCRYPTION_KEY=<generated-fernet-key>
    - Signup with email confirmation
    - Login/logout
    - Profile auto-creation via database trigger
-   - Session persistence (with some caveats - see Known Issues)
+   - Multi-step apply page with location selection
 
-2. **Application Wizard (22 Steps)**
+2. **Application Wizard (22 Steps) - UPDATED**
+   - All form fields now match QuickBase application form
    - Steps 1-10: Personal info, emergency contact, education, references, work history, preferences, agreements
    - Steps 11-17: Document uploads (can be skipped with "I'll upload later")
    - Steps 18-22: Final agreements and signature
    - Progress tracking, step navigation, save & exit
 
-3. **File Uploads to Supabase Storage** ✅ (Implemented March 29, 2026)
-   - **Upload happens on "Next" click** - not on file selection
-   - Files stored in local React state (`pendingFiles`) until user commits
-   - `useApplication.ts` hook handles upload when `saveStep()` is called
-   - Files organized by: `{user_id}/{step_folder}/{timestamp}_{filename}`
-   - Step folders: work-authorization, id-front, id-back, ssn-card, credentials, cpr-certification, tb-test
-   - Saves metadata: file_name, file_size, file_type, storage_path, storage_url, uploaded_at
+3. **Admin Panel - UPDATED**
+   - Pipeline page with slide-out detail panel (like QuickBase mockup)
+   - Stats cards: New Today, Awaiting Docs, Ready for Review, This Week
+   - Applicant table with clickable rows
+   - Detail panel shows: quick info grid, action buttons, onboarding status
+
+4. **File Uploads to Supabase Storage**
+   - Upload happens on "Next" click
+   - Files stored in local React state until user commits
    - Signed URLs generated with 1-year expiry
-   - No orphaned files - upload only happens when user explicitly proceeds
 
-4. **Application Lifecycle**
-   - `in_progress` → Wizard is editable
-   - `submitted` → Wizard shows read-only view, uploads via Dashboard modal
-   - `under_review` → Same as submitted
-   - `approved` → Same, but with congratulations message
-   - `rejected` → Read-only, no upload buttons
-
-5. **Dashboard**
-   - Shows application progress
-   - Documents table with status (Uploaded, Needed, Optional, Expired)
-   - Yellow highlighting for required missing docs
-   - Upload modal for submitted applications
-   - Smart button: Start/Continue/View Application based on status
-
-6. **Backend API**
-   - `GET /api/applications/me` - Get or create user's application
-   - `POST /api/applications/{id}/steps` - Save step data
-   - `POST /api/applications/{id}/submit` - Submit application
-   - Steps 11-17 can be updated even after submission (for document uploads)
-
-### What's NOT Working / Known Issues
-
-1. **Auth Spinning on Hard Refresh**
-   - Sometimes the app spins indefinitely on page reload
-   - Root cause was RLS policy recursion (migration 009 fixes this)
-   - **MUST RUN migration 009_fix_rls_recursion.sql in Supabase SQL Editor**
-   - Added 5-second timeout as fallback, but the RLS fix is required
-
-2. **SSN Encryption**
-   - Backend endpoints exist (`/api/sensitive/ssn`)
-   - Frontend SSNInput component exists
-   - Not fully integrated into the application flow
-
-3. **Admin Panel**
-   - Pages exist but are mostly placeholders
-   - Pipeline, employee management, compliance views need work
+5. **Backend API**
+   - CORS fixed to allow medisvault.com
+   - Admin dashboard/pipeline endpoints working
+   - Global error handler with CORS headers
 
 ---
 
-## File Upload Architecture
+## Application Form Fields (Updated March 29, 2026)
 
-### Flow (Wizard Steps 11-17)
-```
-1. User selects file
-   └─> File stored in pendingFiles[stepNumber] (React state)
-   └─> UI shows: "File will be uploaded when you click Next"
+### Step 1: Application Basics
+- Position applied for (PCA/HHA/CNA/LPN/RN)
+- Employment type (Full-time/Part-time/Fill-in/Live-in)
+- Desired hourly rate
+- Desired start date
+- **Legal Requirements:**
+  - Are you 18 or older? (with validation)
+  - Convicted of violent crime?
+  - Background check consent (required)
+- **Citizenship:**
+  - Citizenship status (for I-9)
+  - Eligible to work in US?
+- **Languages:**
+  - Primary language
+  - Other languages (multi-select)
+- How heard about us
+- Worked for Eveready before?
 
-2. User clicks "Next" (or "Save & Exit")
-   └─> ApplicationPage.handleNext() calls saveStep()
-   └─> useApplication.saveStep() detects pending file
-   └─> Upload to Supabase Storage: documents/{userId}/{folder}/{timestamp}_{filename}
-   └─> Get signed URL (1-year expiry)
-   └─> Save step data with file metadata to API
-   └─> Clear pendingFile for that step
-   └─> Move to next step
+### Step 2: Personal Information
+- First name, Middle name, Last name
+- Other names used (with "I have no other names" checkbox) - **required for I-9**
+- Date of birth (with **18+ age validation**)
+- SSN (encrypted)
+- Gender
+- Address (street, city, state dropdown, zip)
+- Phone, Alt phone, Email
 
-3. User changes mind before clicking Next
-   └─> Select different file → replaces pendingFile (no upload wasted)
-   └─> Check "I'll upload later" → clears pendingFile
-```
+### Step 3: Emergency Contact
+- Name, Relationship, Phone, Alt phone, Email, Address
 
-### Flow (Dashboard Upload Modal - after submission)
-```
-1. User clicks "Upload" on dashboard
-   └─> DocumentUploadModal opens
+### Step 4: Education
+- High school graduate?
+- Highest education level
+- School name, Year graduated
+- **Certifications** (multi-checkbox: HHA/CNA/PCA/LPN/RN/None)
+- CPR certification?
+- TB test in past year?
+- Licensed driver?
+- Eligible to work in US?
+- **Skills:**
+  - Will travel 30 min?
+  - Catheter care?
+  - Vital signs?
+  - Bed bound patients? (Yes/No/Conditional)
+  - Additional skills (textarea)
 
-2. User selects file and fills form
-   └─> File stored in local state
+### Steps 5-6: References
+- Reference 1: Name, Relationship, Phone, Email, Years known
+- Reference 2: Same fields
+- **Optional Reference 3** (checkbox to add)
+- **Consent to contact references** (required radio)
 
-3. User clicks "Upload Document"
-   └─> Upload to Supabase Storage
-   └─> Save step data with metadata
-   └─> Close modal, refresh dashboard
-```
+### Step 7: Employment History
+- **Currently employed?** (Yes/No with conditional fields)
+  - Current employer, supervisor, phone, start date
+  - May we contact current employer?
+- Previous Employer 1 (required)
+- Previous Employer 2 (with "I don't have a 2nd employer" checkbox)
+- Can add up to 3 previous employers
 
-### Key Files
-- `useApplication.ts` - `pendingFiles` state, `setPendingFile()`, `saveStep()` with upload logic
-- `ApplicationPage.tsx` - `handleFileSelect()` calls `setPendingFile(currentStep, file)`
-- `StepRenderer.tsx` - Passes `onFileSelect` and `pendingFile` to upload step components
-- `WizardShell.tsx` - Displays pending file indicator, validates file presence
-- `steps/*.tsx` (11-17) - Use `onFileSelect` prop, show "will upload on Next" message
+### Step 8: Work Preferences
+- Available days (multi-select chips)
+- Shift preferences (multi-checkbox: Morning/Afternoon/Evening/Overnight)
+- **Work every other weekend?** (required)
+- Hours per week preference (dropdown)
+- Has reliable transportation?
+- Maximum travel distance
+- **Comfortable with pets?** (dropdown with detailed options)
+- **Comfortable with smokers?** (dropdown)
+- **Conditions NOT willing to work with** (required textarea)
 
----
+### Steps 9-10: Agreements
+- Confidentiality Agreement
+- E-Signature Agreement
 
-## Database Schema (Key Tables)
+### Steps 11-17: Document Uploads
+- Work Authorization, ID Front/Back, SSN Card, Credentials, CPR Cert, TB Test
 
-### profiles
-```sql
-id UUID PRIMARY KEY (matches auth.users.id)
-email TEXT
-first_name TEXT
-last_name TEXT
-phone TEXT
-role TEXT ('applicant', 'admin', 'superadmin')
-avatar_url TEXT
-created_at TIMESTAMPTZ
-updated_at TIMESTAMPTZ
-```
-
-### applications
-```sql
-id UUID PRIMARY KEY
-user_id UUID REFERENCES profiles(id)
-status TEXT ('in_progress', 'submitted', 'under_review', 'approved', 'rejected')
-current_step INTEGER
-total_steps INTEGER (22)
-submitted_at TIMESTAMPTZ
-reviewed_at TIMESTAMPTZ
-reviewed_by UUID
-created_at TIMESTAMPTZ
-updated_at TIMESTAMPTZ
-```
-
-### application_steps
-```sql
-id UUID PRIMARY KEY
-application_id UUID REFERENCES applications(id)
-step_number INTEGER (1-22)
-step_name TEXT
-step_type TEXT ('form', 'agreement', 'upload')
-is_completed BOOLEAN
-data JSONB  -- Contains file metadata for upload steps
-completed_at TIMESTAMPTZ
-created_at TIMESTAMPTZ
-updated_at TIMESTAMPTZ
-```
-
-### Supabase Storage
-- **Bucket:** `documents` (private)
-- **Structure:** `{user_id}/{step_folder}/{timestamp}_{filename}`
-- **RLS:** Users can only access their own files, admins can read all
-
-### Key RLS Policies
-- Users can only read/write their own profile, application, and steps
-- `is_admin()` function (SECURITY DEFINER) checks admin role without recursion
-- Migration 009 fixed the recursive RLS issue
-
----
-
-## Application Steps (22 Total)
-
-| # | Name | Type | Storage Folder |
-|---|------|------|----------------|
-| 1 | Application Basics | form | - |
-| 2 | Personal Information | form | - |
-| 3 | Emergency Contact | form | - |
-| 4 | Education | form | - |
-| 5 | Reference 1 | form | - |
-| 6 | Reference 2 | form | - |
-| 7 | Employment History | form | - |
-| 8 | Work Preferences | form | - |
-| 9 | Confidentiality Agreement | agreement | - |
-| 10 | E-Signature Agreement | agreement | - |
-| 11 | Work Authorization | upload | work-authorization |
-| 12 | ID Front | upload | id-front |
-| 13 | ID Back | upload | id-back |
-| 14 | Social Security Card | upload | ssn-card |
-| 15 | Credentials | upload | credentials |
-| 16 | CPR Certification | upload | cpr-certification |
-| 17 | TB Test | upload | tb-test |
-| 18 | Orientation Training | agreement | - |
-| 19 | Criminal Background | agreement | - |
-| 20 | VA Code Disclosure | agreement | - |
-| 21 | Job Description | agreement | - |
-| 22 | Final Signature | agreement | - |
+### Steps 18-22: Final Agreements
+- Orientation Training, Criminal Background, VA Code Disclosure, Job Description, Final Signature
 
 ---
 
 ## Recent Changes (March 29, 2026)
 
-### File Upload Implementation - Proper "Upload on Next" Flow
-1. **`useApplication.ts`** - Added `pendingFiles` state
-   - `setPendingFile(stepNumber, file)` - Store file locally
-   - `getPendingFile(stepNumber)` - Get pending file for display
-   - `saveStep()` - Uploads pending file before saving step data
+### Application Form Fields Overhaul
+1. **ApplicationBasics.tsx** - Added all legal/citizenship/language fields
+2. **PersonalInfo.tsx** - Added "other names" logic with checkbox, age validation
+3. **Education.tsx** - Added certifications multi-checkbox, skills section
+4. **Reference1.tsx** - Simplified layout
+5. **Reference2.tsx** - Added optional 3rd reference, consent to contact
+6. **WorkPreferences.tsx** - Added pets, smokers, weekend, conditions fields
+7. **EmploymentHistory.tsx** - Added "currently employed" section, restructured
 
-2. **Upload step components** (WorkAuthorization, IDFront, IDBack, etc.)
-   - Now accept `onFileSelect` and `pendingFile` props
-   - Call `onFileSelect(file)` when user picks a file (no immediate upload)
-   - Show "File will be uploaded when you click Next" message
+### Admin Panel
+- Added ApplicantDetailPanel.tsx (slide-out panel)
+- Updated PipelinePage.tsx with stats cards and table layout
 
-3. **`WizardShell.tsx`** - Updated validation
-   - Checks for either `pendingFile` OR existing `file_name` in step data
-   - Shows pending file indicator in UI
-
-4. **`ApplicationPage.tsx`** - Wires everything together
-   - Passes `setPendingFile` as `onFileSelect` to wizard
-   - Shows "File selected - click Next to upload" indicator
+### Bug Fixes
+- CORS fixed for medisvault.com domain
+- Admin dashboard column name fixes (expiration_date vs expires_at)
 
 ---
 
-## Immediate TODOs for Next Session
+## Immediate TODOs
 
-1. **Verify RLS Fix** - Confirm migration 009 was run and auth works on hard refresh
-2. ~~**Implement File Uploads**~~ ✅ Done - Files upload on "Next" click
-3. **Test Full Flow** - Create account → Complete 22 steps → Submit → Upload missing docs
-4. **Fix Any Build Errors** - Check Cloudflare/Render logs after deploy
-5. **Admin Panel** - View uploaded documents, review applications
+1. **Test full application flow** - Create test applicant, go through all 22 steps
+2. **Google Places autocomplete** - For address fields
+3. **Verify all form validations** - Age check, required fields
+4. **Admin detail view** - Full applicant review page
 
 ---
 
 ## Useful Commands
 
 ```bash
-# Local development (if needed)
-cd frontend && npm install && npm run dev
-cd backend && pip install -r requirements.txt && uvicorn app.main:app --reload
-
-# Check Supabase
-# Go to Supabase Dashboard → SQL Editor
-# Run: SELECT * FROM profiles WHERE email = 'your@email.com';
-
-# Make user admin
-UPDATE profiles SET role = 'admin' WHERE email = 'your@email.com';
+# Make user admin in Supabase
+UPDATE profiles SET role = 'superadmin' WHERE email = 'your@email.com';
 
 # Check uploaded files
 # Supabase Dashboard → Storage → documents bucket
+
+# Wipe test data (keep your account)
+DELETE FROM application_steps;
+DELETE FROM applications;
+DELETE FROM profiles WHERE email != 'your@email.com';
 ```
 
 ---
