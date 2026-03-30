@@ -1,7 +1,7 @@
 from fastapi import APIRouter, Depends, HTTPException, Header
 from supabase import Client
 from datetime import datetime, timedelta
-from typing import Optional
+from typing import Optional, Dict, List
 import logging
 
 from ..dependencies import get_supabase
@@ -62,6 +62,32 @@ def generate_signed_url(supabase: Client, storage_path: str, expires_in: int = 3
         return None
 
 
+def generate_signed_urls_batch(supabase: Client, storage_paths: List[str], expires_in: int = 3600) -> Dict[str, str]:
+    """Generate signed URLs for multiple files at once."""
+    result = {}
+    valid_paths = [p for p in storage_paths if p]
+    if not valid_paths:
+        return result
+    
+    try:
+        # Supabase supports batch signed URL generation
+        batch_result = supabase.storage.from_("documents").create_signed_urls(valid_paths, expires_in)
+        for item in (batch_result or []):
+            path = item.get("path")
+            url = item.get("signedURL") or item.get("signedUrl")
+            if path and url:
+                result[path] = url
+    except Exception as e:
+        # Fall back to individual calls if batch fails
+        logger.warning(f"Batch signed URL failed, falling back: {e}")
+        for path in valid_paths:
+            url = generate_signed_url(supabase, path, expires_in)
+            if url:
+                result[path] = url
+    
+    return result
+
+
 @router.get("/dashboard")
 async def get_dashboard_stats(
     supabase: Client = Depends(get_supabase),
@@ -81,23 +107,38 @@ async def get_dashboard_stats(
             "recent_applications": []
         }
         
+        # Get all counts and recent apps in fewer queries
         try:
-            apps_res = supabase.table("applications").select("id", count="exact").execute()
-            stats["total_applicants"] = apps_res.count or 0
+            # Get all applications in one query
+            all_apps = supabase.table("applications").select("id, status, created_at, updated_at, user_id").execute()
+            apps_data = all_apps.data or []
+            
+            stats["total_applicants"] = len(apps_data)
+            stats["pending_review"] = len([a for a in apps_data if a["status"] in ("submitted", "under_review")])
+            stats["approved_this_month"] = len([a for a in apps_data if a["status"] == "approved" and a.get("updated_at", "") >= thirty_days_ago])
+            
+            # Get recent applications
+            recent_apps = [a for a in apps_data if a.get("created_at", "") >= seven_days_ago]
+            recent_apps.sort(key=lambda x: x.get("created_at", ""), reverse=True)
+            recent_apps = recent_apps[:10]
+            
+            if recent_apps:
+                # Batch fetch all profiles for recent apps
+                user_ids = list(set(a["user_id"] for a in recent_apps))
+                profiles_res = supabase.table("profiles").select("id, first_name, last_name, email").in_("id", user_ids).execute()
+                profiles_map = {p["id"]: p for p in (profiles_res.data or [])}
+                
+                for app in recent_apps:
+                    profile = profiles_map.get(app["user_id"], {})
+                    stats["recent_applications"].append({
+                        "id": app["id"],
+                        "status": app["status"],
+                        "created_at": app["created_at"],
+                        "applicant_name": f"{profile.get('first_name') or ''} {profile.get('last_name') or ''}".strip() or "Unknown",
+                        "email": profile.get("email")
+                    })
         except Exception as e:
-            logger.warning(f"Failed to get total applicants: {e}")
-        
-        try:
-            pending_res = supabase.table("applications").select("id", count="exact").in_("status", ["submitted", "under_review"]).execute()
-            stats["pending_review"] = pending_res.count or 0
-        except Exception as e:
-            logger.warning(f"Failed to get pending review count: {e}")
-        
-        try:
-            approved_res = supabase.table("applications").select("id", count="exact").eq("status", "approved").gte("updated_at", thirty_days_ago).execute()
-            stats["approved_this_month"] = approved_res.count or 0
-        except Exception as e:
-            logger.warning(f"Failed to get approved count: {e}")
+            logger.warning(f"Failed to get applications: {e}")
         
         try:
             thirty_days_future = (now + timedelta(days=30)).isoformat()
@@ -105,24 +146,6 @@ async def get_dashboard_stats(
             stats["expiring_documents"] = docs_res.count or 0
         except Exception as e:
             logger.warning(f"Failed to get expiring docs count: {e}")
-        
-        try:
-            recent_res = supabase.table("applications").select("*").gte("created_at", seven_days_ago).order("created_at", desc=True).limit(10).execute()
-            for app in (recent_res.data or []):
-                try:
-                    profile_res = supabase.table("profiles").select("first_name, last_name, email").eq("id", app["user_id"]).single().execute()
-                    profile = profile_res.data or {}
-                except:
-                    profile = {}
-                stats["recent_applications"].append({
-                    "id": app["id"],
-                    "status": app["status"],
-                    "created_at": app["created_at"],
-                    "applicant_name": f"{profile.get('first_name') or ''} {profile.get('last_name') or ''}".strip() or "Unknown",
-                    "email": profile.get("email")
-                })
-        except Exception as e:
-            logger.warning(f"Failed to get recent applications: {e}")
         
         return stats
         
@@ -136,27 +159,32 @@ async def get_pipeline(
     supabase: Client = Depends(get_supabase),
     user: dict = Depends(get_staff_user)
 ):
-    """Get applicant pipeline for admin users."""
+    """Get applicant pipeline for admin users - optimized with batch queries."""
     try:
-        res = supabase.table("applications").select("*").order("created_at", desc=True).execute()
+        # Get all applications
+        apps_res = supabase.table("applications").select("*").order("created_at", desc=True).execute()
+        apps_data = apps_res.data or []
         
+        if not apps_data:
+            return {"applications": []}
+        
+        # Batch fetch all profiles
+        user_ids = list(set(a["user_id"] for a in apps_data))
+        profiles_res = supabase.table("profiles").select("id, first_name, last_name, email").in_("id", user_ids).execute()
+        profiles_map = {p["id"]: p for p in (profiles_res.data or [])}
+        
+        # Batch fetch all locations (if any apps have location_id)
+        location_ids = list(set(a["location_id"] for a in apps_data if a.get("location_id")))
+        locations_map = {}
+        if location_ids:
+            locations_res = supabase.table("locations").select("id, name").in_("id", location_ids).execute()
+            locations_map = {loc["id"]: loc for loc in (locations_res.data or [])}
+        
+        # Build response
         applications = []
-        for app in (res.data or []):
-            profile = {}
-            location = {}
-            
-            try:
-                profile_res = supabase.table("profiles").select("first_name, last_name, email").eq("id", app["user_id"]).single().execute()
-                profile = profile_res.data or {}
-            except:
-                pass
-            
-            if app.get("location_id"):
-                try:
-                    location_res = supabase.table("locations").select("name").eq("id", app["location_id"]).single().execute()
-                    location = location_res.data or {}
-                except:
-                    pass
+        for app in apps_data:
+            profile = profiles_map.get(app["user_id"], {})
+            location = locations_map.get(app.get("location_id"), {})
             
             applications.append({
                 "id": app["id"],
@@ -184,7 +212,7 @@ async def get_applicant_detail(
     supabase: Client = Depends(get_supabase),
     user: dict = Depends(get_staff_user)
 ):
-    """Get detailed applicant information including documents and agreements."""
+    """Get detailed applicant information - optimized with batch queries."""
     try:
         # Get application
         app_res = supabase.table("applications").select("*").eq("id", application_id).single().execute()
@@ -192,15 +220,17 @@ async def get_applicant_detail(
             raise HTTPException(status_code=404, detail="Application not found")
         app = app_res.data
         
-        # Get profile
+        user_id = app["user_id"]
+        
+        # Batch: Get profile, steps, documents, agreements in parallel-ish queries
         profile = {}
         try:
-            profile_res = supabase.table("profiles").select("*").eq("id", app["user_id"]).single().execute()
+            profile_res = supabase.table("profiles").select("*").eq("id", user_id).single().execute()
             profile = profile_res.data or {}
         except Exception as e:
             logger.warning(f"Failed to fetch profile: {e}")
         
-        # Get location
+        # Get location name
         location_name = None
         if app.get("location_id"):
             try:
@@ -209,7 +239,7 @@ async def get_applicant_detail(
             except:
                 pass
         
-        # Get all application steps
+        # Get all steps
         steps = []
         try:
             steps_res = supabase.table("application_steps").select("*").eq("application_id", application_id).order("step_number").execute()
@@ -217,47 +247,79 @@ async def get_applicant_detail(
         except Exception as e:
             logger.warning(f"Failed to fetch steps: {e}")
         
-        # Get documents from documents table with signed URLs
-        documents = []
+        # Get documents
+        docs_data = []
         try:
-            docs_res = supabase.table("documents").select("*").eq("user_id", app["user_id"]).order("created_at", desc=True).execute()
-            for doc in (docs_res.data or []):
-                signed_url = generate_signed_url(supabase, doc.get("storage_path"))
-                documents.append({
-                    "id": doc["id"],
-                    "document_type": doc.get("document_type"),
-                    "category": doc.get("category"),
-                    "original_filename": doc.get("original_filename"),
-                    "storage_path": doc.get("storage_path"),
-                    "signed_url": signed_url,
-                    "expiration_date": doc.get("expiration_date"),
-                    "created_at": doc.get("created_at"),
-                    "is_current": doc.get("is_current", True),
-                })
+            docs_res = supabase.table("documents").select("*").eq("user_id", user_id).order("created_at", desc=True).execute()
+            docs_data = docs_res.data or []
         except Exception as e:
             logger.warning(f"Failed to fetch documents: {e}")
         
-        # Get agreements with signed URLs for PDFs
-        agreements = []
+        # Get agreements
+        agreements_data = []
         try:
             agreements_res = supabase.table("agreements").select("*").eq("application_id", application_id).order("signed_at", desc=True).execute()
-            for agr in (agreements_res.data or []):
-                pdf_url = generate_signed_url(supabase, agr.get("pdf_storage_path"))
-                agreements.append({
-                    "id": agr["id"],
-                    "agreement_type": agr.get("agreement_type"),
-                    "signed_name": agr.get("signed_name"),
-                    "signed_at": agr.get("signed_at"),
-                    "pdf_storage_path": agr.get("pdf_storage_path"),
-                    "pdf_url": pdf_url,
-                    "ip_address": agr.get("ip_address"),
-                })
+            agreements_data = agreements_res.data or []
         except Exception as e:
             logger.warning(f"Failed to fetch agreements: {e}")
         
-        # Extract uploaded files from application steps (steps 11-17 are uploads)
+        # Collect all storage paths for batch signed URL generation
+        all_storage_paths = []
+        
+        # From documents table
+        for doc in docs_data:
+            if doc.get("storage_path"):
+                all_storage_paths.append(doc["storage_path"])
+        
+        # From agreements
+        for agr in agreements_data:
+            if agr.get("pdf_storage_path"):
+                all_storage_paths.append(agr["pdf_storage_path"])
+        
+        # From upload steps (11-17)
+        upload_steps = {11, 12, 13, 14, 15, 16, 17}
+        for step in steps:
+            if step.get("step_number") in upload_steps:
+                data = step.get("data") or {}
+                if data.get("storage_path"):
+                    all_storage_paths.append(data["storage_path"])
+        
+        # Batch generate signed URLs
+        signed_urls_map = generate_signed_urls_batch(supabase, all_storage_paths)
+        
+        # Build documents response
+        documents = []
+        for doc in docs_data:
+            storage_path = doc.get("storage_path")
+            documents.append({
+                "id": doc["id"],
+                "document_type": doc.get("document_type"),
+                "category": doc.get("category"),
+                "original_filename": doc.get("original_filename"),
+                "storage_path": storage_path,
+                "signed_url": signed_urls_map.get(storage_path),
+                "expiration_date": doc.get("expiration_date"),
+                "created_at": doc.get("created_at"),
+                "is_current": doc.get("is_current", True),
+            })
+        
+        # Build agreements response
+        agreements = []
+        for agr in agreements_data:
+            pdf_path = agr.get("pdf_storage_path")
+            agreements.append({
+                "id": agr["id"],
+                "agreement_type": agr.get("agreement_type"),
+                "signed_name": agr.get("signed_name"),
+                "signed_at": agr.get("signed_at"),
+                "pdf_storage_path": pdf_path,
+                "pdf_url": signed_urls_map.get(pdf_path),
+                "ip_address": agr.get("ip_address"),
+            })
+        
+        # Build uploaded files from steps
         uploaded_files = []
-        upload_steps = {
+        upload_step_names = {
             11: "Work Authorization",
             12: "Photo ID (Front)",
             13: "Photo ID (Back)",
@@ -268,24 +330,24 @@ async def get_applicant_detail(
         }
         for step in steps:
             step_num = step.get("step_number")
-            if step_num in upload_steps:
+            if step_num in upload_step_names:
                 data = step.get("data") or {}
-                if data.get("storage_path") or data.get("file_name"):
-                    storage_path = data.get("storage_path") or ""
-                    signed_url = generate_signed_url(supabase, storage_path) if storage_path else None
+                storage_path = data.get("storage_path") or ""
+                
+                if storage_path or data.get("file_name"):
                     uploaded_files.append({
                         "step_number": step_num,
-                        "document_name": upload_steps[step_num],
+                        "document_name": upload_step_names[step_num],
                         "file_name": data.get("file_name") or data.get("original_filename"),
                         "storage_path": storage_path,
-                        "signed_url": signed_url,
+                        "signed_url": signed_urls_map.get(storage_path) if storage_path else None,
                         "uploaded_at": step.get("completed_at"),
                         "skipped": data.get("skip", False),
                     })
                 elif data.get("skip"):
                     uploaded_files.append({
                         "step_number": step_num,
-                        "document_name": upload_steps[step_num],
+                        "document_name": upload_step_names[step_num],
                         "file_name": None,
                         "storage_path": None,
                         "signed_url": None,
@@ -358,7 +420,6 @@ async def update_applicant_profile(
         step2_updates = {k: v for k, v in updates.items() if k in address_fields and v is not None}
         
         if step2_updates:
-            # Get current step 2 data
             step_res = supabase.table("application_steps").select("id, data").eq("application_id", application_id).eq("step_number", 2).single().execute()
             if step_res.data:
                 current_data = step_res.data.get("data") or {}
@@ -369,11 +430,9 @@ async def update_applicant_profile(
                 }).eq("id", step_res.data["id"]).execute()
         
         # Update Step 3 (emergency contact) if provided
-        emergency_fields = {"emergency_name", "emergency_relationship", "emergency_phone"}
         step3_updates = {}
         for k, v in updates.items():
             if k.startswith("emergency_") and v is not None:
-                # Map emergency_name -> name, etc.
                 field_name = k.replace("emergency_", "")
                 step3_updates[field_name] = v
         
@@ -405,7 +464,6 @@ async def get_document_url(
 ):
     """Get a signed URL for a specific uploaded document."""
     try:
-        # Get the step data
         step_res = supabase.table("application_steps").select("data").eq("application_id", application_id).eq("step_number", step_number).single().execute()
         
         if not step_res.data:
@@ -444,7 +502,6 @@ async def get_agreement_pdf_url(
 ):
     """Get a signed URL for an agreement PDF."""
     try:
-        # Get the agreement
         agr_res = supabase.table("agreements").select("*").eq("id", agreement_id).eq("application_id", application_id).single().execute()
         
         if not agr_res.data:
@@ -494,7 +551,6 @@ async def update_application_status(
             "updated_at": datetime.utcnow().isoformat()
         }
         
-        # If approving or rejecting, record who did it
         if new_status in ("approved", "rejected"):
             update_data["reviewed_by"] = user["user_id"]
             update_data["reviewed_at"] = datetime.utcnow().isoformat()
