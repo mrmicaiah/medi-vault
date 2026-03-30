@@ -1,5 +1,4 @@
 import React, { useState, useEffect, useRef } from 'react';
-import { Link, useNavigate } from 'react-router-dom';
 import { Button } from '../../components/ui/Button';
 import { Alert } from '../../components/ui/Alert';
 import { api } from '../../lib/api';
@@ -56,7 +55,6 @@ const CheckCircle = ({ checked, label }: { checked: boolean; label: string }) =>
 );
 
 export function PipelinePage() {
-  const navigate = useNavigate();
   const fileInputRef = useRef<HTMLInputElement>(null);
   
   const [applicants, setApplicants] = useState<Applicant[]>([]);
@@ -164,7 +162,6 @@ export function PipelinePage() {
 
       if (uploadErr) throw uploadErr;
 
-      // Refresh applicant detail
       await selectApplicant(selectedApplicant);
       setShowUploadModal(false);
       setUploadType('');
@@ -174,6 +171,14 @@ export function PipelinePage() {
       setUploading(false);
       if (fileInputRef.current) fileInputRef.current.value = '';
     }
+  };
+
+  const goToView = (id: string) => {
+    window.location.href = `/admin/applicant/${id}`;
+  };
+
+  const goToHire = (id: string) => {
+    window.location.href = `/admin/hire/${id}`;
   };
 
   const getPositionLabel = (position?: string) => {
@@ -383,31 +388,25 @@ export function PipelinePage() {
                   </div>
 
                   {/* Action Buttons */}
-                  <div className="grid grid-cols-3 mt-5 rounded-lg overflow-hidden shadow-sm">
+                  <div className="grid grid-cols-2 gap-3 mt-5">
                     <button 
-                      onClick={() => navigate(`/admin/applicant/${selectedApplicant.id}`)}
-                      className="w-full py-3.5 bg-navy text-white text-xs font-semibold hover:bg-navy/90 transition-colors"
+                      onClick={() => goToView(selectedApplicant.id)}
+                      className="py-3 bg-navy text-white text-sm font-semibold rounded-lg hover:bg-navy/90 transition-colors"
                     >
-                      VIEW
+                      View Full Profile
                     </button>
                     <button 
-                      onClick={() => navigate(`/admin/applicant/${selectedApplicant.id}`)}
-                      className="w-full py-3.5 bg-navy/80 text-white text-xs font-semibold hover:bg-navy/70 transition-colors"
+                      onClick={() => goToHire(selectedApplicant.id)}
+                      className="py-3 bg-success text-navy text-sm font-semibold rounded-lg hover:bg-success/90 transition-colors"
                     >
-                      EDIT
-                    </button>
-                    <button 
-                      onClick={() => navigate(`/admin/hire/${selectedApplicant.id}`)}
-                      className="w-full py-3.5 bg-success text-navy text-xs font-semibold hover:bg-success/90 transition-colors"
-                    >
-                      ONBOARD
+                      Onboard
                     </button>
                   </div>
 
                   {/* Onboarding Status */}
                   <div className="bg-white rounded-lg shadow-sm p-4 mt-5">
                     <div className="flex items-center justify-between">
-                      <span className="text-[11px] font-semibold text-gray uppercase tracking-wide">Onboarding Status</span>
+                      <span className="text-[11px] font-semibold text-gray uppercase tracking-wide">Documents</span>
                       <div className="flex gap-4">
                         <CheckCircle checked={applicantDetail?.credentials_uploaded || false} label="Cred." />
                         <CheckCircle checked={applicantDetail?.cpr_uploaded || false} label="CPR" />
@@ -419,9 +418,9 @@ export function PipelinePage() {
                   {/* Upload Button */}
                   <button 
                     onClick={handleUploadClick}
-                    className="w-full mt-5 py-3.5 bg-navy text-white text-xs font-semibold rounded-lg hover:bg-navy/90 transition-colors tracking-wide"
+                    className="w-full mt-5 py-3 bg-white border border-border text-navy text-sm font-medium rounded-lg hover:bg-gray-50 transition-colors"
                   >
-                    UPLOAD DOCUMENT
+                    Upload Document
                   </button>
                 </>
               )}
