@@ -178,6 +178,14 @@ export function ApplyPage() {
               <strong>Next Steps:</strong> After confirming your email, you'll be able to complete your employment application, upload required documents, and submit for review.
             </p>
           </div>
+          
+          {/* Return to Login Button */}
+          <Link to="/auth/login">
+            <Button variant="secondary" className="w-full mb-4">
+              Return to Login
+            </Button>
+          </Link>
+          
           <p className="text-xs text-gray">
             Didn't receive the email? Check your spam folder or{' '}
             <button 
