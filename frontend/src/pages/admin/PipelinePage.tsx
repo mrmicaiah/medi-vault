@@ -117,6 +117,7 @@ export function PipelinePage() {
   };
 
   const selectApplicant = async (applicant: Applicant) => {
+    console.log('[Pipeline] selectApplicant called for:', applicant.id);
     setSelectedApplicant(applicant);
     setPanelOpen(true);
     setEditMode(false);
@@ -142,40 +143,44 @@ export function PipelinePage() {
         ssn_last_four?: string;
       }>(`/admin/applicants/${applicant.id}`);
       
-      const steps = res.steps || [];
-      const step1 = steps.find(s => s.step_number === 1)?.data || {};
-      const step2 = steps.find(s => s.step_number === 2)?.data || {};
-      const step3 = steps.find(s => s.step_number === 3)?.data || {};
-      const step4 = steps.find(s => s.step_number === 4)?.data || {};
-      const step8 = steps.find(s => s.step_number === 8)?.data || {};
-      const step15 = steps.find(s => s.step_number === 15)?.data || {};
-      const step16 = steps.find(s => s.step_number === 16)?.data || {};
-      const step17 = steps.find(s => s.step_number === 17)?.data || {};
+      const stepsMap = new Map<number, Record<string, unknown>>();
+      (res.steps || []).forEach(s => stepsMap.set(s.step_number, s.data || {}));
+      
+      const step1 = stepsMap.get(1) || {};
+      const step2 = stepsMap.get(2) || {};
+      const step3 = stepsMap.get(3) || {};
+      const step4 = stepsMap.get(4) || {};
+      const step5 = stepsMap.get(5) || {};
+      const step6 = stepsMap.get(6) || {};
+      const step7 = stepsMap.get(7) || {};
+      const step8 = stepsMap.get(8) || {};
+      const step9 = stepsMap.get(9) || {};
+      const step10 = stepsMap.get(10) || {};
       
       const detail: ApplicantDetail = {
+        first_name: step1.first_name as string,
+        last_name: step1.last_name as string,
+        email: step1.email as string,
+        phone: step1.phone as string,
         city: step2.city as string,
-        certifications: step4.certifications as string[],
-        has_cpr_certification: step4.has_cpr_certification as string,
-        has_tb_test: step4.has_tb_test as string,
-        has_drivers_license: step4.has_drivers_license as string,
-        will_travel_30_min: step4.will_travel_30_min as string,
-        will_work_bed_bound: step4.will_work_bed_bound as string,
-        available_days: step8.available_days as string[],
-        hours_per_week: step8.hours_per_week as string,
-        comfortable_with_smokers: step8.comfortable_with_smokers as string,
-        position_applied: step1.position_applied as string,
-        credentials_uploaded: Boolean(step15.file_name),
-        cpr_uploaded: Boolean(step16.file_name),
-        tb_uploaded: Boolean(step17.file_name),
-        first_name: applicant.first_name,
-        last_name: applicant.last_name,
-        email: applicant.email,
-        phone: step2.phone as string,
         address_line1: step2.address_line1 as string,
         address_line2: step2.address_line2 as string,
         state: step2.state as string,
         zip: step2.zip as string,
         date_of_birth: step2.date_of_birth as string,
+        certifications: step4.certifications as string[],
+        position_applied: step4.position_applying as string,
+        has_cpr_certification: step5.has_cpr_certification as string,
+        has_tb_test: step6.has_tb_test as string,
+        has_drivers_license: step7.has_drivers_license as string,
+        will_travel_30_min: step8.will_travel_30_min as string,
+        will_work_bed_bound: step9.will_work_bed_bound as string,
+        available_days: step10.available_days as string[],
+        hours_per_week: step10.hours_per_week as string,
+        comfortable_with_smokers: step10.comfortable_with_smokers as string,
+        credentials_uploaded: false,
+        cpr_uploaded: false,
+        tb_uploaded: false,
         emergency_name: step3.name as string,
         emergency_relationship: step3.relationship as string,
         emergency_phone: step3.phone as string,
@@ -250,11 +255,8 @@ export function PipelinePage() {
       setRevealedSsn(formattedSsn);
       setSsnRevealed(true);
       setEditingSsn(false);
-      if (applicantDetail) {
-        const updated = { ...applicantDetail, ssn_last_four: res.ssn_last_four };
-        detailCache.set(selectedApplicant.id, updated);
-        setApplicantDetail(updated);
-      }
+      setApplicantDetail(prev => prev ? { ...prev, ssn_last_four: res.ssn_last_four } : null);
+      detailCache.delete(selectedApplicant.id);
     } catch (err) {
       setError(err instanceof Error ? err.message : 'Failed to save SSN');
     } finally {
@@ -263,20 +265,33 @@ export function PipelinePage() {
   };
 
   const formatSsnInput = (value: string) => {
-    const digits = value.replace(/\D/g, '').slice(0, 9);
+    const digits = value.replace(/\D/g, '');
     if (digits.length <= 3) return digits;
     if (digits.length <= 5) return `${digits.slice(0, 3)}-${digits.slice(3)}`;
-    return `${digits.slice(0, 3)}-${digits.slice(3, 5)}-${digits.slice(5)}`;
+    return `${digits.slice(0, 3)}-${digits.slice(3, 5)}-${digits.slice(5, 9)}`;
   };
 
   const handleSaveEdit = async () => {
     if (!selectedApplicant) return;
     setSaving(true);
     try {
-      await api.patch(`/admin/applicants/${selectedApplicant.id}/profile`, editForm);
-      const updatedDetail = { ...applicantDetail, ...editForm };
-      detailCache.set(selectedApplicant.id, updatedDetail as ApplicantDetail);
-      setApplicantDetail(updatedDetail as ApplicantDetail);
+      await api.put(`/admin/applicants/${selectedApplicant.id}`, {
+        first_name: editForm.first_name,
+        last_name: editForm.last_name,
+        email: editForm.email,
+        phone: editForm.phone,
+        city: editForm.city,
+        address_line1: editForm.address_line1,
+        address_line2: editForm.address_line2,
+        state: editForm.state,
+        zip: editForm.zip,
+        date_of_birth: editForm.date_of_birth,
+        emergency_name: editForm.emergency_name,
+        emergency_relationship: editForm.emergency_relationship,
+        emergency_phone: editForm.emergency_phone,
+      });
+      setApplicantDetail(prev => prev ? { ...prev, ...editForm } : null);
+      detailCache.delete(selectedApplicant.id);
       setApplicants(prev => prev.map(a => 
         a.id === selectedApplicant.id 
           ? { ...a, first_name: editForm.first_name, last_name: editForm.last_name, email: editForm.email }
@@ -351,40 +366,44 @@ export function PipelinePage() {
   };
 
   const formatHours = (hours?: string) => {
-    const labels: Record<string, string> = { part_time: 'Part Time', full_time: 'Full Time', fill_in: 'Fill In', live_in: 'Live-In' };
-    return labels[hours || ''] || '—';
+    const map: Record<string, string> = { '10-20': '10–20 hrs', '20-30': '20–30 hrs', '30-40': '30–40 hrs', '40+': '40+ hrs' };
+    return map[hours || ''] || hours || '—';
   };
 
   const formatSmokerPref = (pref?: string) => {
-    if (pref === 'yes') return 'OK with smokers';
-    if (pref === 'no') return 'No smokers';
-    if (pref === 'prefer_no_smoking') return 'Prefer non-smoking';
-    return 'No preference';
+    const map: Record<string, string> = { yes: 'OK with', no: 'Not OK', no_preference: 'No pref' };
+    return map[pref || ''] || pref || '—';
   };
 
   const getStatusBadge = (status: string) => {
-    const config: Record<string, { bg: string; text: string; label: string }> = {
-      in_progress: { bg: 'bg-blue-50', text: 'text-blue-700', label: 'In Progress' },
-      submitted: { bg: 'bg-amber-50', text: 'text-amber-700', label: 'Submitted' },
-      under_review: { bg: 'bg-purple-50', text: 'text-purple-700', label: 'Under Review' },
-      approved: { bg: 'bg-emerald-50', text: 'text-emerald-700', label: 'Approved' },
-      rejected: { bg: 'bg-red-50', text: 'text-red-700', label: 'Rejected' },
-      hired: { bg: 'bg-teal-50', text: 'text-teal-700', label: 'Hired' },
+    const styles: Record<string, string> = {
+      in_progress: 'bg-info/10 text-info',
+      submitted: 'bg-warning/10 text-warning',
+      under_review: 'bg-maroon/10 text-maroon',
+      approved: 'bg-success/10 text-success',
+      rejected: 'bg-error/10 text-error',
     };
-    const s = config[status] || { bg: 'bg-gray-100', text: 'text-gray-600', label: status };
-    return <span className={`text-xs px-2.5 py-1 rounded-md font-medium ${s.bg} ${s.text}`}>{s.label}</span>;
+    const labels: Record<string, string> = {
+      in_progress: 'In Progress',
+      submitted: 'Submitted',
+      under_review: 'Under Review',
+      approved: 'Approved',
+      rejected: 'Rejected',
+    };
+    return (
+      <span className={`inline-flex items-center px-2.5 py-0.5 rounded-full text-xs font-medium ${styles[status] || 'bg-gray-100 text-gray'}`}>
+        {labels[status] || status}
+      </span>
+    );
   };
 
   if (loading) {
     return (
-      <div className="flex h-64 items-center justify-center">
-        <div className="text-center">
-          <svg className="mx-auto h-8 w-8 animate-spin text-maroon" fill="none" viewBox="0 0 24 24">
-            <circle className="opacity-25" cx="12" cy="12" r="10" stroke="currentColor" strokeWidth="4" />
-            <path className="opacity-75" fill="currentColor" d="M4 12a8 8 0 018-8V0C5.373 0 0 5.373 0 12h4zm2 5.291A7.962 7.962 0 014 12H0c0 3.042 1.135 5.824 3 7.938l3-2.647z" />
-          </svg>
-          <p className="mt-3 text-sm text-gray">Loading applicants...</p>
-        </div>
+      <div className="flex items-center justify-center py-12">
+        <svg className="h-8 w-8 animate-spin text-maroon" fill="none" viewBox="0 0 24 24">
+          <circle className="opacity-25" cx="12" cy="12" r="10" stroke="currentColor" strokeWidth="4" />
+          <path className="opacity-75" fill="currentColor" d="M4 12a8 8 0 018-8V0C5.373 0 0 5.373 0 12h4z" />
+        </svg>
       </div>
     );
   }
@@ -393,10 +412,9 @@ export function PipelinePage() {
     <div className="space-y-6">
       <div className="flex items-center justify-between">
         <div>
-          <h1 className="font-display text-2xl font-bold text-navy">Applicants</h1>
-          <p className="text-sm text-gray mt-1">{new Date().toLocaleDateString('en-US', { weekday: 'long', month: 'long', day: 'numeric', year: 'numeric' })}</p>
+          <h1 className="font-display text-2xl font-bold text-navy">Applicant Pipeline</h1>
+          <p className="text-sm text-gray mt-1">Review and manage applicants</p>
         </div>
-        <Button onClick={() => window.open('/apply/eveready-homecare', '_blank')}><span className="mr-1">+</span> Add Applicant</Button>
       </div>
 
       {error && <Alert variant="error" dismissible onDismiss={() => setError(null)}>{error}</Alert>}
@@ -435,7 +453,11 @@ export function PipelinePage() {
               <tr><td colSpan={4} className="px-6 py-12 text-center text-gray">No applicants yet</td></tr>
             ) : (
               applicants.map((applicant) => (
-                <tr key={applicant.id} onClick={() => selectApplicant(applicant)} className="hover:bg-gray-50 cursor-pointer transition-colors">
+                <tr 
+                  key={applicant.id} 
+                  onClick={() => selectApplicant(applicant)} 
+                  className="hover:bg-gray-50 cursor-pointer transition-colors"
+                >
                   <td className="px-6 py-4">
                     <div className="flex items-center gap-3">
                       <div className="flex h-10 w-10 flex-shrink-0 items-center justify-center rounded-lg bg-navy text-sm font-semibold text-white">
@@ -457,9 +479,13 @@ export function PipelinePage() {
         </table>
       </div>
 
+      {/* Side Panel */}
       {selectedApplicant && (
         <>
-          <div className={`fixed inset-0 bg-black/20 z-40 transition-opacity duration-250 ${panelOpen ? 'opacity-100' : 'opacity-0 pointer-events-none'}`} onClick={closePanel} />
+          <div 
+            className={`fixed inset-0 bg-black/20 z-40 transition-opacity duration-250 ${panelOpen ? 'opacity-100' : 'opacity-0 pointer-events-none'}`} 
+            onClick={closePanel} 
+          />
           <div className={`fixed top-0 right-0 h-full w-[420px] bg-white shadow-2xl z-50 flex flex-col transition-transform duration-250 ease-out ${panelOpen ? 'translate-x-0' : 'translate-x-full'}`}>
             <div className="px-6 py-5 bg-navy flex items-center justify-between">
               <div>
@@ -628,6 +654,7 @@ export function PipelinePage() {
         </>
       )}
 
+      {/* Upload Modal */}
       {showUploadModal && selectedApplicant && (
         <>
           <div className="fixed inset-0 bg-black/40 z-[60]" onClick={() => setShowUploadModal(false)} />
