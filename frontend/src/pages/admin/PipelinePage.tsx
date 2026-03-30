@@ -1,4 +1,4 @@
-import React, { useState, useEffect, useRef } from 'react';
+import React, { useState, useEffect, useRef, useMemo } from 'react';
 import { useNavigate } from 'react-router-dom';
 import { Button } from '../../components/ui/Button';
 import { Alert } from '../../components/ui/Alert';
@@ -16,6 +16,7 @@ interface Applicant {
   last_name: string;
   email: string;
   location_name: string;
+  position?: string;
 }
 
 interface ApplicantDetail {
@@ -54,6 +55,21 @@ interface ApplicantDetail {
 
 const detailCache = new Map<string, ApplicantDetail>();
 
+// Position colors
+const POSITION_COLORS: Record<string, { bg: string; text: string }> = {
+  pca: { bg: 'bg-blue-500', text: 'text-white' },
+  hha: { bg: 'bg-teal-500', text: 'text-white' },
+  cna: { bg: 'bg-purple-500', text: 'text-white' },
+  lpn: { bg: 'bg-amber-500', text: 'text-white' },
+  rn: { bg: 'bg-rose-500', text: 'text-white' },
+  default: { bg: 'bg-gray-400', text: 'text-white' },
+};
+
+const getPositionColor = (position?: string) => {
+  if (!position) return POSITION_COLORS.default;
+  return POSITION_COLORS[position.toLowerCase()] || POSITION_COLORS.default;
+};
+
 const YesNo = ({ value }: { value: boolean | string | undefined }) => {
   const isYes = value === true || value === 'yes';
   return (
@@ -81,6 +97,11 @@ export function PipelinePage() {
   const [applicantDetail, setApplicantDetail] = useState<ApplicantDetail | null>(null);
   const [loadingDetail, setLoadingDetail] = useState(false);
   const [panelOpen, setPanelOpen] = useState(false);
+  
+  // Filters
+  const [positionFilter, setPositionFilter] = useState<string>('all');
+  const [sortBy, setSortBy] = useState<'recent' | 'oldest'>('recent');
+  const [showRejected, setShowRejected] = useState(false);
   
   const [editMode, setEditMode] = useState(false);
   const [editForm, setEditForm] = useState<Record<string, string>>({});
@@ -116,8 +137,49 @@ export function PipelinePage() {
     }
   };
 
+  // Get unique positions from applicants (will be populated after detail fetch)
+  const availablePositions = useMemo(() => {
+    const positions = new Set<string>();
+    // For now, show standard positions
+    ['PCA', 'HHA', 'CNA', 'LPN', 'RN'].forEach(p => positions.add(p));
+    return Array.from(positions);
+  }, []);
+
+  // Filtered and sorted applicants
+  const filteredApplicants = useMemo(() => {
+    let result = [...applicants];
+    
+    // Hide rejected unless toggled
+    if (!showRejected) {
+      result = result.filter(a => a.status !== 'rejected');
+    }
+    
+    // Position filter - we need to check cached detail
+    if (positionFilter !== 'all') {
+      result = result.filter(a => {
+        const cached = detailCache.get(a.id);
+        if (!cached) return true; // Show if not yet loaded
+        const pos = cached.position_applied || (cached.certifications?.[0] !== 'none' ? cached.certifications?.[0] : '');
+        return pos?.toLowerCase() === positionFilter.toLowerCase();
+      });
+    }
+    
+    // Sort
+    result.sort((a, b) => {
+      const dateA = new Date(a.created_at).getTime();
+      const dateB = new Date(b.created_at).getTime();
+      return sortBy === 'recent' ? dateB - dateA : dateA - dateB;
+    });
+    
+    return result;
+  }, [applicants, positionFilter, sortBy, showRejected]);
+
+  // Count rejected
+  const rejectedCount = useMemo(() => {
+    return applicants.filter(a => a.status === 'rejected').length;
+  }, [applicants]);
+
   const selectApplicant = async (applicant: Applicant) => {
-    console.log('[Pipeline] selectApplicant called for:', applicant.id);
     setSelectedApplicant(applicant);
     setPanelOpen(true);
     setEditMode(false);
@@ -142,8 +204,6 @@ export function PipelinePage() {
         steps: Array<{ step_number: number; data: Record<string, unknown> }>;
         ssn_last_four?: string;
       }>(`/admin/applicants/${applicant.id}`);
-      
-      console.log('[Pipeline] API response:', res);
       
       const stepsMap = new Map<number, Record<string, unknown>>();
       (res.steps || []).forEach(s => {
@@ -170,12 +230,8 @@ export function PipelinePage() {
       
       const profile = res.profile || {};
       
-      // Get position - try multiple possible field names
       const position = (step4.position_applying as string) || (step4.position as string) || (step4.position_applied as string) || '';
-      console.log('[Pipeline] Step 4 data:', step4);
-      console.log('[Pipeline] Position found:', position);
       
-      // Get certifications - handle both array and string
       let certifications: string[] = [];
       if (Array.isArray(step4.certifications)) {
         certifications = step4.certifications as string[];
@@ -216,8 +272,6 @@ export function PipelinePage() {
         emergency_phone: step3.phone as string,
         ssn_last_four: res.ssn_last_four,
       };
-      
-      console.log('[Pipeline] Parsed detail:', detail);
       
       detailCache.set(applicant.id, detail);
       setApplicantDetail(detail);
@@ -386,6 +440,13 @@ export function PipelinePage() {
     return labels[position.toLowerCase()] || position.toUpperCase();
   };
 
+  const getApplicantPosition = (applicant: Applicant): string => {
+    const cached = detailCache.get(applicant.id);
+    if (cached?.position_applied) return cached.position_applied;
+    if (cached?.certifications?.[0] && cached.certifications[0] !== 'none') return cached.certifications[0];
+    return '';
+  };
+
   const formatCertifications = (certs?: string[]) => {
     if (!certs || certs.length === 0 || (certs.length === 1 && certs[0] === 'none')) return 'None';
     return certs.filter(c => c !== 'none').map(c => c.toUpperCase()).join(', ');
@@ -443,34 +504,63 @@ export function PipelinePage() {
 
   return (
     <div className="space-y-6">
+      {/* Header */}
       <div className="flex items-center justify-between">
         <div>
-          <h1 className="font-display text-2xl font-bold text-navy">Applicant Pipeline</h1>
-          <p className="text-sm text-gray mt-1">Review and manage applicants</p>
+          <h1 className="font-display text-2xl font-bold text-navy">Applicants</h1>
+          <p className="text-sm text-gray mt-1">Review and manage applications</p>
         </div>
       </div>
 
       {error && <Alert variant="error" dismissible onDismiss={() => setError(null)}>{error}</Alert>}
 
-      <div className="grid grid-cols-2 lg:grid-cols-4 gap-4">
-        <div className="bg-white rounded-xl border border-border p-5">
-          <p className="text-sm text-gray font-medium">Total</p>
-          <p className="text-3xl font-bold text-navy mt-1">{applicants.length}</p>
+      {/* Filters */}
+      <div className="flex flex-wrap items-center gap-3">
+        {/* Sort */}
+        <div className="flex items-center gap-2 bg-white border border-border rounded-lg px-3 py-2">
+          <span className="text-xs text-gray font-medium">Sort:</span>
+          <select 
+            value={sortBy} 
+            onChange={(e) => setSortBy(e.target.value as 'recent' | 'oldest')}
+            className="text-sm text-navy bg-transparent border-none focus:outline-none cursor-pointer"
+          >
+            <option value="recent">Most Recent</option>
+            <option value="oldest">Oldest First</option>
+          </select>
         </div>
-        <div className="bg-white rounded-xl border border-border p-5">
-          <p className="text-sm text-gray font-medium">Submitted</p>
-          <p className="text-3xl font-bold text-warning mt-1">{applicants.filter(a => a.status === 'submitted').length}</p>
+
+        {/* Position Filter */}
+        <div className="flex items-center gap-2 bg-white border border-border rounded-lg px-3 py-2">
+          <span className="text-xs text-gray font-medium">Position:</span>
+          <select 
+            value={positionFilter} 
+            onChange={(e) => setPositionFilter(e.target.value)}
+            className="text-sm text-navy bg-transparent border-none focus:outline-none cursor-pointer"
+          >
+            <option value="all">All Positions</option>
+            {availablePositions.map(pos => (
+              <option key={pos} value={pos.toLowerCase()}>{pos}</option>
+            ))}
+          </select>
         </div>
-        <div className="bg-white rounded-xl border border-border p-5">
-          <p className="text-sm text-gray font-medium">In Progress</p>
-          <p className="text-3xl font-bold text-info mt-1">{applicants.filter(a => a.status === 'in_progress').length}</p>
-        </div>
-        <div className="bg-white rounded-xl border border-border p-5">
-          <p className="text-sm text-gray font-medium">Approved</p>
-          <p className="text-3xl font-bold text-success mt-1">{applicants.filter(a => a.status === 'approved').length}</p>
-        </div>
+
+        {/* Rejected Toggle */}
+        {rejectedCount > 0 && (
+          <button
+            onClick={() => setShowRejected(!showRejected)}
+            className={`flex items-center gap-2 px-3 py-2 rounded-lg border text-sm transition-colors ${
+              showRejected 
+                ? 'bg-error/10 border-error/30 text-error' 
+                : 'bg-white border-border text-gray hover:border-gray-300'
+            }`}
+          >
+            <span>{showRejected ? 'Hide' : 'Show'} Rejected</span>
+            <span className="bg-error/20 text-error text-xs px-1.5 py-0.5 rounded-full font-medium">{rejectedCount}</span>
+          </button>
+        )}
       </div>
 
+      {/* Applicants Table */}
       <div className="bg-white rounded-xl border border-border overflow-hidden">
         <table className="w-full">
           <thead className="bg-gray-50 border-b border-border">
@@ -482,31 +572,39 @@ export function PipelinePage() {
             </tr>
           </thead>
           <tbody className="divide-y divide-border">
-            {applicants.length === 0 ? (
-              <tr><td colSpan={4} className="px-6 py-12 text-center text-gray">No applicants yet</td></tr>
+            {filteredApplicants.length === 0 ? (
+              <tr><td colSpan={4} className="px-6 py-12 text-center text-gray">
+                {applicants.length === 0 ? 'No applicants yet' : 'No applicants match the current filters'}
+              </td></tr>
             ) : (
-              applicants.map((applicant) => (
-                <tr 
-                  key={applicant.id} 
-                  onClick={() => selectApplicant(applicant)} 
-                  className="hover:bg-gray-50 cursor-pointer transition-colors"
-                >
-                  <td className="px-6 py-4">
-                    <div className="flex items-center gap-3">
-                      <div className="flex h-10 w-10 flex-shrink-0 items-center justify-center rounded-lg bg-navy text-sm font-semibold text-white">
-                        {applicant.first_name?.[0] || ''}{applicant.last_name?.[0] || ''}
+              filteredApplicants.map((applicant) => {
+                const position = getApplicantPosition(applicant);
+                const positionColor = getPositionColor(position);
+                
+                return (
+                  <tr 
+                    key={applicant.id} 
+                    onClick={() => selectApplicant(applicant)} 
+                    className="hover:bg-gray-50 cursor-pointer transition-colors"
+                  >
+                    <td className="px-6 py-4">
+                      <div className="flex items-center gap-3">
+                        {/* Position-colored badge */}
+                        <div className={`flex h-10 w-10 flex-shrink-0 items-center justify-center rounded-lg text-xs font-bold ${positionColor.bg} ${positionColor.text}`}>
+                          {position ? position.toUpperCase().slice(0, 3) : (applicant.first_name?.[0] || '') + (applicant.last_name?.[0] || '')}
+                        </div>
+                        <div>
+                          <p className="text-sm font-semibold text-navy">{applicant.first_name} {applicant.last_name}</p>
+                          <p className="text-xs text-gray">{applicant.email}</p>
+                        </div>
                       </div>
-                      <div>
-                        <p className="text-sm font-semibold text-navy">{applicant.first_name} {applicant.last_name}</p>
-                        <p className="text-xs text-gray">{applicant.email}</p>
-                      </div>
-                    </div>
-                  </td>
-                  <td className="px-6 py-4 text-sm text-slate">{applicant.location_name || '—'}</td>
-                  <td className="px-6 py-4">{getStatusBadge(applicant.status)}</td>
-                  <td className="px-6 py-4 text-sm text-gray">{new Date(applicant.created_at).toLocaleDateString()}</td>
-                </tr>
-              ))
+                    </td>
+                    <td className="px-6 py-4 text-sm text-slate">{applicant.location_name || '—'}</td>
+                    <td className="px-6 py-4">{getStatusBadge(applicant.status)}</td>
+                    <td className="px-6 py-4 text-sm text-gray">{new Date(applicant.created_at).toLocaleDateString()}</td>
+                  </tr>
+                );
+              })
             )}
           </tbody>
         </table>
@@ -531,7 +629,6 @@ export function PipelinePage() {
                     {getPositionLabel(applicantDetail.position_applied)}
                   </span>
                 )}
-                {/* Fallback: show certifications if no position */}
                 {!editMode && !applicantDetail?.position_applied && applicantDetail?.certifications && applicantDetail.certifications.length > 0 && applicantDetail.certifications[0] !== 'none' && (
                   <span className="text-sm font-bold text-white bg-white/20 px-2 py-0.5 rounded">
                     {applicantDetail.certifications[0].toUpperCase()}
@@ -704,7 +801,7 @@ export function PipelinePage() {
               )}
             </div>
 
-            {/* Footer - Always visible */}
+            {/* Footer */}
             <div className="px-6 py-3 border-t border-gray-100 bg-white flex-shrink-0">
               <p className="text-[10px] text-gray-400 text-center">Powered by MediSVault</p>
             </div>
