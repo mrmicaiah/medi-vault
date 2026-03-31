@@ -110,7 +110,7 @@ class ApplicationService:
                     "step_number": step_def.step_number,
                     "step_name": step_def.name,
                     "step_type": step_def.step_type.value,
-                    "completed": False,
+                    "is_completed": False,
                     "data": {},
                     "created_at": now,
                     "updated_at": now,
@@ -153,7 +153,7 @@ class ApplicationService:
             self.supabase.table("application_steps")
             .select("id", count="exact")
             .eq("application_id", app_id)
-            .eq("completed", True)
+            .eq("is_completed", True)
             .execute()
         )
         completed_count = completed_result.count or 0
@@ -191,7 +191,7 @@ class ApplicationService:
                 self.supabase.table("application_steps")
                 .select("id", count="exact")
                 .eq("application_id", d["id"])
-                .eq("completed", True)
+                .eq("is_completed", True)
                 .execute()
             )
             completed_count = completed_result.count or 0
@@ -246,16 +246,16 @@ class ApplicationService:
             )
 
         now = datetime.now(timezone.utc).isoformat()
-        completed = step_status == "completed"
+        is_completed = step_status == "completed"
 
         # Update the step
         update_data = {
             "data": data,
-            "completed": completed,
+            "is_completed": is_completed,
             "updated_at": now,
         }
         
-        if completed:
+        if is_completed:
             update_data["completed_at"] = now
 
         step_result = (
@@ -273,7 +273,7 @@ class ApplicationService:
             )
 
         # Update application's current step if moving forward (only for in_progress apps)
-        if app.status == ApplicationStatus.IN_PROGRESS and completed and step_number >= app.current_step:
+        if app.status == ApplicationStatus.IN_PROGRESS and is_completed and step_number >= app.current_step:
             next_step = min(step_number + 1, 22)
             self.supabase.table("applications").update(
                 {
@@ -289,7 +289,7 @@ class ApplicationService:
             step_number=s["step_number"],
             step_name=s["step_name"],
             step_type=s["step_type"],
-            status="completed" if s.get("completed") else "in_progress",
+            status="completed" if s.get("is_completed") else "in_progress",
             data=s.get("data"),
             completed_at=s.get("completed_at"),
         )
@@ -320,7 +320,7 @@ class ApplicationService:
                 step_number=s["step_number"],
                 step_name=s["step_name"],
                 step_type=s["step_type"],
-                status="completed" if s.get("completed") else "pending",
+                status="completed" if s.get("is_completed") else "pending",
                 data=s.get("data"),
                 completed_at=s.get("completed_at"),
             )
@@ -345,7 +345,7 @@ class ApplicationService:
             self.supabase.table("application_steps")
             .select("step_number, step_name")
             .eq("application_id", app_id)
-            .eq("completed", False)
+            .eq("is_completed", False)
             .in_("step_number", required_steps)
             .execute()
         )
