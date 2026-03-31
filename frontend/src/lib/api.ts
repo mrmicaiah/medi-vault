@@ -1,6 +1,8 @@
 import { supabase } from './supabase';
 
-const API_URL = import.meta.env.VITE_API_URL || 'http://localhost:3001/api';
+// For local dev: http://localhost:8000/api
+// For production: https://medi-vault-api.onrender.com/api
+const API_URL = import.meta.env.VITE_API_URL || 'http://localhost:8000';
 
 async function getAuthHeaders(): Promise<Record<string, string>> {
   const { data } = await supabase.auth.getSession();
@@ -26,7 +28,7 @@ async function request<T>(
 
   if (!response.ok) {
     const error = await response.json().catch(() => ({ message: 'Request failed' }));
-    throw new Error(error.message || `HTTP ${response.status}`);
+    throw new Error(error.message || error.detail || `HTTP ${response.status}`);
   }
 
   return response.json();
@@ -73,7 +75,7 @@ export const api = {
     });
     if (!response.ok) {
       const error = await response.json().catch(() => ({ message: 'Upload failed' }));
-      throw new Error(error.message || `HTTP ${response.status}`);
+      throw new Error(error.message || error.detail || `HTTP ${response.status}`);
     }
     return response.json();
   },
@@ -90,7 +92,7 @@ export const api = {
     });
     if (!response.ok) {
       const error = await response.json().catch(() => ({ message: 'Upload failed' }));
-      throw new Error(error.message || `HTTP ${response.status}`);
+      throw new Error(error.message || error.detail || `HTTP ${response.status}`);
     }
     return response.json();
   },

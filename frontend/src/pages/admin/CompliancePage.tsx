@@ -1,407 +1,293 @@
-import React, { useState, useEffect } from 'react';
-import { Link } from 'react-router-dom';
-import { Alert } from '../../components/ui/Alert';
-import { api } from '../../lib/api';
+import { useState, useEffect } from 'react';
+import { supabase } from '../../lib/supabase';
 
-interface Applicant {
+interface ExpiringDocument {
   id: string;
   user_id: string;
-  status: string;
-  first_name: string;
-  last_name: string;
+  employee_name: string;
   email: string;
+  document_type: string;
+  file_name: string;
+  expiration_date: string;
+  days_until_expiry: number;
 }
 
-interface DocumentItem {
-  type: string;
-  name: string;
-  endpoint?: string;
-  step_number?: number;
-  filename?: string;
-  uploaded_at?: string;
-  signed?: boolean;
-  signed_date?: string;
+interface MissingDocReport {
+  employee_id: string;
+  user_id: string;
+  employee_name: string;
+  email: string;
+  missing_documents: string[];
+  missing_count: number;
 }
 
-interface DocumentsSummary {
-  application_id: string;
-  applicant_name: string;
-  status: string;
-  documents: {
-    uploaded: DocumentItem[];
-    agreements: DocumentItem[];
-    generated: DocumentItem[];
-  };
+interface ComplianceReport {
+  total_employees: number;
+  fully_compliant: number;
+  partially_compliant: number;
+  non_compliant: number;
+  expiring_within_30_days: number;
+  expired_documents: number;
+  missing_documents: number;
+  compliance_rate: number;
 }
 
-const API_BASE = import.meta.env.VITE_API_URL || 'https://medi-vault-api.onrender.com';
+const API_BASE = import.meta.env.VITE_API_URL || 'http://localhost:8000';
 
-export function CompliancePage() {
-  const [applicants, setApplicants] = useState<Applicant[]>([]);
+export default function CompliancePage() {
+  const [report, setReport] = useState<ComplianceReport | null>(null);
+  const [expiring, setExpiring] = useState<ExpiringDocument[]>([]);
+  const [missing, setMissing] = useState<MissingDocReport[]>([]);
   const [loading, setLoading] = useState(true);
   const [error, setError] = useState<string | null>(null);
-  const [selectedApplicant, setSelectedApplicant] = useState<Applicant | null>(null);
-  const [documentsSummary, setDocumentsSummary] = useState<DocumentsSummary | null>(null);
-  const [loadingDocs, setLoadingDocs] = useState(false);
-  const [search, setSearch] = useState('');
-  const [downloading, setDownloading] = useState<string | null>(null);
+  const [activeTab, setActiveTab] = useState<'overview' | 'expiring' | 'missing'>('overview');
 
   useEffect(() => {
-    loadApplicants();
+    fetchComplianceData();
   }, []);
 
-  const loadApplicants = async () => {
+  async function fetchComplianceData() {
     try {
       setLoading(true);
-      const res = await api.get<{ applications: Applicant[] }>('/admin/pipeline');
-      // Only show submitted or later applicants
-      const filtered = (res.applications || []).filter(a => 
-        ['submitted', 'under_review', 'approved', 'hired'].includes(a.status)
-      );
-      setApplicants(filtered);
+      setError(null);
+      
+      const { data: { session } } = await supabase.auth.getSession();
+      const token = session?.access_token;
+      
+      if (!token) {
+        setError('Not authenticated');
+        return;
+      }
+
+      const headers = {
+        'Authorization': `Bearer ${token}`,
+        'Content-Type': 'application/json'
+      };
+
+      // Fetch all compliance data in parallel
+      const [reportRes, expiringRes, missingRes] = await Promise.all([
+        fetch(`${API_BASE}/api/compliance/report`, { headers }),
+        fetch(`${API_BASE}/api/compliance/expiring?days=30`, { headers }),
+        fetch(`${API_BASE}/api/compliance/missing`, { headers })
+      ]);
+
+      if (reportRes.ok) {
+        setReport(await reportRes.json());
+      }
+      if (expiringRes.ok) {
+        setExpiring(await expiringRes.json());
+      }
+      if (missingRes.ok) {
+        setMissing(await missingRes.json());
+      }
+
     } catch (err) {
-      console.error('Error loading applicants:', err);
-      setError(err instanceof Error ? err.message : 'Failed to load applicants');
+      setError(err instanceof Error ? err.message : 'Failed to load compliance data');
     } finally {
       setLoading(false);
     }
-  };
-
-  const loadDocuments = async (applicant: Applicant) => {
-    setSelectedApplicant(applicant);
-    setLoadingDocs(true);
-    setDocumentsSummary(null);
-    
-    try {
-      const res = await api.get<DocumentsSummary>(`/admin/applicants/${applicant.id}/documents-summary`);
-      setDocumentsSummary(res);
-    } catch (err) {
-      console.error('Error loading documents:', err);
-      setError(err instanceof Error ? err.message : 'Failed to load documents');
-    } finally {
-      setLoadingDocs(false);
-    }
-  };
-
-  const downloadPdf = async (endpoint: string, filename: string) => {
-    setDownloading(endpoint);
-    try {
-      const token = localStorage.getItem('supabase_token') || sessionStorage.getItem('supabase_token');
-      const response = await fetch(`${API_BASE}${endpoint}`, {
-        headers: {
-          'Authorization': `Bearer ${token}`
-        }
-      });
-      
-      if (!response.ok) {
-        throw new Error('Download failed');
-      }
-      
-      const blob = await response.blob();
-      const url = window.URL.createObjectURL(blob);
-      const a = document.createElement('a');
-      a.href = url;
-      a.download = filename;
-      document.body.appendChild(a);
-      a.click();
-      window.URL.revokeObjectURL(url);
-      document.body.removeChild(a);
-    } catch (err) {
-      console.error('Download error:', err);
-      setError(err instanceof Error ? err.message : 'Download failed');
-    } finally {
-      setDownloading(null);
-    }
-  };
-
-  const viewUploadedDoc = async (endpoint: string) => {
-    try {
-      const res = await api.get<{ signed_url: string }>(endpoint);
-      if (res.signed_url) {
-        window.open(res.signed_url, '_blank');
-      }
-    } catch (err) {
-      console.error('Error getting document URL:', err);
-      setError(err instanceof Error ? err.message : 'Failed to get document');
-    }
-  };
-
-  const filteredApplicants = applicants.filter(a => {
-    if (!search) return true;
-    const searchLower = search.toLowerCase();
-    return (
-      a.first_name?.toLowerCase().includes(searchLower) ||
-      a.last_name?.toLowerCase().includes(searchLower) ||
-      a.email?.toLowerCase().includes(searchLower)
-    );
-  });
-
-  const formatDate = (dateStr?: string) => {
-    if (!dateStr) return '';
-    return new Date(dateStr).toLocaleDateString();
-  };
-
-  const getStatusBadge = (status: string) => {
-    const styles: Record<string, string> = {
-      submitted: 'bg-warning/10 text-warning',
-      under_review: 'bg-maroon/10 text-maroon',
-      approved: 'bg-success/10 text-success',
-      hired: 'bg-info/10 text-info',
-    };
-    const labels: Record<string, string> = {
-      submitted: 'Submitted',
-      under_review: 'Under Review',
-      approved: 'Approved',
-      hired: 'Hired',
-    };
-    return (
-      <span className={`inline-flex items-center px-2 py-0.5 rounded-full text-xs font-medium ${styles[status] || 'bg-gray-100 text-gray'}`}>
-        {labels[status] || status}
-      </span>
-    );
-  };
+  }
 
   if (loading) {
     return (
-      <div className="flex items-center justify-center py-12">
-        <svg className="h-8 w-8 animate-spin text-maroon" fill="none" viewBox="0 0 24 24">
-          <circle className="opacity-25" cx="12" cy="12" r="10" stroke="currentColor" strokeWidth="4" />
-          <path className="opacity-75" fill="currentColor" d="M4 12a8 8 0 018-8V0C5.373 0 0 5.373 0 12h4z" />
-        </svg>
+      <div className="p-6">
+        <div className="animate-pulse">
+          <div className="h-8 bg-gray-200 rounded w-1/4 mb-6"></div>
+          <div className="grid grid-cols-4 gap-4 mb-6">
+            {[1, 2, 3, 4].map(i => (
+              <div key={i} className="h-24 bg-gray-200 rounded"></div>
+            ))}
+          </div>
+        </div>
+      </div>
+    );
+  }
+
+  if (error) {
+    return (
+      <div className="p-6">
+        <div className="bg-red-50 border border-red-200 rounded-lg p-4">
+          <p className="text-red-800">{error}</p>
+          <button 
+            onClick={fetchComplianceData}
+            className="mt-2 text-red-600 underline"
+          >
+            Retry
+          </button>
+        </div>
       </div>
     );
   }
 
   return (
-    <div className="space-y-6">
-      {/* Header */}
-      <div>
-        <h1 className="font-display text-2xl font-bold text-navy">Documents</h1>
-        <p className="mt-1 text-sm text-gray">View and download applicant documents, agreements, and forms</p>
-      </div>
+    <div className="p-6">
+      <h1 className="text-2xl font-bold mb-6">Compliance Dashboard</h1>
 
-      {error && <Alert variant="error" dismissible onDismiss={() => setError(null)}>{error}</Alert>}
-
-      <div className="grid grid-cols-1 lg:grid-cols-3 gap-6">
-        {/* Left: Applicant List */}
-        <div className="lg:col-span-1">
-          <div className="bg-white rounded-xl border border-border overflow-hidden">
-            <div className="p-4 border-b border-border">
-              <input
-                type="text"
-                placeholder="Search applicants..."
-                value={search}
-                onChange={(e) => setSearch(e.target.value)}
-                className="w-full rounded-lg border border-border px-3 py-2 text-sm focus:border-maroon focus:outline-none focus:ring-2 focus:ring-maroon/20"
-              />
-            </div>
-            <div className="max-h-[600px] overflow-y-auto">
-              {filteredApplicants.length === 0 ? (
-                <div className="p-6 text-center text-gray text-sm">
-                  No applicants with documents
-                </div>
-              ) : (
-                filteredApplicants.map((applicant) => (
-                  <button
-                    key={applicant.id}
-                    onClick={() => loadDocuments(applicant)}
-                    className={`w-full px-4 py-3 text-left border-b border-border last:border-0 hover:bg-gray-50 transition-colors ${
-                      selectedApplicant?.id === applicant.id ? 'bg-maroon/5 border-l-2 border-l-maroon' : ''
-                    }`}
-                  >
-                    <div className="flex items-center justify-between">
-                      <div>
-                        <p className="text-sm font-semibold text-navy">
-                          {applicant.first_name} {applicant.last_name}
-                        </p>
-                        <p className="text-xs text-gray">{applicant.email}</p>
-                      </div>
-                      {getStatusBadge(applicant.status)}
-                    </div>
-                  </button>
-                ))
-              )}
-            </div>
+      {/* Stats Cards */}
+      {report && (
+        <div className="grid grid-cols-2 md:grid-cols-4 gap-4 mb-6">
+          <div className="bg-white rounded-lg shadow p-4">
+            <div className="text-sm text-gray-500">Compliance Rate</div>
+            <div className="text-2xl font-bold text-green-600">{report.compliance_rate}%</div>
+          </div>
+          <div className="bg-white rounded-lg shadow p-4">
+            <div className="text-sm text-gray-500">Fully Compliant</div>
+            <div className="text-2xl font-bold">{report.fully_compliant}</div>
+          </div>
+          <div className="bg-white rounded-lg shadow p-4">
+            <div className="text-sm text-gray-500">Expiring (30 days)</div>
+            <div className="text-2xl font-bold text-yellow-600">{report.expiring_within_30_days}</div>
+          </div>
+          <div className="bg-white rounded-lg shadow p-4">
+            <div className="text-sm text-gray-500">Expired</div>
+            <div className="text-2xl font-bold text-red-600">{report.expired_documents}</div>
           </div>
         </div>
+      )}
 
-        {/* Right: Document Details */}
-        <div className="lg:col-span-2">
-          {!selectedApplicant ? (
-            <div className="bg-white rounded-xl border border-border p-12 text-center">
-              <svg className="mx-auto h-12 w-12 text-gray-300" fill="none" viewBox="0 0 24 24" stroke="currentColor">
-                <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={1.5} d="M9 12h6m-6 4h6m2 5H7a2 2 0 01-2-2V5a2 2 0 012-2h5.586a1 1 0 01.707.293l5.414 5.414a1 1 0 01.293.707V19a2 2 0 01-2 2z" />
-              </svg>
-              <p className="mt-4 text-gray">Select an applicant to view their documents</p>
-            </div>
-          ) : loadingDocs ? (
-            <div className="bg-white rounded-xl border border-border p-12 flex items-center justify-center">
-              <svg className="h-8 w-8 animate-spin text-maroon" fill="none" viewBox="0 0 24 24">
-                <circle className="opacity-25" cx="12" cy="12" r="10" stroke="currentColor" strokeWidth="4" />
-                <path className="opacity-75" fill="currentColor" d="M4 12a8 8 0 018-8V0C5.373 0 0 5.373 0 12h4z" />
-              </svg>
-            </div>
-          ) : documentsSummary ? (
-            <div className="space-y-6">
-              {/* Header */}
-              <div className="bg-white rounded-xl border border-border p-5">
-                <div className="flex items-center justify-between">
-                  <div>
-                    <h2 className="text-lg font-semibold text-navy">{documentsSummary.applicant_name}</h2>
-                    <p className="text-sm text-gray">Application #{documentsSummary.application_id.slice(0, 8)}</p>
-                  </div>
-                  {getStatusBadge(documentsSummary.status)}
-                </div>
-              </div>
-
-              {/* Generated PDFs */}
-              <div className="bg-white rounded-xl border border-border overflow-hidden">
-                <div className="px-5 py-4 border-b border-border bg-gray-50">
-                  <h3 className="text-sm font-semibold text-navy">Generated Documents</h3>
-                  <p className="text-xs text-gray mt-0.5">Printable application and forms</p>
-                </div>
-                <div className="divide-y divide-border">
-                  {documentsSummary.documents.generated.map((doc) => (
-                    <div key={doc.type} className="px-5 py-4 flex items-center justify-between">
-                      <div className="flex items-center gap-3">
-                        <div className="w-10 h-10 rounded-lg bg-maroon/10 flex items-center justify-center">
-                          <svg className="w-5 h-5 text-maroon" fill="none" viewBox="0 0 24 24" stroke="currentColor">
-                            <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={1.5} d="M7 21h10a2 2 0 002-2V9.414a1 1 0 00-.293-.707l-5.414-5.414A1 1 0 0012.586 3H7a2 2 0 00-2 2v14a2 2 0 002 2z" />
-                          </svg>
-                        </div>
-                        <div>
-                          <p className="text-sm font-medium text-navy">{doc.name}</p>
-                          <p className="text-xs text-gray">PDF</p>
-                        </div>
-                      </div>
-                      <button
-                        onClick={() => downloadPdf(doc.endpoint!, `${documentsSummary.applicant_name.replace(/\s+/g, '_')}_${doc.type}.pdf`)}
-                        disabled={downloading === doc.endpoint}
-                        className="flex items-center gap-2 px-3 py-1.5 text-sm font-medium text-maroon bg-maroon/10 rounded-lg hover:bg-maroon/20 transition-colors disabled:opacity-50"
-                      >
-                        {downloading === doc.endpoint ? (
-                          <>
-                            <svg className="w-4 h-4 animate-spin" fill="none" viewBox="0 0 24 24">
-                              <circle className="opacity-25" cx="12" cy="12" r="10" stroke="currentColor" strokeWidth="4" />
-                              <path className="opacity-75" fill="currentColor" d="M4 12a8 8 0 018-8V0C5.373 0 0 5.373 0 12h4z" />
-                            </svg>
-                            Downloading...
-                          </>
-                        ) : (
-                          <>
-                            <svg className="w-4 h-4" fill="none" viewBox="0 0 24 24" stroke="currentColor">
-                              <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M4 16v1a3 3 0 003 3h10a3 3 0 003-3v-1m-4-4l-4 4m0 0l-4-4m4 4V4" />
-                            </svg>
-                            Download
-                          </>
-                        )}
-                      </button>
-                    </div>
-                  ))}
-                </div>
-              </div>
-
-              {/* Signed Agreements */}
-              {documentsSummary.documents.agreements.length > 0 && (
-                <div className="bg-white rounded-xl border border-border overflow-hidden">
-                  <div className="px-5 py-4 border-b border-border bg-gray-50">
-                    <h3 className="text-sm font-semibold text-navy">Signed Agreements</h3>
-                    <p className="text-xs text-gray mt-0.5">Consent forms and acknowledgments</p>
-                  </div>
-                  <div className="divide-y divide-border">
-                    {documentsSummary.documents.agreements.map((doc) => (
-                      <div key={doc.type} className="px-5 py-4 flex items-center justify-between">
-                        <div className="flex items-center gap-3">
-                          <div className="w-10 h-10 rounded-lg bg-success/10 flex items-center justify-center">
-                            <svg className="w-5 h-5 text-success" fill="none" viewBox="0 0 24 24" stroke="currentColor">
-                              <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={1.5} d="M9 12l2 2 4-4m6 2a9 9 0 11-18 0 9 9 0 0118 0z" />
-                            </svg>
-                          </div>
-                          <div>
-                            <p className="text-sm font-medium text-navy">{doc.name}</p>
-                            <p className="text-xs text-gray">
-                              {doc.signed ? `Signed ${formatDate(doc.signed_date)}` : 'Pending'}
-                            </p>
-                          </div>
-                        </div>
-                        <button
-                          onClick={() => downloadPdf(doc.endpoint!, `${documentsSummary.applicant_name.replace(/\s+/g, '_')}_${doc.type}.pdf`)}
-                          disabled={downloading === doc.endpoint}
-                          className="flex items-center gap-2 px-3 py-1.5 text-sm font-medium text-maroon bg-maroon/10 rounded-lg hover:bg-maroon/20 transition-colors disabled:opacity-50"
-                        >
-                          {downloading === doc.endpoint ? (
-                            <svg className="w-4 h-4 animate-spin" fill="none" viewBox="0 0 24 24">
-                              <circle className="opacity-25" cx="12" cy="12" r="10" stroke="currentColor" strokeWidth="4" />
-                              <path className="opacity-75" fill="currentColor" d="M4 12a8 8 0 018-8V0C5.373 0 0 5.373 0 12h4z" />
-                            </svg>
-                          ) : (
-                            <svg className="w-4 h-4" fill="none" viewBox="0 0 24 24" stroke="currentColor">
-                              <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M4 16v1a3 3 0 003 3h10a3 3 0 003-3v-1m-4-4l-4 4m0 0l-4-4m4 4V4" />
-                            </svg>
-                          )}
-                          Download
-                        </button>
-                      </div>
-                    ))}
-                  </div>
-                </div>
+      {/* Tabs */}
+      <div className="border-b border-gray-200 mb-4">
+        <nav className="-mb-px flex space-x-8">
+          {(['overview', 'expiring', 'missing'] as const).map(tab => (
+            <button
+              key={tab}
+              onClick={() => setActiveTab(tab)}
+              className={`py-2 px-1 border-b-2 font-medium text-sm ${
+                activeTab === tab
+                  ? 'border-teal-500 text-teal-600'
+                  : 'border-transparent text-gray-500 hover:text-gray-700'
+              }`}
+            >
+              {tab.charAt(0).toUpperCase() + tab.slice(1)}
+              {tab === 'expiring' && expiring.length > 0 && (
+                <span className="ml-2 bg-yellow-100 text-yellow-800 px-2 py-0.5 rounded-full text-xs">
+                  {expiring.length}
+                </span>
               )}
-
-              {/* Uploaded Documents */}
-              {documentsSummary.documents.uploaded.length > 0 && (
-                <div className="bg-white rounded-xl border border-border overflow-hidden">
-                  <div className="px-5 py-4 border-b border-border bg-gray-50">
-                    <h3 className="text-sm font-semibold text-navy">Uploaded Documents</h3>
-                    <p className="text-xs text-gray mt-0.5">ID, credentials, and certifications</p>
-                  </div>
-                  <div className="divide-y divide-border">
-                    {documentsSummary.documents.uploaded.map((doc) => (
-                      <div key={doc.type} className="px-5 py-4 flex items-center justify-between">
-                        <div className="flex items-center gap-3">
-                          <div className="w-10 h-10 rounded-lg bg-info/10 flex items-center justify-center">
-                            <svg className="w-5 h-5 text-info" fill="none" viewBox="0 0 24 24" stroke="currentColor">
-                              <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={1.5} d="M4 16l4.586-4.586a2 2 0 012.828 0L16 16m-2-2l1.586-1.586a2 2 0 012.828 0L20 14m-6-6h.01M6 20h12a2 2 0 002-2V6a2 2 0 00-2-2H6a2 2 0 00-2 2v12a2 2 0 002 2z" />
-                            </svg>
-                          </div>
-                          <div>
-                            <p className="text-sm font-medium text-navy">{doc.name}</p>
-                            <p className="text-xs text-gray">
-                              {doc.filename || 'Uploaded'} • {formatDate(doc.uploaded_at)}
-                            </p>
-                          </div>
-                        </div>
-                        <button
-                          onClick={() => viewUploadedDoc(doc.endpoint!)}
-                          className="flex items-center gap-2 px-3 py-1.5 text-sm font-medium text-info bg-info/10 rounded-lg hover:bg-info/20 transition-colors"
-                        >
-                          <svg className="w-4 h-4" fill="none" viewBox="0 0 24 24" stroke="currentColor">
-                            <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M15 12a3 3 0 11-6 0 3 3 0 016 0z" />
-                            <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M2.458 12C3.732 7.943 7.523 5 12 5c4.478 0 8.268 2.943 9.542 7-1.274 4.057-5.064 7-9.542 7-4.477 0-8.268-2.943-9.542-7z" />
-                          </svg>
-                          View
-                        </button>
-                      </div>
-                    ))}
-                  </div>
-                </div>
+              {tab === 'missing' && missing.length > 0 && (
+                <span className="ml-2 bg-red-100 text-red-800 px-2 py-0.5 rounded-full text-xs">
+                  {missing.length}
+                </span>
               )}
+            </button>
+          ))}
+        </nav>
+      </div>
 
-              {/* Empty State */}
-              {documentsSummary.documents.agreements.length === 0 && 
-               documentsSummary.documents.uploaded.length === 0 && (
-                <div className="bg-white rounded-xl border border-border p-8 text-center">
-                  <p className="text-gray text-sm">No additional documents uploaded yet</p>
-                </div>
-              )}
+      {/* Tab Content */}
+      {activeTab === 'overview' && report && (
+        <div className="bg-white rounded-lg shadow p-6">
+          <h2 className="text-lg font-semibold mb-4">Compliance Overview</h2>
+          <dl className="grid grid-cols-2 gap-4">
+            <div>
+              <dt className="text-sm text-gray-500">Total Employees</dt>
+              <dd className="text-lg font-medium">{report.total_employees}</dd>
             </div>
-          ) : null}
+            <div>
+              <dt className="text-sm text-gray-500">Partially Compliant</dt>
+              <dd className="text-lg font-medium">{report.partially_compliant}</dd>
+            </div>
+            <div>
+              <dt className="text-sm text-gray-500">Non-Compliant</dt>
+              <dd className="text-lg font-medium text-red-600">{report.non_compliant}</dd>
+            </div>
+            <div>
+              <dt className="text-sm text-gray-500">Missing Documents</dt>
+              <dd className="text-lg font-medium">{report.missing_documents}</dd>
+            </div>
+          </dl>
         </div>
-      </div>
+      )}
 
-      {/* Footer */}
-      <div className="text-center py-4">
-        <p className="text-[10px] text-gray-400">Powered by MediSVault</p>
-      </div>
+      {activeTab === 'expiring' && (
+        <div className="bg-white rounded-lg shadow overflow-hidden">
+          <table className="min-w-full divide-y divide-gray-200">
+            <thead className="bg-gray-50">
+              <tr>
+                <th className="px-6 py-3 text-left text-xs font-medium text-gray-500 uppercase">Employee</th>
+                <th className="px-6 py-3 text-left text-xs font-medium text-gray-500 uppercase">Document</th>
+                <th className="px-6 py-3 text-left text-xs font-medium text-gray-500 uppercase">Expires</th>
+                <th className="px-6 py-3 text-left text-xs font-medium text-gray-500 uppercase">Days Left</th>
+              </tr>
+            </thead>
+            <tbody className="bg-white divide-y divide-gray-200">
+              {expiring.length === 0 ? (
+                <tr>
+                  <td colSpan={4} className="px-6 py-4 text-center text-gray-500">
+                    No documents expiring in the next 30 days
+                  </td>
+                </tr>
+              ) : (
+                expiring.map(doc => (
+                  <tr key={doc.id}>
+                    <td className="px-6 py-4 whitespace-nowrap">
+                      <div className="font-medium">{doc.employee_name}</div>
+                      <div className="text-sm text-gray-500">{doc.email}</div>
+                    </td>
+                    <td className="px-6 py-4 whitespace-nowrap">{doc.document_type}</td>
+                    <td className="px-6 py-4 whitespace-nowrap">{doc.expiration_date}</td>
+                    <td className="px-6 py-4 whitespace-nowrap">
+                      <span className={`px-2 py-1 rounded-full text-xs ${
+                        doc.days_until_expiry <= 7 ? 'bg-red-100 text-red-800' :
+                        doc.days_until_expiry <= 14 ? 'bg-yellow-100 text-yellow-800' :
+                        'bg-gray-100 text-gray-800'
+                      }`}>
+                        {doc.days_until_expiry} days
+                      </span>
+                    </td>
+                  </tr>
+                ))
+              )}
+            </tbody>
+          </table>
+        </div>
+      )}
+
+      {activeTab === 'missing' && (
+        <div className="bg-white rounded-lg shadow overflow-hidden">
+          <table className="min-w-full divide-y divide-gray-200">
+            <thead className="bg-gray-50">
+              <tr>
+                <th className="px-6 py-3 text-left text-xs font-medium text-gray-500 uppercase">Employee</th>
+                <th className="px-6 py-3 text-left text-xs font-medium text-gray-500 uppercase">Missing Documents</th>
+                <th className="px-6 py-3 text-left text-xs font-medium text-gray-500 uppercase">Count</th>
+              </tr>
+            </thead>
+            <tbody className="bg-white divide-y divide-gray-200">
+              {missing.length === 0 ? (
+                <tr>
+                  <td colSpan={3} className="px-6 py-4 text-center text-gray-500">
+                    All employees have required documents
+                  </td>
+                </tr>
+              ) : (
+                missing.map(emp => (
+                  <tr key={emp.employee_id}>
+                    <td className="px-6 py-4 whitespace-nowrap">
+                      <div className="font-medium">{emp.employee_name}</div>
+                      <div className="text-sm text-gray-500">{emp.email}</div>
+                    </td>
+                    <td className="px-6 py-4">
+                      <div className="flex flex-wrap gap-1">
+                        {emp.missing_documents.map(doc => (
+                          <span key={doc} className="px-2 py-1 bg-red-100 text-red-800 rounded text-xs">
+                            {doc}
+                          </span>
+                        ))}
+                      </div>
+                    </td>
+                    <td className="px-6 py-4 whitespace-nowrap">
+                      <span className="px-2 py-1 bg-red-100 text-red-800 rounded-full text-xs">
+                        {emp.missing_count}
+                      </span>
+                    </td>
+                  </tr>
+                ))
+              )}
+            </tbody>
+          </table>
+        </div>
+      )}
     </div>
   );
 }
