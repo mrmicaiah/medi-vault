@@ -49,14 +49,23 @@ class ApplicationService:
                 detail="User already has an active application",
             )
 
-        # If no agency_id provided, try to get from user metadata
+        # If no agency_id provided, try to get from profiles table
         if not agency_id:
-            user_result = self.supabase.auth.admin.get_user_by_id(user_id)
-            if user_result and user_result.user:
-                user_meta = user_result.user.user_metadata or {}
-                agency_id = user_meta.get("agency_id")
-                if not location_id:
-                    location_id = user_meta.get("location_id")
+            try:
+                profile_result = (
+                    self.supabase.table("profiles")
+                    .select("agency_id, location_id")
+                    .eq("id", user_id)
+                    .single()
+                    .execute()
+                )
+                if profile_result.data:
+                    agency_id = profile_result.data.get("agency_id")
+                    if not location_id:
+                        location_id = profile_result.data.get("location_id")
+            except Exception:
+                # Profile might not have these columns yet, that's OK
+                pass
 
         now = datetime.now(timezone.utc).isoformat()
 
