@@ -118,7 +118,7 @@ async def get_dashboard_stats(
         except:
             pass
         
-        recent_res = supabase.table("applications").select("id, status, updated_at, profiles(first_name, last_name)").order("updated_at", desc=True).limit(5).execute()
+        recent_res = supabase.table("applications").select("id, status, updated_at, profiles!applications_user_id_fkey(first_name, last_name)").order("updated_at", desc=True).limit(5).execute()
         for app in (recent_res.data or []):
             profile = app.get("profiles") or {}
             stats["recent_activity"].append({
@@ -141,7 +141,7 @@ async def get_pipeline(
 ):
     try:
         res = supabase.table("applications").select(
-            "id, user_id, status, created_at, submitted_at, updated_at, current_step, completed_steps, location_id, profiles(first_name, last_name, email), locations(name)"
+            "id, user_id, status, created_at, submitted_at, updated_at, current_step, completed_steps, location_id, profiles!applications_user_id_fkey(first_name, last_name, email), locations(name)"
         ).order("created_at", desc=True).execute()
         
         applications = []
@@ -175,7 +175,7 @@ async def get_applicant_detail(
 ):
     try:
         app_res = supabase.table("applications").select(
-            "*, profiles(first_name, last_name, email, phone), locations(name)"
+            "*, profiles!applications_user_id_fkey(first_name, last_name, email, phone), locations(name)"
         ).eq("id", application_id).single().execute()
         
         if not app_res.data:
@@ -857,7 +857,7 @@ async def get_applicant_documents_summary(
 ):
     """Get all documents for an applicant including agreements, uploaded docs, and generated PDFs."""
     try:
-        app_res = supabase.table("applications").select("*, user_id, profiles(first_name, last_name)").eq("id", application_id).single().execute()
+        app_res = supabase.table("applications").select("*, user_id, profiles!applications_user_id_fkey(first_name, last_name)").eq("id", application_id).single().execute()
         if not app_res.data:
             raise HTTPException(status_code=404, detail="Application not found")
         
