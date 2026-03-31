@@ -17,8 +17,8 @@ class Settings(BaseSettings):
 
     # Supabase
     supabase_url: str = "https://your-project.supabase.co"
-    supabase_key: str = "your-service-role-key"
-    supabase_anon_key: str = "your-anon-key"
+    supabase_key: str = "your-anon-key"  # Public anon key
+    supabase_service_key: str = "your-service-role-key"  # Service role key for admin ops
 
     # CORS
     cors_origins: str = "http://localhost:3000,http://localhost:5173"

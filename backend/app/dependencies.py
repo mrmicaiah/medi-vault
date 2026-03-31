@@ -11,15 +11,15 @@ logger = logging.getLogger(__name__)
 
 
 def get_supabase() -> Client:
-    """Create and return a Supabase client using service-role key."""
+    """Create and return a Supabase client using service-role key for admin operations."""
     settings: Settings = get_settings()
-    return create_client(settings.supabase_url, settings.supabase_key)
+    return create_client(settings.supabase_url, settings.supabase_service_key)
 
 
 def get_anon_supabase() -> Client:
-    """Create and return a Supabase client using anon key (for auth ops)."""
+    """Create and return a Supabase client using anon key (for public/auth ops)."""
     settings: Settings = get_settings()
-    return create_client(settings.supabase_url, settings.supabase_anon_key)
+    return create_client(settings.supabase_url, settings.supabase_key)
 
 
 async def get_current_user(
