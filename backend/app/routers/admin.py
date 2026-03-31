@@ -141,7 +141,7 @@ async def get_pipeline(
 ):
     try:
         res = supabase.table("applications").select(
-            "id, user_id, status, created_at, submitted_at, updated_at, current_step, completed_steps, location_id, profiles!applications_user_id_fkey(first_name, last_name, email), locations(name)"
+            "id, user_id, status, created_at, submitted_at, updated_at, current_step, location_id, profiles!applications_user_id_fkey(first_name, last_name, email), locations(name)"
         ).order("created_at", desc=True).execute()
         
         applications = []
