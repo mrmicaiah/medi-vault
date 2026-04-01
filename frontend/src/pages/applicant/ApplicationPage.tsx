@@ -1,5 +1,5 @@
 import React, { useEffect } from 'react';
-import { useNavigate } from 'react-router-dom';
+import { useNavigate, useSearchParams } from 'react-router-dom';
 import { WizardShell } from '../../components/application/WizardShell';
 import { ReadOnlyApplication } from '../../components/application/ReadOnlyApplication';
 import { useApplication } from '../../hooks/useApplication';
@@ -7,6 +7,7 @@ import { Alert } from '../../components/ui/Alert';
 
 export function ApplicationPage() {
   const navigate = useNavigate();
+  const [searchParams] = useSearchParams();
   const {
     currentStep,
     completedCount,
@@ -22,6 +23,7 @@ export function ApplicationPage() {
     submitApplication,
     nextStep,
     prevStep,
+    goToStep,
     getStepData,
     markDirty,
     setPendingFile,
@@ -31,6 +33,17 @@ export function ApplicationPage() {
   useEffect(() => {
     loadApplication();
   }, [loadApplication]);
+
+  // Handle step query parameter after application loads
+  useEffect(() => {
+    const stepParam = searchParams.get('step');
+    if (stepParam && !loading) {
+      const stepNumber = parseInt(stepParam, 10);
+      if (stepNumber >= 1 && stepNumber <= 22) {
+        goToStep(stepNumber);
+      }
+    }
+  }, [searchParams, loading, goToStep]);
 
   const handleSave = (data: Record<string, unknown>, completed?: boolean) => {
     // For regular saves (form field changes), just update local state

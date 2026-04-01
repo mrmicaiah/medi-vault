@@ -146,6 +146,17 @@ export function ApplicantDashboardPage() {
   const currentStep = application?.current_step || 1;
   const hasApplication = application !== null;
 
+  // Find the first incomplete step
+  const getFirstIncompleteStep = (): number => {
+    for (let i = 1; i <= 22; i++) {
+      const step = steps.find(s => s.step_number === i);
+      if (!step || step.status !== 'completed') {
+        return i;
+      }
+    }
+    return 22; // All completed, go to last step
+  };
+
   // Count required docs that are missing
   const requiredMissing = documents.filter(d => d.required && d.status === 'needed');
   const expiredDocs = documents.filter(d => d.status === 'expired');
@@ -183,8 +194,10 @@ export function ApplicantDashboardPage() {
     }
     
     if (isInProgress) {
+      // Navigate to the first incomplete step
+      const firstIncomplete = getFirstIncompleteStep();
       return (
-        <Link to="/applicant/application">
+        <Link to={`/applicant/application?step=${firstIncomplete}`}>
           <Button>Continue Application</Button>
         </Link>
       );
@@ -411,7 +424,7 @@ export function ApplicantDashboardPage() {
                 </div>
               </div>
             );
-          })}
+          })})
         </div>
         <p className="mt-4 text-xs text-gray">
           <span className="text-maroon">*</span> All documents are required and must be uploaded before you can be hired.
