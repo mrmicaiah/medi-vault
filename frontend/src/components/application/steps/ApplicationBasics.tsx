@@ -24,10 +24,9 @@ export function ApplicationBasics({ data, onSave }: StepProps) {
     citizenship_status: (data.citizenship_status as string) || '',
     eligible_to_work: (data.eligible_to_work as string) || '',
     
-    // Languages
-    primary_language: (data.primary_language as string) || '',
-    no_other_languages: (data.no_other_languages as boolean) || false,
-    other_languages: (data.other_languages as string[]) || [],
+    // Languages - English is always primary
+    speaks_other_languages: (data.speaks_other_languages as string) || '',
+    other_languages: (data.other_languages as string) || '',
     
     // How heard & Previous Employment
     how_heard: (data.how_heard as string) || '',
@@ -39,28 +38,13 @@ export function ApplicationBasics({ data, onSave }: StepProps) {
   const handleChange = (field: string, value: unknown) => {
     const updated = { ...form, [field]: value };
     
-    // If checking "no other languages", clear the languages array
-    if (field === 'no_other_languages' && value === true) {
-      updated.other_languages = [];
+    // If they say "no" to other languages, clear the text field
+    if (field === 'speaks_other_languages' && value === 'no') {
+      updated.other_languages = '';
     }
     
     setForm(updated);
     onSave(updated);
-  };
-
-  const languageOptions = ['Spanish', 'French', 'Mandarin', 'Cantonese', 'Vietnamese', 'Korean', 'Tagalog', 'Arabic', 'Hindi', 'Urdu', 'Farsi', 'Amharic', 'Swahili', 'Portuguese', 'Russian', 'Other'];
-
-  const toggleLanguage = (lang: string) => {
-    // If selecting a language, uncheck "no other languages"
-    if (form.no_other_languages) {
-      handleChange('no_other_languages', false);
-    }
-    
-    const current = form.other_languages;
-    const updated = current.includes(lang)
-      ? current.filter((l) => l !== lang)
-      : [...current, lang];
-    handleChange('other_languages', updated);
   };
 
   return (
@@ -244,49 +228,43 @@ export function ApplicationBasics({ data, onSave }: StepProps) {
       <div className="space-y-4">
         <h3 className="text-sm font-semibold text-navy border-b border-border pb-2">Languages</h3>
         
-        <Input
-          label="Primary Language"
-          required
-          value={form.primary_language}
-          onChange={(e) => handleChange('primary_language', e.target.value)}
-          placeholder="e.g., English"
-        />
+        <div className="rounded-lg bg-slate-50 border border-border p-3">
+          <div className="flex items-center gap-2">
+            <div className="flex h-6 w-6 items-center justify-center rounded-full bg-maroon text-white text-xs font-medium">✓</div>
+            <span className="text-sm font-medium text-slate">English</span>
+            <span className="text-xs text-gray">(Primary Language)</span>
+          </div>
+        </div>
 
         <div>
           <label className="block text-sm font-medium text-slate mb-2">
-            Do you speak any other languages?
+            Do you speak any other languages? <span className="text-error">*</span>
           </label>
-          
-          {/* None checkbox */}
-          <label className="flex items-center gap-2 cursor-pointer mb-3">
-            <input
-              type="checkbox"
-              checked={form.no_other_languages}
-              onChange={(e) => handleChange('no_other_languages', e.target.checked)}
-              className="h-4 w-4 rounded border-gray-300 text-maroon focus:ring-maroon"
-            />
-            <span className="text-sm text-slate">No, I only speak my primary language</span>
-          </label>
-          
-          {/* Language options - disabled if "no other languages" is checked */}
-          <div className={`flex flex-wrap gap-2 ${form.no_other_languages ? 'opacity-50 pointer-events-none' : ''}`}>
-            {languageOptions.map((lang) => (
-              <button
-                key={lang}
-                type="button"
-                onClick={() => toggleLanguage(lang)}
-                disabled={form.no_other_languages}
-                className={`rounded-lg border px-3 py-1.5 text-sm font-medium transition-colors ${
-                  form.other_languages.includes(lang)
-                    ? 'border-maroon bg-maroon-subtle text-maroon'
-                    : 'border-border text-gray hover:border-gray-light'
-                }`}
-              >
-                {lang}
-              </button>
+          <div className="flex gap-4">
+            {['yes', 'no'].map((val) => (
+              <label key={val} className="flex items-center gap-2 cursor-pointer">
+                <input
+                  type="radio"
+                  name="speaks_other_languages"
+                  value={val}
+                  checked={form.speaks_other_languages === val}
+                  onChange={(e) => handleChange('speaks_other_languages', e.target.value)}
+                  className="h-4 w-4 text-maroon focus:ring-maroon"
+                />
+                <span className="text-sm text-slate">{val === 'yes' ? 'Yes' : 'No'}</span>
+              </label>
             ))}
           </div>
         </div>
+
+        {form.speaks_other_languages === 'yes' && (
+          <Input
+            label="What other languages do you speak?"
+            value={form.other_languages}
+            onChange={(e) => handleChange('other_languages', e.target.value)}
+            placeholder="e.g., Spanish, French, Tagalog"
+          />
+        )}
       </div>
 
       {/* How Did You Hear About Us */}
