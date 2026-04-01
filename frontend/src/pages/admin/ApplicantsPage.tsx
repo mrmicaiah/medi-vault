@@ -263,10 +263,10 @@ export function ApplicantsPage() {
         zip: step2.zip as string,
         date_of_birth: step2.date_of_birth as string,
         
-        // Step 3: Emergency Contact
-        emergency_name: step3.name as string,
-        emergency_relationship: step3.relationship as string,
-        emergency_phone: step3.phone as string,
+        // Step 3: Emergency Contact (uses ec_ prefix from EmergencyContact.tsx)
+        emergency_name: [step3.ec_first_name, step3.ec_last_name].filter(Boolean).join(' ') as string,
+        emergency_relationship: step3.ec_relationship as string,
+        emergency_phone: step3.ec_phone as string,
         
         // Step 8: Work Preferences
         available_days: step8.available_days as string[],
