@@ -1,18 +1,18 @@
 """PDF generation service - lazily imports WeasyPrint to avoid startup failures."""
 
+import io
 import os
 import logging
 from pathlib import Path
 from datetime import datetime
 from typing import Optional, Dict, Any
 
-from jinja2 import Environment, FileSystemLoader
-
 logger = logging.getLogger(__name__)
 
 # Lazy imports for WeasyPrint - only load when actually generating PDFs
 _weasyprint_html = None
 _weasyprint_css = None
+_jinja_env = None
 
 def _get_weasyprint():
     """Lazy load WeasyPrint to avoid import errors on systems without GTK."""
@@ -31,14 +31,22 @@ def _get_weasyprint():
     return _weasyprint_html, _weasyprint_css
 
 
-# Template directory
-TEMPLATE_DIR = Path(__file__).parent.parent / "templates"
+def _get_jinja_env():
+    """Lazy load Jinja2 environment."""
+    global _jinja_env
+    if _jinja_env is None:
+        from jinja2 import Environment, FileSystemLoader
+        template_dir = Path(__file__).parent.parent / "templates"
+        _jinja_env = Environment(
+            loader=FileSystemLoader(template_dir),
+            autoescape=True,
+        )
+    return _jinja_env
 
-# Initialize Jinja2 environment
-env = Environment(
-    loader=FileSystemLoader(TEMPLATE_DIR),
-    autoescape=True,
-)
+
+# Template and asset directories
+TEMPLATE_DIR = Path(__file__).parent.parent / "templates"
+ASSETS_DIR = Path(__file__).parent.parent / "assets"
 
 
 class PDFService:
@@ -46,10 +54,12 @@ class PDFService:
 
     def __init__(self):
         self.template_dir = TEMPLATE_DIR
+        self.assets_dir = ASSETS_DIR
         self.css_path = TEMPLATE_DIR / "application_styles.css"
 
     def _render_template(self, template_name: str, context: Dict[str, Any]) -> str:
         """Render a Jinja2 template with the given context."""
+        env = _get_jinja_env()
         template = env.get_template(template_name)
         return template.render(**context)
 
@@ -70,21 +80,79 @@ class PDFService:
 
     def generate_employment_application(
         self,
-        applicant_data: Dict[str, Any],
-        steps_data: Dict[int, Dict[str, Any]],
+        application_data: Dict[str, Any],
     ) -> bytes:
-        """Generate the employment application PDF."""
-        # Build context from application steps
+        """
+        Generate the employment application PDF.
+        
+        application_data should contain:
+        - id: application ID
+        - status: application status
+        - submitted_at: submission timestamp
+        - steps: dict of step_number -> {data: {...}, completed: bool}
+        """
+        steps = application_data.get("steps", {})
+        
+        # Extract data from various steps
+        step1_data = steps.get(1, {}).get("data", {})
+        step2_data = steps.get(2, {}).get("data", {})
+        step3_data = steps.get(3, {}).get("data", {})
+        step4_data = steps.get(4, {}).get("data", {})
+        step5_data = steps.get(5, {}).get("data", {})
+        step6_data = steps.get(6, {}).get("data", {})
+        step7_data = steps.get(7, {}).get("data", {})
+        step8_data = steps.get(8, {}).get("data", {})
+        
+        # Build context for template
         context = {
-            "applicant": applicant_data,
-            "personal_info": steps_data.get(1, {}),
-            "contact_info": steps_data.get(2, {}),
-            "position_info": steps_data.get(3, {}),
-            "education": steps_data.get(4, {}),
-            "employment_history": steps_data.get(5, {}),
-            "references": steps_data.get(6, {}),
-            "skills": steps_data.get(7, {}),
-            "availability": steps_data.get(8, {}),
+            "application_id": application_data.get("id", ""),
+            "status": application_data.get("status", ""),
+            "submitted_at": application_data.get("submitted_at", ""),
+            
+            # Personal info (step 1 or 2 depending on structure)
+            "first_name": step2_data.get("first_name", step1_data.get("first_name", "")),
+            "last_name": step2_data.get("last_name", step1_data.get("last_name", "")),
+            "middle_name": step2_data.get("middle_name", step1_data.get("middle_name", "")),
+            "date_of_birth": step2_data.get("date_of_birth", step1_data.get("date_of_birth", "")),
+            "email": step2_data.get("email", step1_data.get("email", "")),
+            "phone": step2_data.get("phone", step1_data.get("phone", "")),
+            
+            # Address info
+            "address_line1": step2_data.get("address_line1", ""),
+            "address_line2": step2_data.get("address_line2", ""),
+            "city": step2_data.get("city", ""),
+            "state": step2_data.get("state", ""),
+            "zip": step2_data.get("zip", step2_data.get("zip_code", "")),
+            
+            # Emergency contact (step 3)
+            "ec_name": step3_data.get("name", step3_data.get("ec_name", "")),
+            "ec_relationship": step3_data.get("relationship", step3_data.get("ec_relationship", "")),
+            "ec_phone": step3_data.get("phone", step3_data.get("ec_phone", "")),
+            
+            # Position/availability (step 4 or combined)
+            "position": step4_data.get("position", step3_data.get("position", "")),
+            "desired_pay": step4_data.get("desired_pay", ""),
+            "start_date": step4_data.get("start_date", ""),
+            
+            # Work history (step 5)
+            "employment_history": step5_data.get("employers", []),
+            
+            # Education (step 4 or 6)
+            "education": step4_data.get("education", step6_data.get("education", [])),
+            
+            # References (step 6 or 7)
+            "references": step6_data.get("references", step7_data.get("references", [])),
+            
+            # Skills (step 7 or 8)
+            "skills": step7_data.get("skills", step8_data.get("skills", {})),
+            
+            # Availability
+            "availability": step8_data.get("availability", step4_data.get("availability", {})),
+            
+            # Full steps data for flexibility
+            "steps": steps,
+            
+            # Generation metadata
             "generated_at": datetime.now().strftime("%B %d, %Y at %I:%M %p"),
         }
 
@@ -126,20 +194,26 @@ class PDFService:
         html = self._render_template(template_name, context)
         return self._generate_pdf(html)
 
-    def generate_i9_pdf(
+    def generate_i9_form(
         self,
-        applicant_data: Dict[str, Any],
-        steps_data: Dict[int, Dict[str, Any]],
+        application_data: Dict[str, Any],
+        ssn: Optional[str] = None,
     ) -> bytes:
-        """Generate I-9 form PDF (placeholder - would need actual I-9 form filling)."""
-        # For now, we'll use pypdf to fill the actual I-9 form
-        # This is a simplified version
-        from pypdf import PdfReader, PdfWriter
+        """
+        Generate I-9 form PDF by filling in the official template.
         
-        i9_path = Path(__file__).parent.parent / "assets" / "i-9.pdf"
+        application_data should contain:
+        - steps: dict of step_number -> {data: {...}, completed: bool}
+        """
+        try:
+            from pypdf import PdfReader, PdfWriter
+        except ImportError:
+            raise RuntimeError("pypdf is required for I-9 generation")
+        
+        i9_path = self.assets_dir / "i-9.pdf"
         
         if not i9_path.exists():
-            raise FileNotFoundError("I-9 template not found")
+            raise FileNotFoundError(f"I-9 template not found at {i9_path}")
 
         reader = PdfReader(str(i9_path))
         writer = PdfWriter()
@@ -148,27 +222,60 @@ class PDFService:
         for page in reader.pages:
             writer.add_page(page)
 
-        # Get form fields and fill them
-        personal = steps_data.get(1, {})
+        # Extract applicant info from steps
+        steps = application_data.get("steps", {})
+        step2_data = steps.get(2, {}).get("data", {})
+        step1_data = steps.get(1, {}).get("data", {})
         
-        # Build field mappings based on I-9 field names
+        # Use step 2 primarily, fall back to step 1
+        personal = {**step1_data, **step2_data}
+        
+        # Format date of birth as MM/DD/YYYY
+        dob = personal.get("date_of_birth", "")
+        if dob and "-" in dob:
+            try:
+                parts = dob.split("-")
+                if len(parts) == 3:
+                    dob = f"{parts[1]}/{parts[2]}/{parts[0]}"
+            except:
+                pass
+        
+        # Format SSN as XXX-XX-XXXX
+        ssn_formatted = ""
+        if ssn and len(ssn) == 9:
+            ssn_formatted = f"{ssn[:3]}-{ssn[3:5]}-{ssn[5:]}"
+        
+        # Build address
+        address = personal.get("address_line1", "")
+        if personal.get("address_line2"):
+            address += f" {personal.get('address_line2')}"
+        
+        # Common I-9 field names - these may need adjustment based on actual PDF field names
         field_mappings = {
+            # Section 1 fields
             "Last Name Family Name": personal.get("last_name", ""),
             "First Name Given Name": personal.get("first_name", ""),
             "Middle Initial": personal.get("middle_name", "")[:1] if personal.get("middle_name") else "",
-            "Address Street Number and Name": personal.get("address", ""),
+            "Other Last Names Used if any": "",
+            "Address Street Number and Name": address,
+            "Apt Number": personal.get("address_line2", ""),
             "City or Town": personal.get("city", ""),
             "State": personal.get("state", ""),
-            "ZIP Code": personal.get("zip_code", ""),
-            "Date of Birth mmddyyyy": personal.get("date_of_birth", ""),
+            "ZIP Code": personal.get("zip", personal.get("zip_code", "")),
+            "Date of Birth mmddyyyy": dob,
+            "US Social Security Number": ssn_formatted,
+            "Employees E-mail Address": personal.get("email", ""),
+            "Employees Telephone Number": personal.get("phone", ""),
         }
 
-        # Update form fields
-        if "/AcroForm" in reader.trailer["/Root"]:
-            writer.update_page_form_field_values(writer.pages[0], field_mappings)
+        # Try to update form fields
+        try:
+            if len(writer.pages) > 0:
+                writer.update_page_form_field_values(writer.pages[0], field_mappings)
+        except Exception as e:
+            logger.warning(f"Could not fill I-9 form fields: {e}")
 
         # Write to bytes
-        import io
         output = io.BytesIO()
         writer.write(output)
         return output.getvalue()
