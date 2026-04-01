@@ -52,8 +52,16 @@ const STEP_REQUIRED_FIELDS: Record<number, string[]> = {
   ],
   // Step 4: Education & Certifications
   4: [
+    'graduated_high_school',
     'highest_education',
-    'credential_type',
+    // 'certifications' is handled in CHECKBOX_ARRAY_REQUIREMENTS
+    'has_cpr_certification',
+    'has_drivers_license',
+    'eligible_to_work',
+    'will_travel_30_min',
+    'can_do_catheter_care',
+    'can_do_vital_signs',
+    'will_work_bed_bound',
   ],
   // Step 5: Reference 1
   5: [
@@ -100,6 +108,9 @@ const REQUIRED_FILE_STEPS = [11, 12, 13, 14];
 
 // Steps that require checkbox array to have at least one selection
 const CHECKBOX_ARRAY_REQUIREMENTS: Record<number, { field: string; minCount: number }[]> = {
+  4: [
+    { field: 'certifications', minCount: 1 },
+  ],
   8: [
     { field: 'available_days', minCount: 1 },
     { field: 'shift_preferences', minCount: 1 },
