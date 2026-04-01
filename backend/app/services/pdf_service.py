@@ -218,9 +218,15 @@ class PDFService:
         reader = PdfReader(str(i9_path))
         writer = PdfWriter()
 
-        # Copy all pages
+        # Copy all pages and clone form fields
         for page in reader.pages:
             writer.add_page(page)
+        
+        # Clone the form field definitions from the reader
+        if "/AcroForm" in reader.trailer["/Root"]:
+            writer._root_object.update({
+                "/AcroForm": reader.trailer["/Root"]["/AcroForm"]
+            })
 
         # Extract applicant info from steps
         steps = application_data.get("steps", {})
@@ -245,35 +251,58 @@ class PDFService:
         if ssn and len(ssn) == 9:
             ssn_formatted = f"{ssn[:3]}-{ssn[3:5]}-{ssn[5:]}"
         
-        # Build address
-        address = personal.get("address_line1", "")
-        if personal.get("address_line2"):
-            address += f" {personal.get('address_line2')}"
+        # Get middle initial
+        middle_name = personal.get("middle_name", "")
+        middle_initial = middle_name[0].upper() if middle_name else ""
         
-        # Common I-9 field names - these may need adjustment based on actual PDF field names
+        # I-9 form field names (exact names from the official USCIS I-9 PDF)
+        # Section 1 - Employee Information
         field_mappings = {
-            # Section 1 fields
-            "Last Name Family Name": personal.get("last_name", ""),
+            # Name fields
+            "Last Name (Family Name)": personal.get("last_name", ""),
             "First Name Given Name": personal.get("first_name", ""),
-            "Middle Initial": personal.get("middle_name", "")[:1] if personal.get("middle_name") else "",
-            "Other Last Names Used if any": "",
-            "Address Street Number and Name": address,
-            "Apt Number": personal.get("address_line2", ""),
+            "Employee Middle Initial (if any)": middle_initial,
+            "Employee Other Last Names Used (if any)": "",
+            
+            # Address fields
+            "Address Street Number and Name": personal.get("address_line1", ""),
+            "Apt Number (if any)": personal.get("address_line2", ""),
             "City or Town": personal.get("city", ""),
             "State": personal.get("state", ""),
             "ZIP Code": personal.get("zip", personal.get("zip_code", "")),
+            
+            # Personal info
             "Date of Birth mmddyyyy": dob,
             "US Social Security Number": ssn_formatted,
+            
+            # Contact
             "Employees E-mail Address": personal.get("email", ""),
-            "Employees Telephone Number": personal.get("phone", ""),
+            "Telephone Number": personal.get("phone", ""),
         }
 
-        # Try to update form fields
+        # Try to update form fields on page 1 (Section 1)
         try:
-            if len(writer.pages) > 0:
-                writer.update_page_form_field_values(writer.pages[0], field_mappings)
+            writer.update_page_form_field_values(writer.pages[0], field_mappings)
+            logger.info(f"Successfully filled I-9 form fields for applicant: {personal.get('first_name', '')} {personal.get('last_name', '')}")
         except Exception as e:
             logger.warning(f"Could not fill I-9 form fields: {e}")
+            # Try alternative method - update fields directly
+            try:
+                for page in writer.pages:
+                    if "/Annots" in page:
+                        for annot in page["/Annots"]:
+                            annot_obj = annot.get_object()
+                            if annot_obj.get("/Subtype") == "/Widget":
+                                field_name = annot_obj.get("/T")
+                                if field_name and str(field_name) in field_mappings:
+                                    value = field_mappings[str(field_name)]
+                                    if value:
+                                        annot_obj.update({
+                                            "/V": value,
+                                            "/AP": None  # Clear appearance to force regeneration
+                                        })
+            except Exception as e2:
+                logger.warning(f"Alternative field filling also failed: {e2}")
 
         # Write to bytes
         output = io.BytesIO()
