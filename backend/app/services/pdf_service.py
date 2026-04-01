@@ -218,15 +218,9 @@ class PDFService:
         reader = PdfReader(str(i9_path))
         writer = PdfWriter()
 
-        # Copy all pages and clone form fields
+        # Copy all pages
         for page in reader.pages:
             writer.add_page(page)
-        
-        # Clone the form field definitions from the reader
-        if "/AcroForm" in reader.trailer["/Root"]:
-            writer._root_object.update({
-                "/AcroForm": reader.trailer["/Root"]["/AcroForm"]
-            })
 
         # Extract applicant info from steps
         steps = application_data.get("steps", {})
@@ -283,26 +277,9 @@ class PDFService:
         # Try to update form fields on page 1 (Section 1)
         try:
             writer.update_page_form_field_values(writer.pages[0], field_mappings)
-            logger.info(f"Successfully filled I-9 form fields for applicant: {personal.get('first_name', '')} {personal.get('last_name', '')}")
+            logger.info(f"Filled I-9 form for: {personal.get('first_name', '')} {personal.get('last_name', '')}")
         except Exception as e:
             logger.warning(f"Could not fill I-9 form fields: {e}")
-            # Try alternative method - update fields directly
-            try:
-                for page in writer.pages:
-                    if "/Annots" in page:
-                        for annot in page["/Annots"]:
-                            annot_obj = annot.get_object()
-                            if annot_obj.get("/Subtype") == "/Widget":
-                                field_name = annot_obj.get("/T")
-                                if field_name and str(field_name) in field_mappings:
-                                    value = field_mappings[str(field_name)]
-                                    if value:
-                                        annot_obj.update({
-                                            "/V": value,
-                                            "/AP": None  # Clear appearance to force regeneration
-                                        })
-            except Exception as e2:
-                logger.warning(f"Alternative field filling also failed: {e2}")
 
         # Write to bytes
         output = io.BytesIO()
