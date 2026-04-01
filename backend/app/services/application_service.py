@@ -1,5 +1,6 @@
 """Application management service."""
 
+import logging
 from datetime import datetime, timezone
 from typing import Any, Dict, List, Optional
 
@@ -17,6 +18,8 @@ from app.schemas.application import (
     ApplicationStepResponse,
     StepData,
 )
+
+logger = logging.getLogger(__name__)
 
 # Steps that can be updated after submission (document uploads)
 UPDATABLE_STEPS_AFTER_SUBMISSION = [11, 12, 13, 14, 15, 16, 17]
@@ -258,11 +261,18 @@ class ApplicationService:
         if is_completed:
             update_data["completed_at"] = now
 
+        # First, update the step
+        self.supabase.table("application_steps").update(update_data).eq(
+            "application_id", app_id
+        ).eq("step_number", step_number).execute()
+
+        # Then fetch the updated step (supabase-py 2.0.x doesn't always return updated data)
         step_result = (
             self.supabase.table("application_steps")
-            .update(update_data)
+            .select("*")
             .eq("application_id", app_id)
             .eq("step_number", step_number)
+            .single()
             .execute()
         )
 
@@ -282,7 +292,7 @@ class ApplicationService:
                 }
             ).eq("id", app_id).execute()
 
-        s = step_result.data[0]
+        s = step_result.data
         return ApplicationStepResponse(
             id=s.get("id"),
             application_id=s["application_id"],
