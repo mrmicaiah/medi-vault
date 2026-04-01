@@ -1,4 +1,4 @@
-import React, { useState, useEffect } from 'react';
+import React, { useState } from 'react';
 import { FileUpload } from '../../ui/FileUpload';
 import { Input, Select } from '../../ui/Input';
 import { Alert } from '../../ui/Alert';
@@ -42,8 +42,12 @@ const CREDENTIAL_TYPES = [
 ];
 
 export function Credentials({ data, onSave, onFileSelect, pendingFile, onChange }: StepProps) {
+  // Initialize skip to false if there's already a file uploaded
+  const existingFileName = (data.file_name as string) || '';
+  const initialSkip = existingFileName ? false : ((data.skip as boolean) || false);
+  
   const [form, setForm] = useState({
-    skip: (data.skip as boolean) || false,
+    skip: initialSkip,
     credential_type: (data.credential_type as string) || '',
     other_credential_type: (data.other_credential_type as string) || '',
     credential_number: (data.credential_number as string) || '',
@@ -51,21 +55,10 @@ export function Credentials({ data, onSave, onFileSelect, pendingFile, onChange 
     expiration_date: (data.expiration_date as string) || '',
   });
 
-  const existingFileName = (data.file_name as string) || '';
   const displayFileName = pendingFile?.name || existingFileName;
   const hasUpload = !!displayFileName;
 
-  // Auto-uncheck skip if they have an upload
-  useEffect(() => {
-    if (hasUpload && form.skip) {
-      const updated = { ...form, skip: false };
-      setForm(updated);
-      onSave(updated);
-    }
-  }, [hasUpload]);
-
   const handleChange = (field: string, value: string) => {
-    // Auto-uncheck skip if they're filling out fields
     const updated = { ...form, [field]: value, skip: false };
     setForm(updated);
     onChange?.();
@@ -73,7 +66,6 @@ export function Credentials({ data, onSave, onFileSelect, pendingFile, onChange 
   };
 
   const handleFileSelect = (file: File) => {
-    // Auto-uncheck skip when they select a file
     const updated = { ...form, skip: false };
     setForm(updated);
     onChange?.();

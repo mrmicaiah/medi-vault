@@ -1,4 +1,4 @@
-import React, { useState, useEffect } from 'react';
+import React, { useState } from 'react';
 import { FileUpload } from '../../ui/FileUpload';
 import { Alert } from '../../ui/Alert';
 
@@ -12,25 +12,18 @@ interface StepProps {
 }
 
 export function IDBack({ data, onSave, onFileSelect, pendingFile, onChange }: StepProps) {
+  // Initialize skip to false if there's already a file uploaded
+  const existingFileName = (data.file_name as string) || '';
+  const initialSkip = existingFileName ? false : ((data.skip as boolean) || false);
+  
   const [form, setForm] = useState({
-    skip: (data.skip as boolean) || false,
+    skip: initialSkip,
   });
 
-  const existingFileName = (data.file_name as string) || '';
   const displayFileName = pendingFile?.name || existingFileName;
   const hasUpload = !!displayFileName;
 
-  // Auto-uncheck skip if they have an upload
-  useEffect(() => {
-    if (hasUpload && form.skip) {
-      const updated = { ...form, skip: false };
-      setForm(updated);
-      onSave(updated);
-    }
-  }, [hasUpload]);
-
   const handleFileSelect = (file: File) => {
-    // Auto-uncheck skip when they select a file
     const updated = { ...form, skip: false };
     setForm(updated);
     onChange?.();
