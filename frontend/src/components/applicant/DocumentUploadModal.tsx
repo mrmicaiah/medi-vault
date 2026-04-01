@@ -93,7 +93,6 @@ export function DocumentUploadModal({
       throw new Error('User not authenticated');
     }
 
-    // Create a unique file path: {user_id}/{step_folder}/{timestamp}_{filename}
     const folderName = STEP_FOLDER_NAMES[stepNumber] || `step-${stepNumber}`;
     const timestamp = Date.now();
     const sanitizedFileName = file.name.replace(/[^a-zA-Z0-9.-]/g, '_');
@@ -101,12 +100,11 @@ export function DocumentUploadModal({
 
     setUploadProgress('Uploading file...');
 
-    // Upload to Supabase Storage
     const { data, error: uploadError } = await supabase.storage
       .from('documents')
       .upload(filePath, file, {
         cacheControl: '3600',
-        upsert: true, // Replace if exists
+        upsert: true,
       });
 
     if (uploadError) {
@@ -114,10 +112,9 @@ export function DocumentUploadModal({
       throw new Error(`Failed to upload file: ${uploadError.message}`);
     }
 
-    // Get the URL for accessing the file (signed URL for private bucket)
     const { data: urlData } = await supabase.storage
       .from('documents')
-      .createSignedUrl(data.path, 60 * 60 * 24 * 365); // 1 year expiry
+      .createSignedUrl(data.path, 60 * 60 * 24 * 365);
 
     setUploadProgress(null);
 
@@ -125,6 +122,18 @@ export function DocumentUploadModal({
       path: data.path,
       url: urlData?.signedUrl || '',
     };
+  };
+
+  const deleteOldFile = async (storagePath: string) => {
+    try {
+      setUploadProgress('Removing old file...');
+      const { error } = await supabase.storage.from('documents').remove([storagePath]);
+      if (error) {
+        console.warn('Failed to delete old file (non-critical):', error);
+      }
+    } catch (err) {
+      console.warn('Error deleting old file:', err);
+    }
   };
 
   const handleSubmit = async () => {
@@ -137,10 +146,14 @@ export function DocumentUploadModal({
     setError(null);
 
     try {
-      // Step 1: Upload file to Supabase Storage
+      // Delete old file if exists
+      const oldStoragePath = existingData?.storage_path as string | undefined;
+      if (oldStoragePath) {
+        await deleteOldFile(oldStoragePath);
+      }
+
       const { path, url } = await uploadFileToStorage(file);
 
-      // Step 2: Save step data with file metadata
       setUploadProgress('Saving document info...');
       
       await api.post(`/applications/${applicationId}/steps`, {
@@ -236,7 +249,6 @@ export function DocumentUploadModal({
 
       case 13: // ID Back
       case 14: // SSN Card
-        // File only
         return null;
 
       case 15: // Credentials
@@ -294,24 +306,47 @@ export function DocumentUploadModal({
               value={(formData.test_type as string) || ''}
               onChange={(e) => handleFieldChange('test_type', e.target.value)}
               options={[
-                { value: 'skin', label: 'Skin Test (PPD)' },
-                { value: 'blood', label: 'Blood Test (IGRA)' },
+                { value: 'ppd', label: 'PPD Skin Test' },
+                { value: 'quantiferon', label: 'QuantiFERON-TB Gold' },
+                { value: 'tspot', label: 'T-SPOT' },
                 { value: 'xray', label: 'Chest X-Ray' },
               ]}
             />
             <Input
               label="Test Date"
               type="date"
+              required
               value={(formData.test_date as string) || ''}
-              onChange={(e) => handleFieldChange('test_date', e.target.value)}
+              onChange={(e) => {
+                const testDate = e.target.value;
+                handleFieldChange('test_date', testDate);
+                if (testDate) {
+                  const date = new Date(testDate);
+                  date.setFullYear(date.getFullYear() + 1);
+                  handleFieldChange('expiration_date', date.toISOString().split('T')[0]);
+                }
+              }}
+              helperText="TB tests are valid for 12 months"
             />
+            {formData.test_date && (
+              <div className="rounded-lg bg-gray-50 border border-border p-3">
+                <p className="text-sm text-gray">
+                  <span className="font-medium">Expires:</span>{' '}
+                  {(() => {
+                    const date = new Date(formData.test_date as string);
+                    date.setFullYear(date.getFullYear() + 1);
+                    return date.toLocaleDateString('en-US', { month: 'long', day: 'numeric', year: 'numeric' });
+                  })()}
+                </p>
+              </div>
+            )}
             <Select
               label="Result"
               value={(formData.result as string) || ''}
               onChange={(e) => handleFieldChange('result', e.target.value)}
               options={[
                 { value: 'negative', label: 'Negative' },
-                { value: 'positive', label: 'Positive (with clearance)' },
+                { value: 'positive_cleared', label: 'Positive - Cleared by physician' },
               ]}
             />
           </>
