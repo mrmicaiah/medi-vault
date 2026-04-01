@@ -76,6 +76,7 @@ export default function DocumentsPage() {
       setError(null);
       
       const headers = await getAuthHeaders();
+      // API_BASE already includes /api or the full URL, admin router is at /api/admin
       const res = await fetch(`${API_BASE}/api/admin/pipeline`, { headers });
       
       if (!res.ok) {
@@ -122,6 +123,7 @@ export default function DocumentsPage() {
       setDownloadingId(endpoint);
       const headers = await getAuthHeaders();
       
+      // endpoint already starts with /admin/..., so we add /api prefix
       const res = await fetch(`${API_BASE}/api${endpoint}`, { headers });
       
       if (!res.ok) {
@@ -149,6 +151,7 @@ export default function DocumentsPage() {
       setDownloadingId(endpoint);
       const headers = await getAuthHeaders();
       
+      // endpoint already starts with /admin/..., so we add /api prefix
       const res = await fetch(`${API_BASE}/api${endpoint}`, { headers });
       
       if (!res.ok) {
