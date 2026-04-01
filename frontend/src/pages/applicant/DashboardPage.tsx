@@ -37,6 +37,60 @@ const DOCUMENT_STEPS: Record<number, { name: string; category: string; required:
   17: { name: 'TB Test Results', category: 'Health', required: true },
 };
 
+// Document groups for display
+interface DocumentGroup {
+  id: string;
+  name: string;
+  description: string;
+  hasExpiration: boolean;
+  steps: number[];
+}
+
+const DOCUMENT_GROUPS: DocumentGroup[] = [
+  {
+    id: 'photo_id',
+    name: 'Photo ID',
+    description: 'Government-issued photo identification (front and back)',
+    hasExpiration: true,
+    steps: [12, 13], // Front and Back share expiration from Front
+  },
+  {
+    id: 'ssn',
+    name: 'Social Security Card',
+    description: 'Your Social Security card',
+    hasExpiration: false,
+    steps: [14],
+  },
+  {
+    id: 'work_auth',
+    name: 'Work Authorization',
+    description: 'Proof of eligibility to work in the US',
+    hasExpiration: true, // May or may not have expiration
+    steps: [11],
+  },
+  {
+    id: 'credentials',
+    name: 'Professional Credentials',
+    description: 'HHA, CNA, or other certifications',
+    hasExpiration: true,
+    steps: [15],
+  },
+  {
+    id: 'cpr',
+    name: 'CPR Certification',
+    description: 'Current CPR/BLS certification',
+    hasExpiration: true,
+    steps: [16],
+  },
+  {
+    id: 'tb_test',
+    name: 'TB Test Results',
+    description: 'Tuberculosis screening results (valid for 12 months)',
+    hasExpiration: true,
+    steps: [17],
+  },
+];
+
 // Agreement steps that require signatures
 const AGREEMENT_STEP_NUMBERS = [9, 10, 18, 19, 20, 21, 22];
 
@@ -110,36 +164,94 @@ export function ApplicantDashboardPage() {
   const isRejected = application?.status === 'rejected';
   const isInProgress = application?.status === 'in_progress';
 
+  // Get step data helper
+  const getStepData = (stepNum: number): Record<string, unknown> => {
+    const step = steps.find(s => s.step_number === stepNum);
+    return (step?.data || {}) as Record<string, unknown>;
+  };
+
+  // Process individual documents (still needed for counts)
   const documents: DocItem[] = Object.entries(DOCUMENT_STEPS).map(([stepNum, doc]) => {
-    const step = steps.find(s => s.step_number === parseInt(stepNum));
-    const data = step?.data || {};
+    const stepNumber = parseInt(stepNum);
+    const data = getStepData(stepNumber);
     
     let status: DocStatus;
     let expirationDate: string | undefined;
 
-    // Document is uploaded if file_name exists (regardless of skip flag or step status)
+    // Document is uploaded if file_name exists
     if (data.file_name) {
       status = 'uploaded';
-      const expDate = data.expiration_date as string | undefined;
-      if (expDate) {
-        expirationDate = expDate;
-        if (new Date(expDate) < new Date()) {
-          status = 'expired';
-        }
+      
+      // Special case: ID Back (13) inherits expiration from ID Front (12)
+      if (stepNumber === 13) {
+        const frontData = getStepData(12);
+        expirationDate = frontData.expiration_date as string | undefined;
+      } else {
+        expirationDate = data.expiration_date as string | undefined;
+      }
+      
+      if (expirationDate && new Date(expirationDate) < new Date()) {
+        status = 'expired';
       }
     } else {
-      // No file uploaded
       status = 'needed';
     }
 
     return {
-      stepNumber: parseInt(stepNum),
+      stepNumber,
       name: doc.name,
       category: doc.category,
       required: doc.required,
       status,
       expirationDate,
-      data: data as Record<string, unknown>,
+      data,
+    };
+  });
+
+  // Process document groups for display
+  interface GroupedDoc {
+    group: DocumentGroup;
+    status: DocStatus;
+    expirationDate?: string;
+    uploadedCount: number;
+    totalCount: number;
+    items: DocItem[];
+  }
+
+  const groupedDocuments: GroupedDoc[] = DOCUMENT_GROUPS.map(group => {
+    const items = group.steps.map(stepNum => 
+      documents.find(d => d.stepNumber === stepNum)!
+    ).filter(Boolean);
+
+    const uploadedCount = items.filter(d => d.status === 'uploaded' || d.status === 'expired').length;
+    const totalCount = items.length;
+    
+    // Group status: if any expired, show expired; if any needed, show needed; else uploaded
+    let status: DocStatus = 'uploaded';
+    if (items.some(d => d.status === 'expired')) {
+      status = 'expired';
+    } else if (items.some(d => d.status === 'needed')) {
+      status = 'needed';
+    }
+
+    // Get expiration from first step that has one (for Photo ID, use front)
+    let expirationDate: string | undefined;
+    if (group.hasExpiration) {
+      // For Photo ID group, use the front's expiration
+      if (group.id === 'photo_id') {
+        expirationDate = items[0]?.expirationDate;
+      } else {
+        expirationDate = items.find(d => d.expirationDate)?.expirationDate;
+      }
+    }
+
+    return {
+      group,
+      status,
+      expirationDate,
+      uploadedCount,
+      totalCount,
+      items,
     };
   });
 
@@ -352,82 +464,142 @@ export function ApplicantDashboardPage() {
       </div>
 
       <Card header="Documents">
-        <div className="space-y-1">
-          <div className="grid grid-cols-12 gap-4 border-b border-border pb-2 text-xs font-medium uppercase text-gray">
-            <span className="col-span-4">Document</span>
-            <span className="col-span-2">Category</span>
-            <span className="col-span-2">Status</span>
-            <span className="col-span-2">Expires</span>
-            <span className="col-span-2">Action</span>
-          </div>
-          {documents.map((doc) => {
-            // Yellow highlight for docs that need attention
-            const needsAttention = doc.status === 'needed' || doc.status === 'expired';
+        <div className="space-y-4">
+          {groupedDocuments.map((groupDoc) => {
+            const needsAttention = groupDoc.status === 'needed' || groupDoc.status === 'expired';
             const canUpload = !isRejected;
-            const showUploadButton = doc.status === 'needed' || doc.status === 'expired';
+            const isComplete = groupDoc.uploadedCount === groupDoc.totalCount && groupDoc.status !== 'expired';
             
             return (
               <div
-                key={doc.stepNumber}
-                className={`grid grid-cols-12 gap-4 border-b border-border py-3 last:border-0 ${
-                  needsAttention ? 'bg-warning-bg -mx-4 px-4 rounded-lg' : ''
+                key={groupDoc.group.id}
+                className={`rounded-lg border p-4 ${
+                  needsAttention 
+                    ? 'border-warning bg-warning-bg' 
+                    : 'border-border bg-white'
                 }`}
               >
-                <div className="col-span-4 flex items-center gap-2">
-                  <span className="text-sm font-medium text-slate">{doc.name}</span>
-                  <span className="text-xs text-maroon">*</span>
-                </div>
-                <span className="col-span-2 text-sm text-gray">{doc.category}</span>
-                <div className="col-span-2">
-                  <Badge variant={statusVariant[doc.status]}>
-                    {statusLabel[doc.status]}
-                  </Badge>
-                </div>
-                <span className="col-span-2 text-sm text-gray">
-                  {doc.expirationDate ? formatDate(doc.expirationDate) : '--'}
-                </span>
-                <div className="col-span-2">
-                  {canUpload && showUploadButton && (
-                    isSubmitted ? (
-                      <Button 
-                        size="sm" 
-                        variant="primary"
-                        onClick={() => handleUploadClick(doc)}
-                      >
-                        Upload
-                      </Button>
-                    ) : (
-                      <Link to={`/applicant/application?step=${doc.stepNumber}`}>
-                        <Button size="sm" variant="primary">
-                          Upload
-                        </Button>
-                      </Link>
-                    )
-                  )}
-                  {doc.status === 'uploaded' && canUpload && (
-                    isSubmitted ? (
-                      <Button 
-                        size="sm" 
-                        variant="ghost"
-                        onClick={() => handleUploadClick(doc)}
-                      >
-                        Update
-                      </Button>
-                    ) : (
-                      <Link to={`/applicant/application?step=${doc.stepNumber}`}>
-                        <Button size="sm" variant="ghost">
+                <div className="flex items-start justify-between">
+                  <div className="flex-1">
+                    <div className="flex items-center gap-2">
+                      <h4 className="font-medium text-slate">{groupDoc.group.name}</h4>
+                      <Badge variant={statusVariant[groupDoc.status]}>
+                        {groupDoc.totalCount > 1 
+                          ? `${groupDoc.uploadedCount}/${groupDoc.totalCount} ${statusLabel[groupDoc.status]}`
+                          : statusLabel[groupDoc.status]
+                        }
+                      </Badge>
+                    </div>
+                    <p className="text-xs text-gray mt-1">{groupDoc.group.description}</p>
+                    
+                    {/* Show expiration info */}
+                    {groupDoc.group.hasExpiration && groupDoc.expirationDate && (
+                      <p className={`text-xs mt-1 ${
+                        groupDoc.status === 'expired' ? 'text-error font-medium' :
+                        daysUntil(groupDoc.expirationDate) <= 30 ? 'text-warning font-medium' :
+                        'text-gray'
+                      }`}>
+                        {groupDoc.status === 'expired' 
+                          ? `Expired ${formatDate(groupDoc.expirationDate)}`
+                          : `Expires ${formatDate(groupDoc.expirationDate)}`
+                        }
+                        {daysUntil(groupDoc.expirationDate) <= 30 && daysUntil(groupDoc.expirationDate) > 0 && (
+                          <span> ({daysUntil(groupDoc.expirationDate)} days)</span>
+                        )}
+                      </p>
+                    )}
+                    {groupDoc.group.hasExpiration && !groupDoc.expirationDate && groupDoc.status === 'uploaded' && (
+                      <p className="text-xs text-gray mt-1">No expiration</p>
+                    )}
+                    {!groupDoc.group.hasExpiration && (
+                      <p className="text-xs text-gray mt-1">Does not expire</p>
+                    )}
+                    
+                    {/* Show individual items if multiple */}
+                    {groupDoc.totalCount > 1 && (
+                      <div className="mt-2 flex gap-4">
+                        {groupDoc.items.map(item => (
+                          <div key={item.stepNumber} className="flex items-center gap-1 text-xs">
+                            {item.status === 'uploaded' ? (
+                              <svg className="h-3 w-3 text-success" fill="currentColor" viewBox="0 0 20 20">
+                                <path fillRule="evenodd" d="M16.707 5.293a1 1 0 010 1.414l-8 8a1 1 0 01-1.414 0l-4-4a1 1 0 011.414-1.414L8 12.586l7.293-7.293a1 1 0 011.414 0z" clipRule="evenodd" />
+                              </svg>
+                            ) : item.status === 'expired' ? (
+                              <svg className="h-3 w-3 text-error" fill="currentColor" viewBox="0 0 20 20">
+                                <path fillRule="evenodd" d="M18 10a8 8 0 11-16 0 8 8 0 0116 0zm-7 4a1 1 0 11-2 0 1 1 0 012 0zm-1-9a1 1 0 00-1 1v4a1 1 0 102 0V6a1 1 0 00-1-1z" clipRule="evenodd" />
+                              </svg>
+                            ) : (
+                              <svg className="h-3 w-3 text-warning" fill="currentColor" viewBox="0 0 20 20">
+                                <path fillRule="evenodd" d="M10 18a8 8 0 100-16 8 8 0 000 16zm1-12a1 1 0 10-2 0v4a1 1 0 00.293.707l2.828 2.829a1 1 0 101.415-1.415L11 9.586V6z" clipRule="evenodd" />
+                              </svg>
+                            )}
+                            <span className={item.status === 'needed' ? 'text-warning' : item.status === 'expired' ? 'text-error' : 'text-gray'}>
+                              {item.name.replace('Photo ID ', '')}
+                            </span>
+                          </div>
+                        ))}
+                      </div>
+                    )}
+                  </div>
+                  
+                  {/* Action buttons */}
+                  <div className="flex gap-2 ml-4">
+                    {canUpload && groupDoc.items.map(item => {
+                      const showUpload = item.status === 'needed' || item.status === 'expired';
+                      const buttonLabel = groupDoc.totalCount > 1 
+                        ? (item.stepNumber === 12 ? 'Front' : item.stepNumber === 13 ? 'Back' : 'Upload')
+                        : (showUpload ? 'Upload' : 'Update');
+                      
+                      if (!showUpload && groupDoc.totalCount > 1 && isComplete) {
+                        return null; // Don't show update buttons for each item when complete
+                      }
+                      
+                      return (
+                        <div key={item.stepNumber}>
+                          {isSubmitted ? (
+                            <Button 
+                              size="sm" 
+                              variant={showUpload ? 'primary' : 'ghost'}
+                              onClick={() => handleUploadClick(item)}
+                            >
+                              {buttonLabel}
+                            </Button>
+                          ) : (
+                            <Link to={`/applicant/application?step=${item.stepNumber}`}>
+                              <Button size="sm" variant={showUpload ? 'primary' : 'ghost'}>
+                                {buttonLabel}
+                              </Button>
+                            </Link>
+                          )}
+                        </div>
+                      );
+                    })}
+                    {/* Show single update button for complete groups */}
+                    {canUpload && isComplete && groupDoc.totalCount > 1 && (
+                      isSubmitted ? (
+                        <Button 
+                          size="sm" 
+                          variant="ghost"
+                          onClick={() => handleUploadClick(groupDoc.items[0])}
+                        >
                           Update
                         </Button>
-                      </Link>
-                    )
-                  )}
+                      ) : (
+                        <Link to={`/applicant/application?step=${groupDoc.items[0].stepNumber}`}>
+                          <Button size="sm" variant="ghost">
+                            Update
+                          </Button>
+                        </Link>
+                      )
+                    )}
+                  </div>
                 </div>
               </div>
             );
           })}
         </div>
         <p className="mt-4 text-xs text-gray">
-          <span className="text-maroon">*</span> All documents are required and must be uploaded before you can be hired.
+          All documents are required and must be uploaded before you can be hired.
         </p>
       </Card>
 

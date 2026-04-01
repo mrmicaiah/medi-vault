@@ -27,11 +27,25 @@ export function TBTest({ data, onSave, onFileSelect, pendingFile, onChange }: St
   const displayFileName = pendingFile?.name || existingFileName;
   const hasUpload = !!displayFileName;
 
+  // Calculate expiration date (1 year from test date)
+  const calculateExpiration = (testDate: string): string => {
+    if (!testDate) return '';
+    const date = new Date(testDate);
+    date.setFullYear(date.getFullYear() + 1);
+    return date.toISOString().split('T')[0];
+  };
+
   const handleChange = (field: string, value: string) => {
     const updated = { ...form, [field]: value, skip: false };
     setForm(updated);
     onChange?.();
-    onSave(updated);
+    
+    // Auto-calculate expiration when test_date changes
+    if (field === 'test_date') {
+      onSave({ ...updated, expiration_date: calculateExpiration(value) });
+    } else {
+      onSave({ ...updated, expiration_date: calculateExpiration(updated.test_date) });
+    }
   };
 
   const handleFileSelect = (file: File) => {
@@ -49,7 +63,7 @@ export function TBTest({ data, onSave, onFileSelect, pendingFile, onChange }: St
     if (checked) {
       onFileSelect?.(null);
     }
-    onSave(updated);
+    onSave({ ...updated, expiration_date: calculateExpiration(updated.test_date) });
   };
 
   return (
@@ -90,9 +104,24 @@ export function TBTest({ data, onSave, onFileSelect, pendingFile, onChange }: St
       <Input
         label="Test Date"
         type="date"
+        required
         value={form.test_date}
         onChange={(e) => handleChange('test_date', e.target.value)}
+        helperText="TB tests are valid for 12 months from the test date"
       />
+
+      {form.test_date && (
+        <div className="rounded-lg bg-gray-50 border border-border p-3">
+          <p className="text-sm text-gray">
+            <span className="font-medium">Expires:</span>{' '}
+            {new Date(calculateExpiration(form.test_date)).toLocaleDateString('en-US', {
+              month: 'long',
+              day: 'numeric', 
+              year: 'numeric'
+            })}
+          </p>
+        </div>
+      )}
 
       <Select
         label="Result"
