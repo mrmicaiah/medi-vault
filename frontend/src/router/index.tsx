@@ -23,6 +23,7 @@ import { ApplicantDetailPage } from '../pages/admin/ApplicantDetailPage';
 import { EmployeesPage } from '../pages/admin/EmployeesPage';
 import { EmployeeDetailPage } from '../pages/admin/EmployeeDetailPage';
 import AdminDocumentsPage from '../pages/admin/DocumentsPage';
+import ClientsPage from '../pages/admin/ClientsPage';
 import { HirePage } from '../pages/admin/HirePage';
 import { UsersPage } from '../pages/admin/UsersPage';
 import { TrainingLeadsPage } from '../pages/admin/TrainingLeadsPage';
@@ -190,6 +191,7 @@ export function RouterConfig() {
         <Route path="/admin/applicant/:id" element={<ApplicantDetailPage />} />
         <Route path="/admin/employees" element={<EmployeesPage />} />
         <Route path="/admin/employee/:id" element={<EmployeeDetailPage />} />
+        <Route path="/admin/clients" element={<ClientsPage />} />
         <Route path="/admin/documents" element={<AdminDocumentsPage />} />
         <Route path="/admin/compliance" element={<Navigate to="/admin/documents" replace />} />
         <Route path="/admin/hire/:id" element={<HirePage />} />
