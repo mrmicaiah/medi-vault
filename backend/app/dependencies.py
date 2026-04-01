@@ -89,6 +89,8 @@ async def get_current_user(
         last_name=data.get("last_name", ""),
         role=role,
         phone=data.get("phone"),
+        agency_id=data.get("agency_id"),
+        location_id=data.get("location_id"),
         created_at=data.get("created_at"),
         updated_at=data.get("updated_at"),
     )
