@@ -1,4 +1,4 @@
-import React, { useState } from 'react';
+import React, { useState, useEffect } from 'react';
 import { FileUpload } from '../../ui/FileUpload';
 import { Input, Select } from '../../ui/Input';
 import { Alert } from '../../ui/Alert';
@@ -51,18 +51,34 @@ export function Credentials({ data, onSave, onFileSelect, pendingFile, onChange 
     expiration_date: (data.expiration_date as string) || '',
   });
 
-  const displayFileName = pendingFile?.name || (data.file_name as string) || '';
+  const existingFileName = (data.file_name as string) || '';
+  const displayFileName = pendingFile?.name || existingFileName;
+  const hasUpload = !!displayFileName;
+
+  // Auto-uncheck skip if they have an upload
+  useEffect(() => {
+    if (hasUpload && form.skip) {
+      const updated = { ...form, skip: false };
+      setForm(updated);
+      onSave(updated);
+    }
+  }, [hasUpload]);
 
   const handleChange = (field: string, value: string) => {
-    const updated = { ...form, [field]: value };
+    // Auto-uncheck skip if they're filling out fields
+    const updated = { ...form, [field]: value, skip: false };
     setForm(updated);
     onChange?.();
     onSave(updated);
   };
 
   const handleFileSelect = (file: File) => {
+    // Auto-uncheck skip when they select a file
+    const updated = { ...form, skip: false };
+    setForm(updated);
     onChange?.();
     onFileSelect?.(file);
+    onSave(updated);
   };
 
   const handleSkip = (checked: boolean) => {
@@ -82,75 +98,82 @@ export function Credentials({ data, onSave, onFileSelect, pendingFile, onChange 
         This step is optional but may qualify you for additional positions.
       </p>
 
-      <div className="flex items-center gap-3 rounded-lg border border-border bg-gray-50 p-4">
-        <input
-          type="checkbox"
-          id="skip_credentials"
-          checked={form.skip}
-          onChange={(e) => handleSkip(e.target.checked)}
-          className="h-4 w-4 rounded border-gray-300 text-maroon focus:ring-maroon"
+      {/* Show success message if already uploaded */}
+      {existingFileName && !pendingFile && (
+        <Alert variant="success" title="Document Uploaded">
+          <span className="font-medium">{existingFileName}</span> is on file. 
+          You can upload a new version below if needed.
+        </Alert>
+      )}
+
+      <Select
+        label="Credential Type"
+        value={form.credential_type}
+        onChange={(e) => handleChange('credential_type', e.target.value)}
+        options={CREDENTIAL_TYPES}
+      />
+
+      {form.credential_type === 'other' && (
+        <Input
+          label="Specify Credential Type"
+          value={form.other_credential_type}
+          onChange={(e) => handleChange('other_credential_type', e.target.value)}
+          placeholder="Enter your credential type"
         />
-        <label htmlFor="skip_credentials" className="text-sm text-slate">
-          I don't have credentials to upload / I'll upload later
-        </label>
+      )}
+
+      <div className="grid grid-cols-1 gap-4 sm:grid-cols-2">
+        <Input
+          label="Credential/License Number"
+          value={form.credential_number}
+          onChange={(e) => handleChange('credential_number', e.target.value)}
+          placeholder="Enter your credential number"
+        />
+
+        <Select
+          label="Issuing State"
+          value={form.issuing_state}
+          onChange={(e) => handleChange('issuing_state', e.target.value)}
+          options={US_STATES}
+        />
       </div>
 
-      {!form.skip && (
-        <>
-          <Select
-            label="Credential Type"
-            value={form.credential_type}
-            onChange={(e) => handleChange('credential_type', e.target.value)}
-            options={CREDENTIAL_TYPES}
+      <Input
+        label="Expiration Date"
+        type="date"
+        value={form.expiration_date}
+        onChange={(e) => handleChange('expiration_date', e.target.value)}
+      />
+
+      <FileUpload
+        label="Credential Document"
+        onFileSelect={handleFileSelect}
+        accept=".pdf,.jpg,.jpeg,.png"
+        maxSize={10 * 1024 * 1024}
+        currentFile={displayFileName ? { name: displayFileName } : null}
+        helperText="Upload a clear photo or scan of your credential"
+      />
+
+      {pendingFile && (
+        <p className="text-xs text-gray-500">
+          File will be uploaded when you click "Next"
+        </p>
+      )}
+
+      {/* Skip checkbox at the bottom - only show if nothing uploaded */}
+      {!hasUpload && (
+        <div className="flex items-center gap-3 rounded-lg border border-border bg-gray-50 p-4">
+          <input
+            type="checkbox"
+            id="skip_credentials"
+            checked={form.skip}
+            onChange={(e) => handleSkip(e.target.checked)}
+            className="h-4 w-4 rounded border-gray-300 text-maroon focus:ring-maroon"
           />
-
-          {form.credential_type === 'other' && (
-            <Input
-              label="Specify Credential Type"
-              value={form.other_credential_type}
-              onChange={(e) => handleChange('other_credential_type', e.target.value)}
-              placeholder="Enter your credential type"
-            />
-          )}
-
-          <div className="grid grid-cols-1 gap-4 sm:grid-cols-2">
-            <Input
-              label="Credential/License Number"
-              value={form.credential_number}
-              onChange={(e) => handleChange('credential_number', e.target.value)}
-              placeholder="Enter your credential number"
-            />
-
-            <Select
-              label="Issuing State"
-              value={form.issuing_state}
-              onChange={(e) => handleChange('issuing_state', e.target.value)}
-              options={US_STATES}
-            />
-          </div>
-
-          <Input
-            label="Expiration Date"
-            type="date"
-            value={form.expiration_date}
-            onChange={(e) => handleChange('expiration_date', e.target.value)}
-          />
-
-          <FileUpload
-            label="Credential Document"
-            onFileSelect={handleFileSelect}
-            accept=".pdf,.jpg,.jpeg,.png"
-            maxSize={10 * 1024 * 1024}
-            currentFile={displayFileName ? { name: displayFileName } : null}
-            helperText="Upload a clear photo or scan of your credential"
-          />
-
-          {pendingFile && (
-            <p className="text-xs text-gray-500">
-              File will be uploaded when you click "Next"
-            </p>
-          )}
-        </>
+          <label htmlFor="skip_credentials" className="text-sm text-slate">
+            I don't have credentials to upload / I'll upload later
+          </label>
+        </div>
       )}
     </div>
   );
