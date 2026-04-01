@@ -7,6 +7,7 @@ import { Badge } from '../../components/ui/Badge';
 import { ProgressBar } from '../../components/ui/ProgressBar';
 import { Alert } from '../../components/ui/Alert';
 import { DocumentUploadModal } from '../../components/applicant/DocumentUploadModal';
+import { PhotoIDUploadModal } from '../../components/applicant/PhotoIDUploadModal';
 import { TOTAL_STEPS } from '../../types';
 import { formatDate, daysUntil } from '../../lib/utils';
 import { api } from '../../lib/api';
@@ -52,7 +53,7 @@ const DOCUMENT_GROUPS: DocumentGroup[] = [
     name: 'Photo ID',
     description: 'Government-issued photo identification (front and back)',
     hasExpiration: true,
-    steps: [12, 13], // Front and Back share expiration from Front
+    steps: [12, 13],
   },
   {
     id: 'ssn',
@@ -65,7 +66,7 @@ const DOCUMENT_GROUPS: DocumentGroup[] = [
     id: 'work_auth',
     name: 'Work Authorization',
     description: 'Proof of eligibility to work in the US',
-    hasExpiration: true, // May or may not have expiration
+    hasExpiration: true,
     steps: [11],
   },
   {
@@ -91,7 +92,6 @@ const DOCUMENT_GROUPS: DocumentGroup[] = [
   },
 ];
 
-// Agreement steps that require signatures
 const AGREEMENT_STEP_NUMBERS = [9, 10, 18, 19, 20, 21, 22];
 
 type DocStatus = 'uploaded' | 'needed' | 'expired';
@@ -132,6 +132,12 @@ export function ApplicantDashboardPage() {
     existingData?: Record<string, unknown>;
   }>({ isOpen: false, stepNumber: 0, stepName: '' });
 
+  const [photoIdModal, setPhotoIdModal] = useState<{
+    isOpen: boolean;
+    frontData?: Record<string, unknown>;
+    backData?: Record<string, unknown>;
+  }>({ isOpen: false });
+
   const loadApplication = async () => {
     try {
       setLoading(true);
@@ -164,13 +170,11 @@ export function ApplicantDashboardPage() {
   const isRejected = application?.status === 'rejected';
   const isInProgress = application?.status === 'in_progress';
 
-  // Get step data helper
   const getStepData = (stepNum: number): Record<string, unknown> => {
     const step = steps.find(s => s.step_number === stepNum);
     return (step?.data || {}) as Record<string, unknown>;
   };
 
-  // Process individual documents (still needed for counts)
   const documents: DocItem[] = Object.entries(DOCUMENT_STEPS).map(([stepNum, doc]) => {
     const stepNumber = parseInt(stepNum);
     const data = getStepData(stepNumber);
@@ -178,11 +182,9 @@ export function ApplicantDashboardPage() {
     let status: DocStatus;
     let expirationDate: string | undefined;
 
-    // Document is uploaded if file_name exists
     if (data.file_name) {
       status = 'uploaded';
       
-      // Special case: ID Back (13) inherits expiration from ID Front (12)
       if (stepNumber === 13) {
         const frontData = getStepData(12);
         expirationDate = frontData.expiration_date as string | undefined;
@@ -208,7 +210,6 @@ export function ApplicantDashboardPage() {
     };
   });
 
-  // Process document groups for display
   interface GroupedDoc {
     group: DocumentGroup;
     status: DocStatus;
@@ -226,7 +227,6 @@ export function ApplicantDashboardPage() {
     const uploadedCount = items.filter(d => d.status === 'uploaded' || d.status === 'expired').length;
     const totalCount = items.length;
     
-    // Group status: if any expired, show expired; if any needed, show needed; else uploaded
     let status: DocStatus = 'uploaded';
     if (items.some(d => d.status === 'expired')) {
       status = 'expired';
@@ -234,10 +234,8 @@ export function ApplicantDashboardPage() {
       status = 'needed';
     }
 
-    // Get expiration from first step that has one (for Photo ID, use front)
     let expirationDate: string | undefined;
     if (group.hasExpiration) {
-      // For Photo ID group, use the front's expiration
       if (group.id === 'photo_id') {
         expirationDate = items[0]?.expirationDate;
       } else {
@@ -261,7 +259,6 @@ export function ApplicantDashboardPage() {
   const currentStep = application?.current_step || 1;
   const hasApplication = application !== null;
 
-  // Find the first incomplete step
   const getFirstIncompleteStep = (): number => {
     for (let i = 1; i <= 22; i++) {
       const step = steps.find(s => s.step_number === i);
@@ -269,10 +266,9 @@ export function ApplicantDashboardPage() {
         return i;
       }
     }
-    return 22; // All completed, go to last step
+    return 22;
   };
 
-  // Count required docs that are missing
   const requiredMissing = documents.filter(d => d.required && d.status === 'needed');
   const expiredDocs = documents.filter(d => d.status === 'expired');
   const expiringDocs = documents.filter(d => 
@@ -282,7 +278,6 @@ export function ApplicantDashboardPage() {
 
   const uploadedDocs = documents.filter(d => d.status === 'uploaded').length;
   
-  // Count completed agreement steps
   const completedAgreements = steps.filter(s =>
     AGREEMENT_STEP_NUMBERS.includes(s.step_number) && s.status === 'completed'
   ).length;
@@ -293,6 +288,14 @@ export function ApplicantDashboardPage() {
       stepNumber: doc.stepNumber,
       stepName: doc.name,
       existingData: doc.data,
+    });
+  };
+
+  const handlePhotoIdClick = () => {
+    setPhotoIdModal({
+      isOpen: true,
+      frontData: getStepData(12),
+      backData: getStepData(13),
     });
   };
 
@@ -309,7 +312,6 @@ export function ApplicantDashboardPage() {
       );
     }
     
-    // If submitted (even in_progress with 100% completion), show status badge
     if (isSubmitted || completedSteps === TOTAL_STEPS) {
       return (
         <Badge variant="success">Submitted</Badge>
@@ -317,7 +319,6 @@ export function ApplicantDashboardPage() {
     }
     
     if (isInProgress) {
-      // Navigate to the first incomplete step
       const firstIncomplete = getFirstIncompleteStep();
       return (
         <Link to={`/applicant/application?step=${firstIncomplete}`}>
@@ -468,7 +469,6 @@ export function ApplicantDashboardPage() {
           {groupedDocuments.map((groupDoc) => {
             const needsAttention = groupDoc.status === 'needed' || groupDoc.status === 'expired';
             const canUpload = !isRejected;
-            const isComplete = groupDoc.uploadedCount === groupDoc.totalCount && groupDoc.status !== 'expired';
             
             return (
               <div
@@ -492,7 +492,6 @@ export function ApplicantDashboardPage() {
                     </div>
                     <p className="text-xs text-gray mt-1">{groupDoc.group.description}</p>
                     
-                    {/* Show expiration info */}
                     {groupDoc.group.hasExpiration && groupDoc.expirationDate && (
                       <p className={`text-xs mt-1 ${
                         groupDoc.status === 'expired' ? 'text-error font-medium' :
@@ -515,7 +514,6 @@ export function ApplicantDashboardPage() {
                       <p className="text-xs text-gray mt-1">Does not expire</p>
                     )}
                     
-                    {/* Show individual items if multiple */}
                     {groupDoc.totalCount > 1 && (
                       <div className="mt-2 flex gap-4">
                         {groupDoc.items.map(item => (
@@ -542,17 +540,30 @@ export function ApplicantDashboardPage() {
                     )}
                   </div>
                   
-                  {/* Action buttons */}
                   <div className="flex gap-2 ml-4">
-                    {canUpload && groupDoc.items.map(item => {
+                    {groupDoc.group.id === 'photo_id' && canUpload && isSubmitted && (
+                      <Button 
+                        size="sm" 
+                        variant={groupDoc.status === 'needed' || groupDoc.status === 'expired' ? 'primary' : 'ghost'}
+                        onClick={handlePhotoIdClick}
+                      >
+                        {groupDoc.status === 'needed' || groupDoc.status === 'expired' ? 'Upload' : 'Update'}
+                      </Button>
+                    )}
+                    {groupDoc.group.id === 'photo_id' && canUpload && !isSubmitted && (
+                      <Link to="/applicant/application?step=12">
+                        <Button 
+                          size="sm" 
+                          variant={groupDoc.status === 'needed' || groupDoc.status === 'expired' ? 'primary' : 'ghost'}
+                        >
+                          {groupDoc.status === 'needed' || groupDoc.status === 'expired' ? 'Upload' : 'Update'}
+                        </Button>
+                      </Link>
+                    )}
+                    
+                    {groupDoc.group.id !== 'photo_id' && canUpload && groupDoc.items.map(item => {
                       const showUpload = item.status === 'needed' || item.status === 'expired';
-                      const buttonLabel = groupDoc.totalCount > 1 
-                        ? (item.stepNumber === 12 ? 'Front' : item.stepNumber === 13 ? 'Back' : 'Upload')
-                        : (showUpload ? 'Upload' : 'Update');
-                      
-                      if (!showUpload && groupDoc.totalCount > 1 && isComplete) {
-                        return null; // Don't show update buttons for each item when complete
-                      }
+                      const buttonLabel = showUpload ? 'Upload' : 'Update';
                       
                       return (
                         <div key={item.stepNumber}>
@@ -574,24 +585,6 @@ export function ApplicantDashboardPage() {
                         </div>
                       );
                     })}
-                    {/* Show single update button for complete groups */}
-                    {canUpload && isComplete && groupDoc.totalCount > 1 && (
-                      isSubmitted ? (
-                        <Button 
-                          size="sm" 
-                          variant="ghost"
-                          onClick={() => handleUploadClick(groupDoc.items[0])}
-                        >
-                          Update
-                        </Button>
-                      ) : (
-                        <Link to={`/applicant/application?step=${groupDoc.items[0].stepNumber}`}>
-                          <Button size="sm" variant="ghost">
-                            Update
-                          </Button>
-                        </Link>
-                      )
-                    )}
                   </div>
                 </div>
               </div>
@@ -612,6 +605,17 @@ export function ApplicantDashboardPage() {
           stepNumber={uploadModal.stepNumber}
           stepName={uploadModal.stepName}
           existingData={uploadModal.existingData}
+        />
+      )}
+
+      {application && (
+        <PhotoIDUploadModal
+          isOpen={photoIdModal.isOpen}
+          onClose={() => setPhotoIdModal({ isOpen: false })}
+          onSuccess={handleUploadSuccess}
+          applicationId={application.id}
+          frontData={photoIdModal.frontData}
+          backData={photoIdModal.backData}
         />
       )}
     </div>
