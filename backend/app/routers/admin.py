@@ -486,19 +486,46 @@ async def get_document_url(
     supabase: Client = Depends(get_supabase),
     user: dict = Depends(get_staff_user)
 ):
+    """
+    Get a signed URL for viewing an uploaded document.
+    
+    Tries multiple approaches:
+    1. Generate a fresh signed URL from storage_path (preferred, ensures file exists)
+    2. Fall back to storage_url if it exists (pre-signed URL from upload, may be expired)
+    """
     try:
         step_res = supabase.table("application_steps").select("data").eq("application_id", application_id).eq("step_number", step_number).single().execute()
         if not step_res.data:
             raise HTTPException(status_code=404, detail="Step not found")
+        
         data = step_res.data.get("data") or {}
         storage_path = data.get("storage_path")
-        if not storage_path:
+        storage_url = data.get("storage_url")  # Pre-signed URL from upload time
+        file_name = data.get("file_name") or data.get("original_filename")
+        
+        # No file at all
+        if not storage_path and not storage_url:
             raise HTTPException(status_code=404, detail="No file uploaded for this step")
-        signed_url = generate_signed_url(supabase, storage_path, expires_in=3600)
-        if not signed_url:
-            # File path exists in DB but file not found in storage
-            raise HTTPException(status_code=404, detail="File not found in storage. It may have been deleted.")
-        return {"signed_url": signed_url, "file_name": data.get("file_name") or data.get("original_filename"), "expires_in": 3600}
+        
+        # Try to generate a fresh signed URL from storage_path
+        signed_url = None
+        if storage_path:
+            signed_url = generate_signed_url(supabase, storage_path, expires_in=3600)
+        
+        # If that failed but we have a storage_url, use it (may be expired but worth trying)
+        if not signed_url and storage_url:
+            logger.info(f"Using stored URL for step {step_number} (fresh URL generation failed)")
+            return {"signed_url": storage_url, "file_name": file_name, "expires_in": 0, "note": "Using cached URL"}
+        
+        # If we got a fresh signed URL, return it
+        if signed_url:
+            return {"signed_url": signed_url, "file_name": file_name, "expires_in": 3600}
+        
+        # Both methods failed
+        raise HTTPException(
+            status_code=404, 
+            detail=f"File not found in storage. Path: {storage_path}. The file may have been deleted."
+        )
     except HTTPException:
         raise
     except Exception as e:
@@ -685,4 +712,345 @@ async def generate_application_pdf(
             content=pdf_bytes,
             media_type="application/pdf",
             headers={
-                "Content-Disposition": f'
+                "Content-Disposition": f'attachment; filename="{filename}"'
+            }
+        )
+    except HTTPException:
+        raise
+    except Exception as e:
+        logger.error(f"Application PDF generation error: {e}")
+        raise HTTPException(status_code=500, detail=str(e))
+
+
+@router.get("/applicants/{application_id}/pdf/i9")
+async def generate_i9_pdf(
+    application_id: str,
+    supabase: Client = Depends(get_supabase),
+    user: dict = Depends(get_staff_user)
+):
+    """Generate and return a pre-filled I-9 form as a PDF."""
+    from ..services.pdf_service import pdf_service
+    
+    try:
+        app_res = supabase.table("applications").select("*, user_id").eq("id", application_id).single().execute()
+        if not app_res.data:
+            raise HTTPException(status_code=404, detail="Application not found")
+        
+        application = app_res.data
+        user_id = application.get("user_id")
+        
+        steps_res = supabase.table("application_steps").select("step_number, data, is_completed").eq("application_id", application_id).order("step_number").execute()
+        
+        steps = {}
+        for step in (steps_res.data or []):
+            steps[step["step_number"]] = {
+                "data": step.get("data") or {},
+                "completed": step.get("is_completed", False)
+            }
+        
+        ssn = None
+        try:
+            ssn_res = supabase.table("sensitive_data").select("ssn_encrypted").eq("user_id", user_id).single().execute()
+            if ssn_res.data and ssn_res.data.get("ssn_encrypted"):
+                ssn = encryption_service.decrypt(ssn_res.data["ssn_encrypted"])
+        except Exception as e:
+            logger.warning(f"Could not decrypt SSN for I-9: {e}")
+        
+        application_data = {
+            "id": application_id,
+            "status": application.get("status"),
+            "submitted_at": application.get("submitted_at"),
+            "steps": steps
+        }
+        
+        pdf_bytes = pdf_service.generate_i9_form(application_data, ssn)
+        
+        step2 = steps.get(2, {}).get("data", {})
+        first_name = step2.get("first_name", "Applicant")
+        last_name = step2.get("last_name", "")
+        filename = f"{first_name}_{last_name}_I9.pdf".replace(" ", "_")
+        
+        return Response(
+            content=pdf_bytes,
+            media_type="application/pdf",
+            headers={
+                "Content-Disposition": f'attachment; filename="{filename}"'
+            }
+        )
+    except HTTPException:
+        raise
+    except FileNotFoundError as e:
+        raise HTTPException(status_code=404, detail=str(e))
+    except Exception as e:
+        logger.error(f"I-9 PDF generation error: {e}")
+        raise HTTPException(status_code=500, detail=str(e))
+
+
+@router.get("/applicants/{application_id}/pdf/agreement/{agreement_type}")
+async def generate_agreement_pdf(
+    application_id: str,
+    agreement_type: str,
+    supabase: Client = Depends(get_supabase),
+    user: dict = Depends(get_staff_user)
+):
+    """
+    Generate a signed agreement as a PDF.
+    Requires WeasyPrint - works on Render/Docker, not on Windows without GTK.
+    """
+    from jinja2 import Environment, FileSystemLoader
+    from weasyprint import HTML, CSS
+    
+    try:
+        app_res = supabase.table("applications").select("*").eq("id", application_id).single().execute()
+        if not app_res.data:
+            raise HTTPException(status_code=404, detail="Application not found")
+        
+        agreement_step_map = {
+            "confidentiality": 9,
+            "esignature": 10,
+            "orientation": 18,
+            "criminal_background": 19,
+            "va_code_disclosure": 20,
+            "job_description": 21,
+            "final_signature": 22,
+        }
+        
+        step_number = agreement_step_map.get(agreement_type)
+        if not step_number:
+            raise HTTPException(status_code=400, detail=f"Invalid agreement type: {agreement_type}")
+        
+        step_res = supabase.table("application_steps").select("data, is_completed, updated_at").eq("application_id", application_id).eq("step_number", step_number).single().execute()
+        if not step_res.data:
+            raise HTTPException(status_code=404, detail="Agreement step not found")
+        
+        step_data = step_res.data.get("data") or {}
+        
+        step2_res = supabase.table("application_steps").select("data").eq("application_id", application_id).eq("step_number", 2).single().execute()
+        personal_info = step2_res.data.get("data") if step2_res.data else {}
+        
+        context = {
+            "applicant_name": f"{personal_info.get('first_name', '')} {personal_info.get('last_name', '')}".strip() or "Applicant",
+            "signature_text": step_data.get("signature", ""),
+            "signed_at": step_data.get("signed_date", ""),
+            "ip_address": step_data.get("ip_address", "Recorded"),
+            "agreed": step_data.get("agreed", False),
+            "generated_at": datetime.now().strftime("%B %d, %Y at %I:%M %p"),
+            "company_name": "Eveready HomeCare",
+        }
+        
+        template_map = {
+            "confidentiality": "confidentiality_agreement.html",
+            "esignature": "esignature_consent.html",
+            "orientation": "orientation_acknowledgment.html",
+            "criminal_background": "criminal_background_attestation.html",
+            "va_code_disclosure": "va_code_disclosure.html",
+            "job_description": "job_description_acknowledgment.html",
+            "final_signature": "master_onboarding_consent.html",
+        }
+        
+        template_name = template_map.get(agreement_type)
+        
+        templates_dir = os.path.join(os.path.dirname(__file__), '..', 'templates')
+        jinja_env = Environment(loader=FileSystemLoader(templates_dir), autoescape=True)
+        template = jinja_env.get_template(template_name)
+        html_content = template.render(**context)
+        
+        css_path = os.path.join(templates_dir, 'application_styles.css')
+        stylesheets = []
+        if os.path.exists(css_path):
+            stylesheets.append(CSS(filename=css_path))
+        
+        pdf_bytes = HTML(string=html_content).write_pdf(stylesheets=stylesheets)
+        
+        first_name = personal_info.get('first_name', 'Applicant')
+        last_name = personal_info.get('last_name', '')
+        filename = f"{first_name}_{last_name}_{agreement_type}.pdf".replace(" ", "_")
+        
+        return Response(
+            content=pdf_bytes,
+            media_type="application/pdf",
+            headers={
+                "Content-Disposition": f'attachment; filename="{filename}"'
+            }
+        )
+    except HTTPException:
+        raise
+    except Exception as e:
+        logger.error(f"Agreement PDF generation error: {e}")
+        raise HTTPException(status_code=500, detail=str(e))
+
+
+@router.get("/employees/{employee_id}/documents")
+async def get_employee_documents(
+    employee_id: str,
+    supabase: Client = Depends(get_supabase),
+    user: dict = Depends(get_staff_user)
+):
+    """Get all documents for an employee including agreements, uploaded docs, and generated PDFs."""
+    try:
+        emp_res = supabase.table("employees").select("*, user_id").eq("id", employee_id).single().execute()
+        if not emp_res.data:
+            raise HTTPException(status_code=404, detail="Employee not found")
+        
+        employee = emp_res.data
+        user_id = employee.get("user_id")
+        
+        app_res = supabase.table("applications").select("id").eq("user_id", user_id).single().execute()
+        application_id = app_res.data.get("id") if app_res.data else None
+        
+        documents = {
+            "uploaded": [],
+            "agreements": [],
+            "generated": []
+        }
+        
+        if user_id:
+            docs_res = supabase.table("documents").select("*").eq("user_id", user_id).order("created_at", desc=True).execute()
+            for doc in (docs_res.data or []):
+                documents["uploaded"].append({
+                    "id": doc.get("id"),
+                    "type": doc.get("document_type"),
+                    "filename": doc.get("filename"),
+                    "uploaded_at": doc.get("created_at"),
+                    "expires_at": doc.get("expiration_date"),
+                    "storage_path": doc.get("storage_path")
+                })
+        
+        if application_id:
+            documents["generated"] = [
+                {"type": "application", "name": "Employment Application", "endpoint": f"/admin/applicants/{application_id}/pdf/application"},
+                {"type": "i9", "name": "I-9 Form", "endpoint": f"/admin/applicants/{application_id}/pdf/i9"},
+            ]
+            
+            agreement_steps = [
+                (9, "confidentiality", "Confidentiality Agreement"),
+                (10, "esignature", "E-Signature Consent"),
+                (18, "orientation", "Orientation Acknowledgment"),
+                (19, "criminal_background", "Criminal Background Authorization"),
+                (20, "va_code_disclosure", "VA Code Disclosure"),
+                (21, "job_description", "Job Description Acknowledgment"),
+                (22, "final_signature", "Final Signature"),
+            ]
+            
+            steps_res = supabase.table("application_steps").select("step_number, is_completed, data").eq("application_id", application_id).in_("step_number", [s[0] for s in agreement_steps]).execute()
+            completed_steps = {s["step_number"]: s for s in (steps_res.data or [])}
+            
+            for step_num, agreement_type, name in agreement_steps:
+                step = completed_steps.get(step_num)
+                if step and step.get("is_completed"):
+                    data = step.get("data") or {}
+                    documents["agreements"].append({
+                        "type": agreement_type,
+                        "name": name,
+                        "signed": bool(data.get("signature")),
+                        "signed_date": data.get("signed_date"),
+                        "endpoint": f"/admin/applicants/{application_id}/pdf/agreement/{agreement_type}"
+                    })
+        
+        return {
+            "employee_id": employee_id,
+            "employee_name": f"{employee.get('first_name', '')} {employee.get('last_name', '')}",
+            "application_id": application_id,
+            "documents": documents
+        }
+    except HTTPException:
+        raise
+    except Exception as e:
+        logger.error(f"Employee documents error: {e}")
+        raise HTTPException(status_code=500, detail=str(e))
+
+
+@router.get("/applicants/{application_id}/documents-summary")
+async def get_applicant_documents_summary(
+    application_id: str,
+    supabase: Client = Depends(get_supabase),
+    user: dict = Depends(get_staff_user)
+):
+    """Get all documents for an applicant including agreements, uploaded docs, and generated PDFs."""
+    try:
+        app_res = supabase.table("applications").select("*, user_id, profiles!applications_user_id_fkey(first_name, last_name)").eq("id", application_id).single().execute()
+        if not app_res.data:
+            raise HTTPException(status_code=404, detail="Application not found")
+        
+        application = app_res.data
+        profile = application.get("profiles") or {}
+        
+        documents = {
+            "uploaded": [],
+            "agreements": [],
+            "generated": []
+        }
+        
+        # Generated PDFs always available
+        documents["generated"] = [
+            {"type": "application", "name": "Employment Application", "endpoint": f"/admin/applicants/{application_id}/pdf/application"},
+            {"type": "i9", "name": "I-9 Form", "endpoint": f"/admin/applicants/{application_id}/pdf/i9"},
+        ]
+        
+        # Get uploaded documents from steps
+        upload_steps = [
+            (11, "work_authorization", "Work Authorization"),
+            (12, "id_front", "ID Front"),
+            (13, "id_back", "ID Back"),
+            (14, "ssn_card", "Social Security Card"),
+            (15, "credentials", "Credentials"),
+            (16, "cpr", "CPR Certification"),
+            (17, "tb", "TB Test"),
+        ]
+        
+        steps_res = supabase.table("application_steps").select("step_number, data, is_completed, updated_at").eq("application_id", application_id).in_("step_number", [s[0] for s in upload_steps]).execute()
+        upload_steps_data = {s["step_number"]: s for s in (steps_res.data or [])}
+        
+        for step_num, doc_type, name in upload_steps:
+            step = upload_steps_data.get(step_num)
+            if step:
+                data = step.get("data") or {}
+                storage_path = data.get("storage_path") or data.get("file_url")
+                if storage_path:
+                    documents["uploaded"].append({
+                        "type": doc_type,
+                        "name": name,
+                        "step_number": step_num,
+                        "filename": data.get("file_name") or data.get("original_filename"),
+                        "uploaded_at": step.get("updated_at"),
+                        "endpoint": f"/admin/applicants/{application_id}/documents/{step_num}/url"
+                    })
+        
+        # Get agreements - now include preview_endpoint for HTML preview
+        agreement_steps = [
+            (9, "confidentiality", "Confidentiality Agreement"),
+            (10, "esignature", "E-Signature Consent"),
+            (18, "orientation", "Orientation Acknowledgment"),
+            (19, "criminal_background", "Criminal Background Authorization"),
+            (20, "va_code_disclosure", "VA Code Disclosure"),
+            (21, "job_description", "Job Description Acknowledgment"),
+            (22, "final_signature", "Final Signature"),
+        ]
+        
+        agreement_steps_res = supabase.table("application_steps").select("step_number, is_completed, data").eq("application_id", application_id).in_("step_number", [s[0] for s in agreement_steps]).execute()
+        agreement_steps_data = {s["step_number"]: s for s in (agreement_steps_res.data or [])}
+        
+        for step_num, agreement_type, name in agreement_steps:
+            step = agreement_steps_data.get(step_num)
+            if step and step.get("is_completed"):
+                data = step.get("data") or {}
+                documents["agreements"].append({
+                    "type": agreement_type,
+                    "name": name,
+                    "signed": bool(data.get("signature")),
+                    "signed_date": data.get("signed_date"),
+                    "endpoint": f"/admin/applicants/{application_id}/pdf/agreement/{agreement_type}",
+                    "preview_endpoint": f"/admin/applicants/{application_id}/agreement/{agreement_type}/preview"
+                })
+        
+        return {
+            "application_id": application_id,
+            "applicant_name": f"{profile.get('first_name', '')} {profile.get('last_name', '')}".strip(),
+            "status": application.get("status"),
+            "documents": documents
+        }
+    except HTTPException:
+        raise
+    except Exception as e:
+        logger.error(f"Applicant documents summary error: {e}")
+        raise HTTPException(status_code=500, detail=str(e))
