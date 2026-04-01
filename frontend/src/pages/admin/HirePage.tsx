@@ -38,7 +38,9 @@ export function HirePage() {
     position: '',
     hire_date: new Date().toISOString().split('T')[0],
     pay_rate: '',
+    pay_type: 'hourly',
     location_id: '',
+    department: '',
     notes: '',
   });
 
@@ -64,16 +66,11 @@ export function HirePage() {
 
         // Load locations
         try {
-          const locRes = await api.get<{ locations: Array<{ id: string; name: string }> }>('/agencies/eveready-homecare/locations');
+          const locRes = await api.get<{ locations: Array<{ id: string; name: string }> }>('/agencies/me');
           setLocations(locRes.locations || []);
         } catch {
-          // Fallback locations if API fails
-          setLocations([
-            { id: '1', name: 'Dumfries' },
-            { id: '2', name: 'Arlington' },
-            { id: '3', name: 'Sterling' },
-            { id: '4', name: 'Hampton' },
-          ]);
+          // Fallback if API fails
+          setLocations([]);
         }
       } catch (err) {
         setError(err instanceof Error ? err.message : 'Failed to load applicant');
@@ -102,19 +99,16 @@ export function HirePage() {
         await api.post(`/admin/applicant/${id}/status`, { status: 'approved' });
       }
 
-      // Then mark as hired
-      await api.post(`/admin/applicant/${id}/status`, { status: 'hired' });
-
-      // TODO: Create employee record when endpoint is ready
-      // await api.post('/employees', {
-      //   user_id: applicant.profile.id,
-      //   application_id: id,
-      //   position: form.position,
-      //   hire_date: form.hire_date,
-      //   pay_rate: parseFloat(form.pay_rate) || null,
-      //   location_id: form.location_id || null,
-      //   notes: form.notes,
-      // });
+      // Create employee record via the hire endpoint
+      await api.post('/employees/hire', {
+        application_id: id,
+        job_title: form.position,
+        start_date: form.hire_date,
+        pay_rate: form.pay_rate ? parseFloat(form.pay_rate) : null,
+        pay_type: form.pay_type,
+        department: form.department || 'Home Care',
+        notes: form.notes || null,
+      });
 
       navigate('/admin/employees');
     } catch (err) {
@@ -198,40 +192,66 @@ export function HirePage() {
             onChange={(e) => handleChange('position', e.target.value)}
             options={[
               { value: '', label: 'Select position...' },
-              { value: 'pca', label: 'Personal Care Aide (PCA)' },
-              { value: 'hha', label: 'Home Health Aide (HHA)' },
-              { value: 'cna', label: 'Certified Nursing Assistant (CNA)' },
-              { value: 'rn', label: 'Registered Nurse (RN)' },
-              { value: 'lpn', label: 'Licensed Practical Nurse (LPN)' },
+              { value: 'Personal Care Aide (PCA)', label: 'Personal Care Aide (PCA)' },
+              { value: 'Home Health Aide (HHA)', label: 'Home Health Aide (HHA)' },
+              { value: 'Certified Nursing Assistant (CNA)', label: 'Certified Nursing Assistant (CNA)' },
+              { value: 'Registered Nurse (RN)', label: 'Registered Nurse (RN)' },
+              { value: 'Licensed Practical Nurse (LPN)', label: 'Licensed Practical Nurse (LPN)' },
             ]}
           />
 
           <Input
-            label="Hire Date"
+            label="Start Date"
             type="date"
             required
             value={form.hire_date}
             onChange={(e) => handleChange('hire_date', e.target.value)}
           />
 
-          <Input
-            label="Pay Rate ($/hr)"
-            type="number"
-            step="0.01"
-            value={form.pay_rate}
-            onChange={(e) => handleChange('pay_rate', e.target.value)}
-            placeholder="15.00"
-          />
+          <div className="grid grid-cols-2 gap-4">
+            <Input
+              label="Pay Rate"
+              type="number"
+              step="0.01"
+              value={form.pay_rate}
+              onChange={(e) => handleChange('pay_rate', e.target.value)}
+              placeholder="15.00"
+            />
+            <Select
+              label="Pay Type"
+              value={form.pay_type}
+              onChange={(e) => handleChange('pay_type', e.target.value)}
+              options={[
+                { value: 'hourly', label: 'Hourly' },
+                { value: 'salary', label: 'Salary' },
+                { value: 'per_visit', label: 'Per Visit' },
+              ]}
+            />
+          </div>
 
           <Select
-            label="Primary Location"
-            value={form.location_id}
-            onChange={(e) => handleChange('location_id', e.target.value)}
+            label="Department"
+            value={form.department}
+            onChange={(e) => handleChange('department', e.target.value)}
             options={[
-              { value: '', label: 'Select location...' },
-              ...locations.map(loc => ({ value: loc.id, name: loc.name, label: loc.name })),
+              { value: '', label: 'Select department...' },
+              { value: 'Home Care', label: 'Home Care' },
+              { value: 'Skilled Nursing', label: 'Skilled Nursing' },
+              { value: 'Administration', label: 'Administration' },
             ]}
           />
+
+          {locations.length > 0 && (
+            <Select
+              label="Primary Location"
+              value={form.location_id}
+              onChange={(e) => handleChange('location_id', e.target.value)}
+              options={[
+                { value: '', label: 'Select location...' },
+                ...locations.map(loc => ({ value: loc.id, label: loc.name })),
+              ]}
+            />
+          )}
 
           <div>
             <label className="block text-sm font-medium text-slate mb-1">Notes</label>
