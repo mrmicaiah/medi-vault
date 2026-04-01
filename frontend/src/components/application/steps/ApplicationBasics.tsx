@@ -26,6 +26,7 @@ export function ApplicationBasics({ data, onSave }: StepProps) {
     
     // Languages
     primary_language: (data.primary_language as string) || '',
+    no_other_languages: (data.no_other_languages as boolean) || false,
     other_languages: (data.other_languages as string[]) || [],
     
     // How heard & Previous Employment
@@ -37,6 +38,12 @@ export function ApplicationBasics({ data, onSave }: StepProps) {
 
   const handleChange = (field: string, value: unknown) => {
     const updated = { ...form, [field]: value };
+    
+    // If checking "no other languages", clear the languages array
+    if (field === 'no_other_languages' && value === true) {
+      updated.other_languages = [];
+    }
+    
     setForm(updated);
     onSave(updated);
   };
@@ -44,6 +51,11 @@ export function ApplicationBasics({ data, onSave }: StepProps) {
   const languageOptions = ['Spanish', 'French', 'Mandarin', 'Cantonese', 'Vietnamese', 'Korean', 'Tagalog', 'Arabic', 'Hindi', 'Urdu', 'Farsi', 'Amharic', 'Swahili', 'Portuguese', 'Russian', 'Other'];
 
   const toggleLanguage = (lang: string) => {
+    // If selecting a language, uncheck "no other languages"
+    if (form.no_other_languages) {
+      handleChange('no_other_languages', false);
+    }
+    
     const current = form.other_languages;
     const updated = current.includes(lang)
       ? current.filter((l) => l !== lang)
@@ -242,14 +254,28 @@ export function ApplicationBasics({ data, onSave }: StepProps) {
 
         <div>
           <label className="block text-sm font-medium text-slate mb-2">
-            Do you speak any other languages? (Select all that apply)
+            Do you speak any other languages?
           </label>
-          <div className="flex flex-wrap gap-2">
+          
+          {/* None checkbox */}
+          <label className="flex items-center gap-2 cursor-pointer mb-3">
+            <input
+              type="checkbox"
+              checked={form.no_other_languages}
+              onChange={(e) => handleChange('no_other_languages', e.target.checked)}
+              className="h-4 w-4 rounded border-gray-300 text-maroon focus:ring-maroon"
+            />
+            <span className="text-sm text-slate">No, I only speak my primary language</span>
+          </label>
+          
+          {/* Language options - disabled if "no other languages" is checked */}
+          <div className={`flex flex-wrap gap-2 ${form.no_other_languages ? 'opacity-50 pointer-events-none' : ''}`}>
             {languageOptions.map((lang) => (
               <button
                 key={lang}
                 type="button"
                 onClick={() => toggleLanguage(lang)}
+                disabled={form.no_other_languages}
                 className={`rounded-lg border px-3 py-1.5 text-sm font-medium transition-colors ${
                   form.other_languages.includes(lang)
                     ? 'border-maroon bg-maroon-subtle text-maroon'
