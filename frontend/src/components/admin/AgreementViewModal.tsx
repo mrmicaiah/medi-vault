@@ -43,9 +43,9 @@ export function AgreementViewModal({
       />
 
       {/* Modal */}
-      <div className="relative z-10 w-full max-w-4xl max-h-[90vh] bg-white rounded-lg shadow-xl flex flex-col mx-4">
+      <div className="relative z-10 w-full max-w-4xl h-[90vh] bg-white rounded-lg shadow-xl flex flex-col mx-4">
         {/* Header */}
-        <div className="flex items-center justify-between px-6 py-4 border-b border-gray-200">
+        <div className="flex items-center justify-between px-6 py-4 border-b border-gray-200 shrink-0">
           <h2 className="text-lg font-semibold text-navy">{agreementName}</h2>
           <button
             onClick={onClose}
@@ -57,8 +57,8 @@ export function AgreementViewModal({
           </button>
         </div>
 
-        {/* Content */}
-        <div className="flex-1 overflow-hidden p-4 min-h-[500px]">
+        {/* Content - takes all available space */}
+        <div className="flex-1 overflow-hidden p-4">
           {loading ? (
             <div className="flex items-center justify-center h-full">
               <div className="text-center">
@@ -75,6 +75,7 @@ export function AgreementViewModal({
               className="w-full h-full border border-gray-200 rounded bg-white"
               title={agreementName}
               sandbox="allow-same-origin"
+              style={{ minHeight: '100%' }}
             />
           ) : (
             <div className="flex items-center justify-center h-full">
@@ -84,7 +85,7 @@ export function AgreementViewModal({
         </div>
 
         {/* Footer */}
-        <div className="flex items-center justify-end gap-3 px-6 py-4 border-t border-gray-200">
+        <div className="flex items-center justify-end gap-3 px-6 py-4 border-t border-gray-200 shrink-0">
           {onDownload && (
             <Button variant="secondary" onClick={onDownload}>
               <svg className="mr-2 h-4 w-4" fill="none" viewBox="0 0 24 24" stroke="currentColor">
