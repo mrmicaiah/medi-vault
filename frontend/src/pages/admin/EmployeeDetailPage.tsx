@@ -123,6 +123,7 @@ export function EmployeeDetailPage() {
   useEffect(() => {
     if (id) {
       loadEmployee();
+      loadComplianceSummary();
     }
   }, [id]);
 
@@ -180,7 +181,7 @@ export function EmployeeDetailPage() {
         formData.append('file', uploadFile);
       }
 
-      await api.postForm(`/employees/${id}/compliance-documents`, formData);
+      await api.postFormData(`/employees/${id}/compliance-documents`, formData);
       
       setShowUploadModal(false);
       setUploadForm({
