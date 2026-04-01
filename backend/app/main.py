@@ -21,6 +21,9 @@ from app.routers import (
     invitations,
     agencies,
 )
+from app.routers.clients import router as clients_router
+from app.routers.employee_compliance import router as employee_compliance_router
+from app.routers.employee_compliance import compliance_router as compliance_dashboard_router
 
 # Configure logging
 logging.basicConfig(level=logging.INFO)
@@ -35,7 +38,7 @@ logger.info(f"[CORS] Parsed origins list: {settings.cors_origin_list}")
 app = FastAPI(
     title="MediVault API",
     description="Home care agency applicant-to-employee management platform",
-    version="1.0.1",
+    version="1.0.2",
     docs_url="/api/docs",
     redoc_url="/api/redoc",
     openapi_url="/api/openapi.json",
@@ -107,7 +110,7 @@ async def health_check():
     return {
         "status": "healthy", 
         "service": "medivault-api", 
-        "version": "1.0.1",
+        "version": "1.0.2",
         "cors_origins": ALLOWED_ORIGINS,
     }
 
@@ -124,3 +127,8 @@ app.include_router(sensitive_data.router, prefix="/api")
 app.include_router(users.router, prefix="/api")
 app.include_router(invitations.router, prefix="/api")
 app.include_router(agencies.router, prefix="/api")
+
+# New routers for clients and employee compliance
+app.include_router(clients_router, prefix="/api")
+app.include_router(employee_compliance_router, prefix="/api")
+app.include_router(compliance_dashboard_router, prefix="/api")
