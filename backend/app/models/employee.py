@@ -22,16 +22,29 @@ class Employee(BaseModel):
     id: Optional[str] = None
     user_id: str
     application_id: str
+    
+    # Agency/location assignment
+    agency_id: Optional[str] = None
+    location_id: Optional[str] = None
+    
+    # Employee identification
     employee_number: Optional[str] = None
+    
+    # Employment details
     status: EmployeeStatus = EmployeeStatus.ACTIVE
     hire_date: str
+    start_date: Optional[str] = None
     job_title: Optional[str] = None
     department: Optional[str] = None
+    
+    # Compensation
     pay_rate: Optional[float] = None
     pay_type: Optional[str] = None  # hourly, salary
-    start_date: Optional[str] = None
+    
+    # Termination
     termination_date: Optional[str] = None
     termination_reason: Optional[str] = None
+    
     notes: Optional[str] = None
     created_at: Optional[str] = None
     updated_at: Optional[str] = None
