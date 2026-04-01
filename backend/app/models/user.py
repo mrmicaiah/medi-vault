@@ -27,6 +27,11 @@ class UserProfile(BaseModel):
     last_name: str
     role: UserRole = UserRole.APPLICANT
     phone: Optional[str] = None
+    
+    # Agency/location assignment
+    agency_id: Optional[str] = None
+    location_id: Optional[str] = None
+    
     created_at: Optional[str] = None
     updated_at: Optional[str] = None
 
