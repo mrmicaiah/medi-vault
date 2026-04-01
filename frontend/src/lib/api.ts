@@ -1,8 +1,10 @@
 import { supabase } from './supabase';
 
-// For local dev: http://localhost:8000/api
-// For production: https://medi-vault-api.onrender.com/api
-const API_URL = import.meta.env.VITE_API_URL || 'http://localhost:8000';
+// For local dev: http://localhost:8000
+// For production: https://medi-vault-api.onrender.com
+// The /api prefix is added here, not in the env var
+const BASE_URL = import.meta.env.VITE_API_URL || 'http://localhost:8000';
+const API_URL = `${BASE_URL}/api`;
 
 async function getAuthHeaders(): Promise<Record<string, string>> {
   const { data } = await supabase.auth.getSession();
