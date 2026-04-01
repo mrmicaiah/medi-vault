@@ -6,6 +6,7 @@ import { Button } from '../../components/ui/Button';
 import { Badge } from '../../components/ui/Badge';
 import { Input } from '../../components/ui/Input';
 import { Alert } from '../../components/ui/Alert';
+import { AgreementViewModal } from '../../components/admin/AgreementViewModal';
 import { formatDate } from '../../lib/utils';
 
 // Build API URL the same way as lib/api.ts
@@ -59,6 +60,14 @@ export default function DocumentsPage() {
   const [loadingDocs, setLoadingDocs] = useState(false);
   const [error, setError] = useState<string | null>(null);
   const [downloadingId, setDownloadingId] = useState<string | null>(null);
+  
+  // Agreement view modal state
+  const [agreementModal, setAgreementModal] = useState<{
+    isOpen: boolean;
+    name: string;
+    pdfUrl: string | null;
+    loading: boolean;
+  }>({ isOpen: false, name: '', pdfUrl: null, loading: false });
 
   // Load applicants on mount
   useEffect(() => {
@@ -78,7 +87,6 @@ export default function DocumentsPage() {
       setLoading(true);
       setError(null);
       
-      // Use the api helper which handles URL construction correctly
       const data = await api.get<{ applications: Applicant[] }>('/admin/pipeline');
       setApplicants(data.applications || []);
     } catch (err) {
@@ -109,8 +117,6 @@ export default function DocumentsPage() {
       setDownloadingId(endpoint);
       const headers = await getAuthHeaders();
       
-      // endpoint is like "/admin/applicants/{id}/pdf/application"
-      // API_URL is "http://localhost:8000/api"
       const res = await fetch(`${API_URL}${endpoint}`, { headers });
       
       if (!res.ok) {
@@ -133,11 +139,39 @@ export default function DocumentsPage() {
     }
   }
 
+  async function viewAgreement(endpoint: string, name: string) {
+    try {
+      setAgreementModal({ isOpen: true, name, pdfUrl: null, loading: true });
+      
+      const headers = await getAuthHeaders();
+      const res = await fetch(`${API_URL}${endpoint}`, { headers });
+      
+      if (!res.ok) {
+        throw new Error('Failed to load agreement');
+      }
+      
+      const blob = await res.blob();
+      const url = window.URL.createObjectURL(blob);
+      
+      setAgreementModal({ isOpen: true, name, pdfUrl: url, loading: false });
+    } catch (err) {
+      setError(err instanceof Error ? err.message : 'Failed to view agreement');
+      setAgreementModal({ isOpen: false, name: '', pdfUrl: null, loading: false });
+    }
+  }
+
+  function closeAgreementModal() {
+    // Revoke the blob URL to free memory
+    if (agreementModal.pdfUrl) {
+      window.URL.revokeObjectURL(agreementModal.pdfUrl);
+    }
+    setAgreementModal({ isOpen: false, name: '', pdfUrl: null, loading: false });
+  }
+
   async function viewDocument(endpoint: string) {
     try {
       setDownloadingId(endpoint);
       
-      // endpoint is like "/admin/applicants/{id}/documents/{step}/url"
       const data = await api.get<{ signed_url: string }>(endpoint);
       if (data.signed_url) {
         window.open(data.signed_url, '_blank');
@@ -356,17 +390,30 @@ export default function DocumentsPage() {
                           </div>
                         </div>
                         {agreement.signed && (
-                          <Button
-                            size="sm"
-                            variant="secondary"
-                            onClick={() => downloadPdf(agreement.endpoint, `${documentSummary.applicant_name.replace(/\s+/g, '_')}_${agreement.type}.pdf`)}
-                            loading={downloadingId === agreement.endpoint}
-                          >
-                            <svg className="mr-1 h-4 w-4" fill="none" viewBox="0 0 24 24" stroke="currentColor">
-                              <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M4 16v1a3 3 0 003 3h10a3 3 0 003-3v-1m-4-4l-4 4m0 0l-4-4m4 4V4" />
-                            </svg>
-                            Download
-                          </Button>
+                          <div className="flex gap-2">
+                            <Button
+                              size="sm"
+                              variant="ghost"
+                              onClick={() => viewAgreement(agreement.endpoint, agreement.name)}
+                            >
+                              <svg className="mr-1 h-4 w-4" fill="none" viewBox="0 0 24 24" stroke="currentColor">
+                                <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M15 12a3 3 0 11-6 0 3 3 0 016 0z" />
+                                <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M2.458 12C3.732 7.943 7.523 5 12 5c4.478 0 8.268 2.943 9.542 7-1.274 4.057-5.064 7-9.542 7-4.477 0-8.268-2.943-9.542-7z" />
+                              </svg>
+                              View
+                            </Button>
+                            <Button
+                              size="sm"
+                              variant="secondary"
+                              onClick={() => downloadPdf(agreement.endpoint, `${documentSummary.applicant_name.replace(/\s+/g, '_')}_${agreement.type}.pdf`)}
+                              loading={downloadingId === agreement.endpoint}
+                            >
+                              <svg className="mr-1 h-4 w-4" fill="none" viewBox="0 0 24 24" stroke="currentColor">
+                                <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M4 16v1a3 3 0 003 3h10a3 3 0 003-3v-1m-4-4l-4 4m0 0l-4-4m4 4V4" />
+                              </svg>
+                              Download
+                            </Button>
+                          </div>
                         )}
                       </div>
                     ))}
@@ -428,6 +475,15 @@ export default function DocumentsPage() {
           )}
         </div>
       </div>
+
+      {/* Agreement View Modal */}
+      <AgreementViewModal
+        isOpen={agreementModal.isOpen}
+        onClose={closeAgreementModal}
+        pdfUrl={agreementModal.pdfUrl}
+        agreementName={agreementModal.name}
+        loading={agreementModal.loading}
+      />
     </div>
   );
 }
