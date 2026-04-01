@@ -221,6 +221,8 @@ class ApplicationService:
         self, app_id: str, step_number: int, data: dict, step_status: str, user_id: str
     ) -> ApplicationStepResponse:
         """Save data for a specific step."""
+        logger.info(f"save_step called: app_id={app_id}, step_number={step_number}, status={step_status}")
+        
         # Verify ownership
         app = self.get_application(app_id, user_id)
 
@@ -261,22 +263,28 @@ class ApplicationService:
         if is_completed:
             update_data["completed_at"] = now
 
+        logger.info(f"Updating step {step_number} with data keys: {list(data.keys())}")
+
         # First, update the step
-        self.supabase.table("application_steps").update(update_data).eq(
+        update_result = self.supabase.table("application_steps").update(update_data).eq(
             "application_id", app_id
         ).eq("step_number", step_number).execute()
+        
+        logger.info(f"Update result: {update_result}")
 
-        # Then fetch the updated step (supabase-py 2.0.x doesn't always return updated data)
+        # Then fetch the updated step without .single() to avoid errors
         step_result = (
             self.supabase.table("application_steps")
             .select("*")
             .eq("application_id", app_id)
             .eq("step_number", step_number)
-            .single()
             .execute()
         )
 
-        if not step_result.data:
+        logger.info(f"Fetch result: {step_result}")
+
+        if not step_result.data or len(step_result.data) == 0:
+            logger.error(f"Step {step_number} not found for app {app_id}")
             raise HTTPException(
                 status_code=status.HTTP_404_NOT_FOUND,
                 detail=f"Step {step_number} not found",
@@ -292,7 +300,7 @@ class ApplicationService:
                 }
             ).eq("id", app_id).execute()
 
-        s = step_result.data
+        s = step_result.data[0]
         return ApplicationStepResponse(
             id=s.get("id"),
             application_id=s["application_id"],
