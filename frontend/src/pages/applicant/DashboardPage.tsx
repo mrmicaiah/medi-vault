@@ -8,6 +8,7 @@ import { ProgressBar } from '../../components/ui/ProgressBar';
 import { Alert } from '../../components/ui/Alert';
 import { DocumentUploadModal } from '../../components/applicant/DocumentUploadModal';
 import { PhotoIDUploadModal } from '../../components/applicant/PhotoIDUploadModal';
+import { PhotoIDViewModal } from '../../components/applicant/PhotoIDViewModal';
 import { TOTAL_STEPS } from '../../types';
 import { formatDate, daysUntil } from '../../lib/utils';
 import { api } from '../../lib/api';
@@ -38,7 +39,6 @@ const DOCUMENT_STEPS: Record<number, { name: string; category: string; required:
   17: { name: 'TB Test Results', category: 'Health', required: true },
 };
 
-// Document groups for display
 interface DocumentGroup {
   id: string;
   name: string;
@@ -125,6 +125,7 @@ export function ApplicantDashboardPage() {
   const [application, setApplication] = useState<Application | null>(null);
   const [steps, setSteps] = useState<ApplicationStep[]>([]);
   
+  // Single-document upload modal state
   const [uploadModal, setUploadModal] = useState<{
     isOpen: boolean;
     stepNumber: number;
@@ -132,7 +133,15 @@ export function ApplicantDashboardPage() {
     existingData?: Record<string, unknown>;
   }>({ isOpen: false, stepNumber: 0, stepName: '' });
 
-  const [photoIdModal, setPhotoIdModal] = useState<{
+  // Photo ID upload modal (blank form)
+  const [photoIdUploadModal, setPhotoIdUploadModal] = useState<{
+    isOpen: boolean;
+    existingFrontData?: Record<string, unknown>;
+    existingBackData?: Record<string, unknown>;
+  }>({ isOpen: false });
+
+  // Photo ID view modal (read-only)
+  const [photoIdViewModal, setPhotoIdViewModal] = useState<{
     isOpen: boolean;
     frontData?: Record<string, unknown>;
     backData?: Record<string, unknown>;
@@ -291,8 +300,16 @@ export function ApplicantDashboardPage() {
     });
   };
 
-  const handlePhotoIdClick = () => {
-    setPhotoIdModal({
+  const handlePhotoIdUploadClick = () => {
+    setPhotoIdUploadModal({
+      isOpen: true,
+      existingFrontData: getStepData(12),
+      existingBackData: getStepData(13),
+    });
+  };
+
+  const handlePhotoIdViewClick = () => {
+    setPhotoIdViewModal({
       isOpen: true,
       frontData: getStepData(12),
       backData: getStepData(13),
@@ -469,6 +486,7 @@ export function ApplicantDashboardPage() {
           {groupedDocuments.map((groupDoc) => {
             const needsAttention = groupDoc.status === 'needed' || groupDoc.status === 'expired';
             const canUpload = !isRejected;
+            const hasUploads = groupDoc.uploadedCount > 0;
             
             return (
               <div
@@ -541,26 +559,39 @@ export function ApplicantDashboardPage() {
                   </div>
                   
                   <div className="flex gap-2 ml-4">
+                    {/* Photo ID group: View + Update buttons */}
                     {groupDoc.group.id === 'photo_id' && canUpload && isSubmitted && (
-                      <Button 
-                        size="sm" 
-                        variant={groupDoc.status === 'needed' || groupDoc.status === 'expired' ? 'primary' : 'ghost'}
-                        onClick={handlePhotoIdClick}
-                      >
-                        {groupDoc.status === 'needed' || groupDoc.status === 'expired' ? 'Upload' : 'Update'}
-                      </Button>
+                      <>
+                        {hasUploads && (
+                          <Button 
+                            size="sm" 
+                            variant="ghost"
+                            onClick={handlePhotoIdViewClick}
+                          >
+                            View
+                          </Button>
+                        )}
+                        <Button 
+                          size="sm" 
+                          variant={needsAttention ? 'primary' : 'secondary'}
+                          onClick={handlePhotoIdUploadClick}
+                        >
+                          {needsAttention ? 'Upload' : 'Update'}
+                        </Button>
+                      </>
                     )}
                     {groupDoc.group.id === 'photo_id' && canUpload && !isSubmitted && (
                       <Link to="/applicant/application?step=12">
                         <Button 
                           size="sm" 
-                          variant={groupDoc.status === 'needed' || groupDoc.status === 'expired' ? 'primary' : 'ghost'}
+                          variant={needsAttention ? 'primary' : 'ghost'}
                         >
-                          {groupDoc.status === 'needed' || groupDoc.status === 'expired' ? 'Upload' : 'Update'}
+                          {needsAttention ? 'Upload' : 'Update'}
                         </Button>
                       </Link>
                     )}
                     
+                    {/* Other document groups */}
                     {groupDoc.group.id !== 'photo_id' && canUpload && groupDoc.items.map(item => {
                       const showUpload = item.status === 'needed' || item.status === 'expired';
                       const buttonLabel = showUpload ? 'Upload' : 'Update';
@@ -596,6 +627,7 @@ export function ApplicantDashboardPage() {
         </p>
       </Card>
 
+      {/* Single document upload modal */}
       {application && (
         <DocumentUploadModal
           isOpen={uploadModal.isOpen}
@@ -608,16 +640,25 @@ export function ApplicantDashboardPage() {
         />
       )}
 
+      {/* Photo ID upload modal (blank form) */}
       {application && (
         <PhotoIDUploadModal
-          isOpen={photoIdModal.isOpen}
-          onClose={() => setPhotoIdModal({ isOpen: false })}
+          isOpen={photoIdUploadModal.isOpen}
+          onClose={() => setPhotoIdUploadModal({ isOpen: false })}
           onSuccess={handleUploadSuccess}
           applicationId={application.id}
-          frontData={photoIdModal.frontData}
-          backData={photoIdModal.backData}
+          existingFrontData={photoIdUploadModal.existingFrontData}
+          existingBackData={photoIdUploadModal.existingBackData}
         />
       )}
+
+      {/* Photo ID view modal (read-only) */}
+      <PhotoIDViewModal
+        isOpen={photoIdViewModal.isOpen}
+        onClose={() => setPhotoIdViewModal({ isOpen: false })}
+        frontData={photoIdViewModal.frontData}
+        backData={photoIdViewModal.backData}
+      />
     </div>
   );
 }
