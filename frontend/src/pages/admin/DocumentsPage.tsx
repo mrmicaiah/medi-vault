@@ -7,6 +7,7 @@ import { Badge } from '../../components/ui/Badge';
 import { Input } from '../../components/ui/Input';
 import { Alert } from '../../components/ui/Alert';
 import { AgreementViewModal } from '../../components/admin/AgreementViewModal';
+import { DocumentPreviewModal } from '../../components/admin/DocumentPreviewModal';
 import { formatDate } from '../../lib/utils';
 
 interface Applicant {
@@ -58,7 +59,7 @@ export default function DocumentsPage() {
   const [error, setError] = useState<string | null>(null);
   const [downloadingId, setDownloadingId] = useState<string | null>(null);
   
-  // Agreement view modal state - now shows HTML content
+  // Agreement view modal state - shows HTML content
   const [agreementModal, setAgreementModal] = useState<{
     isOpen: boolean;
     name: string;
@@ -66,6 +67,15 @@ export default function DocumentsPage() {
     loading: boolean;
     pdfEndpoint: string | null;
   }>({ isOpen: false, name: '', htmlContent: null, loading: false, pdfEndpoint: null });
+
+  // Document preview modal state - shows images/PDFs
+  const [documentModal, setDocumentModal] = useState<{
+    isOpen: boolean;
+    name: string;
+    url: string | null;
+    fileName?: string;
+    loading: boolean;
+  }>({ isOpen: false, name: '', url: null, loading: false });
 
   // Load applicants on mount
   useEffect(() => {
@@ -151,19 +161,32 @@ export default function DocumentsPage() {
     setAgreementModal({ isOpen: false, name: '', htmlContent: null, loading: false, pdfEndpoint: null });
   }
 
-  async function viewDocument(endpoint: string) {
+  async function viewDocument(endpoint: string, name: string, fileName?: string) {
     try {
-      setDownloadingId(endpoint);
+      setDocumentModal({ isOpen: true, name, url: null, fileName, loading: true });
       
-      const data = await api.get<{ signed_url: string }>(endpoint);
+      // Get signed URL from backend
+      const data = await api.get<{ signed_url: string; file_name?: string }>(endpoint);
+      
       if (data.signed_url) {
-        window.open(data.signed_url, '_blank');
+        setDocumentModal({ 
+          isOpen: true, 
+          name, 
+          url: data.signed_url, 
+          fileName: data.file_name || fileName,
+          loading: false 
+        });
+      } else {
+        throw new Error('No URL returned');
       }
     } catch (err) {
       setError(err instanceof Error ? err.message : 'Failed to view document');
-    } finally {
-      setDownloadingId(null);
+      setDocumentModal({ isOpen: false, name: '', url: null, loading: false });
     }
+  }
+
+  function closeDocumentModal() {
+    setDocumentModal({ isOpen: false, name: '', url: null, loading: false });
   }
 
   // Filter applicants based on search
@@ -435,7 +458,7 @@ export default function DocumentsPage() {
                         <Button
                           size="sm"
                           variant="ghost"
-                          onClick={() => viewDocument(doc.endpoint)}
+                          onClick={() => viewDocument(doc.endpoint, doc.name, doc.filename)}
                           loading={downloadingId === doc.endpoint}
                         >
                           <svg className="mr-1 h-4 w-4" fill="none" viewBox="0 0 24 24" stroke="currentColor">
@@ -463,7 +486,7 @@ export default function DocumentsPage() {
         </div>
       </div>
 
-      {/* Agreement View Modal - now renders HTML */}
+      {/* Agreement View Modal - renders HTML */}
       <AgreementViewModal
         isOpen={agreementModal.isOpen}
         onClose={closeAgreementModal}
@@ -478,6 +501,16 @@ export default function DocumentsPage() {
             );
           }
         } : undefined}
+      />
+
+      {/* Document Preview Modal - shows images/PDFs */}
+      <DocumentPreviewModal
+        isOpen={documentModal.isOpen}
+        onClose={closeDocumentModal}
+        documentUrl={documentModal.url}
+        documentName={documentModal.name}
+        fileName={documentModal.fileName}
+        loading={documentModal.loading}
       />
     </div>
   );
