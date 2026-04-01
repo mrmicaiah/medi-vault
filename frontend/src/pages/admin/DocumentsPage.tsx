@@ -29,8 +29,9 @@ interface DocumentSummary {
       type: string;
       name: string;
       endpoint: string;
+      preview_endpoint?: string | null;
     }>;
-    agreements: Array<{
+    onboarding_agreements: Array<{
       type: string;
       name: string;
       signed: boolean;
@@ -59,8 +60,8 @@ export default function DocumentsPage() {
   const [error, setError] = useState<string | null>(null);
   const [downloadingId, setDownloadingId] = useState<string | null>(null);
   
-  // Agreement view modal state - shows HTML content
-  const [agreementModal, setAgreementModal] = useState<{
+  // HTML preview modal state (for agreements and employment application)
+  const [htmlPreviewModal, setHtmlPreviewModal] = useState<{
     isOpen: boolean;
     name: string;
     htmlContent: string | null;
@@ -132,9 +133,9 @@ export default function DocumentsPage() {
     }
   }
 
-  async function viewAgreement(previewEndpoint: string, pdfEndpoint: string, name: string) {
+  async function viewHtmlPreview(previewEndpoint: string, pdfEndpoint: string, name: string) {
     try {
-      setAgreementModal({ isOpen: true, name, htmlContent: null, loading: true, pdfEndpoint });
+      setHtmlPreviewModal({ isOpen: true, name, htmlContent: null, loading: true, pdfEndpoint });
       
       // Fetch HTML preview (works without WeasyPrint)
       const { data: { session } } = await supabase.auth.getSession();
@@ -145,20 +146,20 @@ export default function DocumentsPage() {
       });
       
       if (!res.ok) {
-        throw new Error('Failed to load agreement preview');
+        throw new Error('Failed to load preview');
       }
       
       const htmlContent = await res.text();
       
-      setAgreementModal({ isOpen: true, name, htmlContent, loading: false, pdfEndpoint });
+      setHtmlPreviewModal({ isOpen: true, name, htmlContent, loading: false, pdfEndpoint });
     } catch (err) {
-      setError(err instanceof Error ? err.message : 'Failed to view agreement');
-      setAgreementModal({ isOpen: false, name: '', htmlContent: null, loading: false, pdfEndpoint: null });
+      setError(err instanceof Error ? err.message : 'Failed to view document');
+      setHtmlPreviewModal({ isOpen: false, name: '', htmlContent: null, loading: false, pdfEndpoint: null });
     }
   }
 
-  function closeAgreementModal() {
-    setAgreementModal({ isOpen: false, name: '', htmlContent: null, loading: false, pdfEndpoint: null });
+  function closeHtmlPreviewModal() {
+    setHtmlPreviewModal({ isOpen: false, name: '', htmlContent: null, loading: false, pdfEndpoint: null });
   }
 
   async function viewDocument(endpoint: string, name: string, fileName?: string) {
@@ -330,8 +331,8 @@ export default function DocumentsPage() {
                 </div>
               </Card>
 
-              {/* Generated Documents */}
-              <Card header="Generated Documents">
+              {/* Signed Application Documents */}
+              <Card header="Signed Application">
                 <div className="divide-y divide-border">
                   {documentSummary.documents.generated.map((doc) => (
                     <div key={doc.type} className="flex items-center justify-between p-4">
@@ -343,34 +344,49 @@ export default function DocumentsPage() {
                         </div>
                         <div>
                           <p className="font-medium text-slate">{doc.name}</p>
-                          <p className="text-xs text-gray">Auto-generated from application data</p>
+                          <p className="text-xs text-gray">Generated from application data</p>
                         </div>
                       </div>
-                      <Button
-                        size="sm"
-                        variant="secondary"
-                        onClick={() => downloadPdf(doc.endpoint, `${documentSummary.applicant_name.replace(/\s+/g, '_')}_${doc.type}.pdf`)}
-                        loading={downloadingId === doc.endpoint}
-                      >
-                        <svg className="mr-1 h-4 w-4" fill="none" viewBox="0 0 24 24" stroke="currentColor">
-                          <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M4 16v1a3 3 0 003 3h10a3 3 0 003-3v-1m-4-4l-4 4m0 0l-4-4m4 4V4" />
-                        </svg>
-                        Download
-                      </Button>
+                      <div className="flex gap-2">
+                        {doc.preview_endpoint && (
+                          <Button
+                            size="sm"
+                            variant="ghost"
+                            onClick={() => viewHtmlPreview(doc.preview_endpoint!, doc.endpoint, doc.name)}
+                          >
+                            <svg className="mr-1 h-4 w-4" fill="none" viewBox="0 0 24 24" stroke="currentColor">
+                              <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M15 12a3 3 0 11-6 0 3 3 0 016 0z" />
+                              <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M2.458 12C3.732 7.943 7.523 5 12 5c4.478 0 8.268 2.943 9.542 7-1.274 4.057-5.064 7-9.542 7-4.477 0-8.268-2.943-9.542-7z" />
+                            </svg>
+                            View
+                          </Button>
+                        )}
+                        <Button
+                          size="sm"
+                          variant="secondary"
+                          onClick={() => downloadPdf(doc.endpoint, `${documentSummary.applicant_name.replace(/\s+/g, '_')}_${doc.type}.pdf`)}
+                          loading={downloadingId === doc.endpoint}
+                        >
+                          <svg className="mr-1 h-4 w-4" fill="none" viewBox="0 0 24 24" stroke="currentColor">
+                            <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M4 16v1a3 3 0 003 3h10a3 3 0 003-3v-1m-4-4l-4 4m0 0l-4-4m4 4V4" />
+                          </svg>
+                          Download
+                        </Button>
+                      </div>
                     </div>
                   ))}
                 </div>
               </Card>
 
-              {/* Signed Agreements */}
-              <Card header="Signed Agreements">
-                {documentSummary.documents.agreements.length === 0 ? (
+              {/* Onboarding Agreements */}
+              <Card header="Onboarding Agreements">
+                {documentSummary.documents.onboarding_agreements.length === 0 ? (
                   <div className="p-4 text-center text-sm text-gray">
                     No agreements signed yet
                   </div>
                 ) : (
                   <div className="divide-y divide-border">
-                    {documentSummary.documents.agreements.map((agreement) => (
+                    {documentSummary.documents.onboarding_agreements.map((agreement) => (
                       <div key={agreement.type} className="flex items-center justify-between p-4">
                         <div className="flex items-center gap-3">
                           <div className={`flex h-10 w-10 items-center justify-center rounded-lg ${
@@ -400,7 +416,7 @@ export default function DocumentsPage() {
                             <Button
                               size="sm"
                               variant="ghost"
-                              onClick={() => viewAgreement(
+                              onClick={() => viewHtmlPreview(
                                 agreement.preview_endpoint || agreement.endpoint.replace('/pdf/agreement/', '/agreement/') + '/preview',
                                 agreement.endpoint,
                                 agreement.name
@@ -486,18 +502,18 @@ export default function DocumentsPage() {
         </div>
       </div>
 
-      {/* Agreement View Modal - renders HTML */}
+      {/* HTML Preview Modal - for agreements and employment application */}
       <AgreementViewModal
-        isOpen={agreementModal.isOpen}
-        onClose={closeAgreementModal}
-        htmlContent={agreementModal.htmlContent}
-        agreementName={agreementModal.name}
-        loading={agreementModal.loading}
-        onDownload={agreementModal.pdfEndpoint ? () => {
-          if (agreementModal.pdfEndpoint && documentSummary) {
+        isOpen={htmlPreviewModal.isOpen}
+        onClose={closeHtmlPreviewModal}
+        htmlContent={htmlPreviewModal.htmlContent}
+        agreementName={htmlPreviewModal.name}
+        loading={htmlPreviewModal.loading}
+        onDownload={htmlPreviewModal.pdfEndpoint ? () => {
+          if (htmlPreviewModal.pdfEndpoint && documentSummary) {
             downloadPdf(
-              agreementModal.pdfEndpoint,
-              `${documentSummary.applicant_name.replace(/\s+/g, '_')}_agreement.pdf`
+              htmlPreviewModal.pdfEndpoint,
+              `${documentSummary.applicant_name.replace(/\s+/g, '_')}_document.pdf`
             );
           }
         } : undefined}
