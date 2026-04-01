@@ -148,6 +148,11 @@ export function ApplicantDetailPage() {
   const initEditForm = (res: ApplicationData) => {
     const step2Data = res.steps.find(s => s.step_number === 2)?.data || {};
     const step3Data = res.steps.find(s => s.step_number === 3)?.data || {};
+    // Emergency contact fields use ec_ prefix from EmergencyContact.tsx
+    const ecFirstName = getStepString(step3Data, 'ec_first_name');
+    const ecLastName = getStepString(step3Data, 'ec_last_name');
+    const ecFullName = [ecFirstName, ecLastName].filter(Boolean).join(' ');
+    
     setEditForm({
       first_name: res.profile.first_name || '',
       last_name: res.profile.last_name || '',
@@ -159,9 +164,12 @@ export function ApplicantDetailPage() {
       state: getStepString(step2Data, 'state'),
       zip: getStepString(step2Data, 'zip'),
       date_of_birth: getStepString(step2Data, 'date_of_birth'),
-      emergency_name: getStepString(step3Data, 'name'),
-      emergency_relationship: getStepString(step3Data, 'relationship'),
-      emergency_phone: getStepString(step3Data, 'phone'),
+      emergency_first_name: ecFirstName,
+      emergency_last_name: ecLastName,
+      emergency_name: ecFullName, // For display in read mode
+      emergency_relationship: getStepString(step3Data, 'ec_relationship'),
+      emergency_phone: getStepString(step3Data, 'ec_phone'),
+      emergency_email: getStepString(step3Data, 'ec_email'),
     });
   };
 
@@ -403,9 +411,9 @@ export function ApplicantDetailPage() {
                   <div>
                     <p className="text-xs font-medium text-gray uppercase tracking-wide">Emergency Contact</p>
                     <p className="mt-1 text-slate">
-                      {getStepString(step3Data, 'name') || '—'}
-                      {getStepString(step3Data, 'relationship') && <span className="text-gray"> ({getStepString(step3Data, 'relationship')})</span>}
-                      {getStepString(step3Data, 'phone') && <><br />{getStepString(step3Data, 'phone')}</>}
+                      {[getStepString(step3Data, 'ec_first_name'), getStepString(step3Data, 'ec_last_name')].filter(Boolean).join(' ') || '—'}
+                      {getStepString(step3Data, 'ec_relationship') && <span className="text-gray"> ({getStepString(step3Data, 'ec_relationship')})</span>}
+                      {getStepString(step3Data, 'ec_phone') && <><br />{getStepString(step3Data, 'ec_phone')}</>}
                     </p>
                   </div>
                   <div>
@@ -513,13 +521,22 @@ export function ApplicantDetailPage() {
                 
                 <div className="md:col-span-2 border-t border-border pt-4 mt-2">
                   <h3 className="text-sm font-semibold text-navy mb-3">Emergency Contact</h3>
-                  <div className="grid grid-cols-1 md:grid-cols-3 gap-4">
+                  <div className="grid grid-cols-1 md:grid-cols-4 gap-4">
                     <div>
-                      <label className="block text-xs font-medium text-gray uppercase mb-1">Name</label>
+                      <label className="block text-xs font-medium text-gray uppercase mb-1">First Name</label>
                       <input
                         type="text"
-                        value={editForm.emergency_name}
-                        onChange={(e) => setEditForm({ ...editForm, emergency_name: e.target.value })}
+                        value={editForm.emergency_first_name}
+                        onChange={(e) => setEditForm({ ...editForm, emergency_first_name: e.target.value })}
+                        className="w-full px-3 py-2 border border-border rounded-lg text-sm focus:border-maroon focus:ring-2 focus:ring-maroon/20 outline-none"
+                      />
+                    </div>
+                    <div>
+                      <label className="block text-xs font-medium text-gray uppercase mb-1">Last Name</label>
+                      <input
+                        type="text"
+                        value={editForm.emergency_last_name}
+                        onChange={(e) => setEditForm({ ...editForm, emergency_last_name: e.target.value })}
                         className="w-full px-3 py-2 border border-border rounded-lg text-sm focus:border-maroon focus:ring-2 focus:ring-maroon/20 outline-none"
                       />
                     </div>
