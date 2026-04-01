@@ -1,5 +1,6 @@
 import { useState, useEffect, useMemo } from 'react';
 import { supabase } from '../../lib/supabase';
+import { api } from '../../lib/api';
 import { Card } from '../../components/ui/Card';
 import { Button } from '../../components/ui/Button';
 import { Badge } from '../../components/ui/Badge';
@@ -7,7 +8,9 @@ import { Input } from '../../components/ui/Input';
 import { Alert } from '../../components/ui/Alert';
 import { formatDate } from '../../lib/utils';
 
-const API_BASE = import.meta.env.VITE_API_URL || 'http://localhost:8000';
+// Build API URL the same way as lib/api.ts
+const BASE_URL = import.meta.env.VITE_API_URL || 'http://localhost:8000';
+const API_URL = `${BASE_URL}/api`;
 
 interface Applicant {
   id: string;
@@ -75,15 +78,8 @@ export default function DocumentsPage() {
       setLoading(true);
       setError(null);
       
-      const headers = await getAuthHeaders();
-      // API_BASE already includes /api or the full URL, admin router is at /api/admin
-      const res = await fetch(`${API_BASE}/api/admin/pipeline`, { headers });
-      
-      if (!res.ok) {
-        throw new Error('Failed to load applicants');
-      }
-      
-      const data = await res.json();
+      // Use the api helper which handles URL construction correctly
+      const data = await api.get<{ applications: Applicant[] }>('/admin/pipeline');
       setApplicants(data.applications || []);
     } catch (err) {
       setError(err instanceof Error ? err.message : 'Failed to load applicants');
@@ -98,17 +94,7 @@ export default function DocumentsPage() {
       setError(null);
       setSelectedApplicant(applicant);
       
-      const headers = await getAuthHeaders();
-      const res = await fetch(
-        `${API_BASE}/api/admin/applicants/${applicant.id}/documents-summary`,
-        { headers }
-      );
-      
-      if (!res.ok) {
-        throw new Error('Failed to load documents');
-      }
-      
-      const data = await res.json();
+      const data = await api.get<DocumentSummary>(`/admin/applicants/${applicant.id}/documents-summary`);
       setDocumentSummary(data);
     } catch (err) {
       setError(err instanceof Error ? err.message : 'Failed to load documents');
@@ -123,8 +109,9 @@ export default function DocumentsPage() {
       setDownloadingId(endpoint);
       const headers = await getAuthHeaders();
       
-      // endpoint already starts with /admin/..., so we add /api prefix
-      const res = await fetch(`${API_BASE}/api${endpoint}`, { headers });
+      // endpoint is like "/admin/applicants/{id}/pdf/application"
+      // API_URL is "http://localhost:8000/api"
+      const res = await fetch(`${API_URL}${endpoint}`, { headers });
       
       if (!res.ok) {
         throw new Error('Failed to generate PDF');
@@ -149,16 +136,9 @@ export default function DocumentsPage() {
   async function viewDocument(endpoint: string) {
     try {
       setDownloadingId(endpoint);
-      const headers = await getAuthHeaders();
       
-      // endpoint already starts with /admin/..., so we add /api prefix
-      const res = await fetch(`${API_BASE}/api${endpoint}`, { headers });
-      
-      if (!res.ok) {
-        throw new Error('Failed to get document URL');
-      }
-      
-      const data = await res.json();
+      // endpoint is like "/admin/applicants/{id}/documents/{step}/url"
+      const data = await api.get<{ signed_url: string }>(endpoint);
       if (data.signed_url) {
         window.open(data.signed_url, '_blank');
       }
