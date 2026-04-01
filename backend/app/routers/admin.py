@@ -185,7 +185,7 @@ async def get_applicant_detail(
         user_id = application.get("user_id")
         
         steps_res = supabase.table("application_steps").select(
-            "step_number, data, status, updated_at"
+            "step_number, data, is_completed, updated_at"
         ).eq("application_id", application_id).order("step_number").execute()
         
         documents = []
@@ -275,11 +275,18 @@ async def get_applicant_detail(
                         "uploaded_at": step.get("updated_at")
                     })
         
+        # Transform steps to include status field for frontend compatibility
+        steps_with_status = []
+        for step in (steps_res.data or []):
+            step_copy = dict(step)
+            step_copy["status"] = "completed" if step.get("is_completed") else "pending"
+            steps_with_status.append(step_copy)
+        
         return {
             "application": application,
             "profile": application.get("profiles") or {},
             "location": application.get("locations") or {},
-            "steps": steps_res.data or [],
+            "steps": steps_with_status,
             "documents": documents,
             "agreements": agreements,
             "uploaded_docs": uploaded_docs,
@@ -570,13 +577,13 @@ async def generate_application_pdf(
         
         application = app_res.data
         
-        steps_res = supabase.table("application_steps").select("step_number, data, status").eq("application_id", application_id).order("step_number").execute()
+        steps_res = supabase.table("application_steps").select("step_number, data, is_completed").eq("application_id", application_id).order("step_number").execute()
         
         steps = {}
         for step in (steps_res.data or []):
             steps[step["step_number"]] = {
                 "data": step.get("data") or {},
-                "completed": step.get("status") == "completed"
+                "completed": step.get("is_completed", False)
             }
         
         application_data = {
@@ -624,13 +631,13 @@ async def generate_i9_pdf(
         application = app_res.data
         user_id = application.get("user_id")
         
-        steps_res = supabase.table("application_steps").select("step_number, data, status").eq("application_id", application_id).order("step_number").execute()
+        steps_res = supabase.table("application_steps").select("step_number, data, is_completed").eq("application_id", application_id).order("step_number").execute()
         
         steps = {}
         for step in (steps_res.data or []):
             steps[step["step_number"]] = {
                 "data": step.get("data") or {},
-                "completed": step.get("status") == "completed"
+                "completed": step.get("is_completed", False)
             }
         
         ssn = None
@@ -706,7 +713,7 @@ async def generate_agreement_pdf(
         if not step_number:
             raise HTTPException(status_code=400, detail=f"Invalid agreement type: {agreement_type}")
         
-        step_res = supabase.table("application_steps").select("data, status, updated_at").eq("application_id", application_id).eq("step_number", step_number).single().execute()
+        step_res = supabase.table("application_steps").select("data, is_completed, updated_at").eq("application_id", application_id).eq("step_number", step_number).single().execute()
         if not step_res.data:
             raise HTTPException(status_code=404, detail="Agreement step not found")
         
@@ -821,12 +828,12 @@ async def get_employee_documents(
                 (22, "final_signature", "Final Signature"),
             ]
             
-            steps_res = supabase.table("application_steps").select("step_number, status, data").eq("application_id", application_id).in_("step_number", [s[0] for s in agreement_steps]).execute()
+            steps_res = supabase.table("application_steps").select("step_number, is_completed, data").eq("application_id", application_id).in_("step_number", [s[0] for s in agreement_steps]).execute()
             completed_steps = {s["step_number"]: s for s in (steps_res.data or [])}
             
             for step_num, agreement_type, name in agreement_steps:
                 step = completed_steps.get(step_num)
-                if step and step.get("status") == "completed":
+                if step and step.get("is_completed"):
                     data = step.get("data") or {}
                     documents["agreements"].append({
                         "type": agreement_type,
@@ -887,7 +894,7 @@ async def get_applicant_documents_summary(
             (17, "tb", "TB Test"),
         ]
         
-        steps_res = supabase.table("application_steps").select("step_number, data, status, updated_at").eq("application_id", application_id).in_("step_number", [s[0] for s in upload_steps]).execute()
+        steps_res = supabase.table("application_steps").select("step_number, data, is_completed, updated_at").eq("application_id", application_id).in_("step_number", [s[0] for s in upload_steps]).execute()
         upload_steps_data = {s["step_number"]: s for s in (steps_res.data or [])}
         
         for step_num, doc_type, name in upload_steps:
@@ -916,12 +923,12 @@ async def get_applicant_documents_summary(
             (22, "final_signature", "Final Signature"),
         ]
         
-        agreement_steps_res = supabase.table("application_steps").select("step_number, status, data").eq("application_id", application_id).in_("step_number", [s[0] for s in agreement_steps]).execute()
+        agreement_steps_res = supabase.table("application_steps").select("step_number, is_completed, data").eq("application_id", application_id).in_("step_number", [s[0] for s in agreement_steps]).execute()
         agreement_steps_data = {s["step_number"]: s for s in (agreement_steps_res.data or [])}
         
         for step_num, agreement_type, name in agreement_steps:
             step = agreement_steps_data.get(step_num)
-            if step and step.get("status") == "completed":
+            if step and step.get("is_completed"):
                 data = step.get("data") or {}
                 documents["agreements"].append({
                     "type": agreement_type,
