@@ -1,4 +1,5 @@
 import { useState, useEffect, useMemo } from 'react';
+import { Link } from 'react-router-dom';
 import { api } from '../../lib/api';
 import { Card } from '../../components/ui/Card';
 import { Badge } from '../../components/ui/Badge';
@@ -17,6 +18,28 @@ interface Client {
   first_name?: string;
   last_name?: string;
   created_at?: string;
+}
+
+interface ClientAssignment {
+  assignment_id: string;
+  employee_id: string;
+  employee_name: string;
+  employee_number?: string;
+  start_date: string;
+  end_date?: string;
+  is_active: boolean;
+}
+
+interface ClientDetail extends Client {
+  assignments: ClientAssignment[];
+}
+
+interface ComplianceSummary {
+  employee_id: string;
+  is_compliant: boolean;
+  alerts: string[];
+  background_check?: { status: string; effective_date: string };
+  oig_exclusion_check?: { status: string; check_result?: string; effective_date: string };
 }
 
 interface ClientListResponse {
@@ -48,7 +71,11 @@ export default function ClientsPage() {
   const [adding, setAdding] = useState(false);
 
   // Selected client slide-in panel
-  const [selectedClient, setSelectedClient] = useState<Client | null>(null);
+  const [selectedClient, setSelectedClient] = useState<ClientDetail | null>(null);
+  const [loadingDetail, setLoadingDetail] = useState(false);
+  
+  // Compliance data for assigned employees
+  const [employeeCompliance, setEmployeeCompliance] = useState<Record<string, ComplianceSummary>>({});
 
   useEffect(() => {
     loadClients();
@@ -81,6 +108,32 @@ export default function ClientsPage() {
     }
   }
 
+  async function loadClientDetail(clientId: string) {
+    try {
+      setLoadingDetail(true);
+      const data = await api.get<ClientDetail>(`/clients/${clientId}`);
+      setSelectedClient(data);
+      
+      // Load compliance for each assigned employee
+      const complianceMap: Record<string, ComplianceSummary> = {};
+      for (const assignment of data.assignments.filter(a => a.is_active)) {
+        try {
+          const compliance = await api.get<ComplianceSummary>(
+            `/employees/${assignment.employee_id}/compliance-summary`
+          );
+          complianceMap[assignment.employee_id] = compliance;
+        } catch {
+          // If compliance fails to load, skip
+        }
+      }
+      setEmployeeCompliance(complianceMap);
+    } catch (err) {
+      setError(err instanceof Error ? err.message : 'Failed to load client details');
+    } finally {
+      setLoadingDetail(false);
+    }
+  }
+
   async function handleSearch(e: React.FormEvent) {
     e.preventDefault();
     setPage(1);
@@ -101,6 +154,10 @@ export default function ClientsPage() {
     } finally {
       setAdding(false);
     }
+  }
+
+  function handleSelectClient(client: Client) {
+    loadClientDetail(client.id);
   }
 
   const filteredClients = useMemo(() => {
@@ -251,7 +308,7 @@ export default function ClientsPage() {
                         className={`cursor-pointer border-b border-border last:border-0 hover:bg-gray-50/50 ${
                           selectedClient?.id === client.id ? 'bg-maroon/5' : ''
                         }`}
-                        onClick={() => setSelectedClient(client)}
+                        onClick={() => handleSelectClient(client)}
                       >
                         <td className="px-4 py-3">
                           <p className="text-sm font-medium text-slate">{client.nickname}</p>
@@ -284,7 +341,7 @@ export default function ClientsPage() {
                             size="sm"
                             onClick={(e) => {
                               e.stopPropagation();
-                              setSelectedClient(client);
+                              handleSelectClient(client);
                             }}
                           >
                             View
@@ -343,7 +400,10 @@ export default function ClientsPage() {
                   )}
                 </div>
                 <button
-                  onClick={() => setSelectedClient(null)}
+                  onClick={() => {
+                    setSelectedClient(null);
+                    setEmployeeCompliance({});
+                  }}
                   className="rounded-lg p-1 text-gray hover:bg-gray-100"
                 >
                   <svg className="h-5 w-5" fill="none" viewBox="0 0 24 24" stroke="currentColor">
@@ -372,17 +432,104 @@ export default function ClientsPage() {
                   </span>
                 </div>
 
-                <div className="flex items-center justify-between">
-                  <span className="text-sm text-gray">Active Caregivers</span>
-                  <span className="text-sm text-slate">{selectedClient.active_assignments}</span>
-                </div>
-
                 {selectedClient.created_at && (
                   <div className="flex items-center justify-between">
                     <span className="text-sm text-gray">Added</span>
                     <span className="text-sm text-slate">
                       {formatDate(selectedClient.created_at)}
                     </span>
+                  </div>
+                )}
+              </div>
+
+              {/* Assigned Caregivers with Compliance */}
+              <div className="mt-6 pt-6 border-t border-border">
+                <h3 className="text-sm font-medium text-slate mb-3">
+                  Assigned Caregivers ({selectedClient.assignments.filter(a => a.is_active).length})
+                </h3>
+                
+                {loadingDetail ? (
+                  <div className="flex justify-center py-4">
+                    <svg className="h-5 w-5 animate-spin text-maroon" fill="none" viewBox="0 0 24 24">
+                      <circle className="opacity-25" cx="12" cy="12" r="10" stroke="currentColor" strokeWidth="4" />
+                      <path className="opacity-75" fill="currentColor" d="M4 12a8 8 0 018-8V0C5.373 0 0 5.373 0 12h4z" />
+                    </svg>
+                  </div>
+                ) : selectedClient.assignments.filter(a => a.is_active).length === 0 ? (
+                  <p className="text-xs text-gray">No caregivers assigned</p>
+                ) : (
+                  <div className="space-y-3">
+                    {selectedClient.assignments
+                      .filter(a => a.is_active)
+                      .map((assignment) => {
+                        const compliance = employeeCompliance[assignment.employee_id];
+                        return (
+                          <div key={assignment.assignment_id} className="rounded-lg border border-border p-3">
+                            <div className="flex items-start justify-between">
+                              <div>
+                                <Link 
+                                  to={`/admin/employee/${assignment.employee_id}`}
+                                  className="text-sm font-medium text-slate hover:text-maroon"
+                                >
+                                  {assignment.employee_name}
+                                </Link>
+                                {assignment.employee_number && (
+                                  <p className="text-xs text-gray">{assignment.employee_number}</p>
+                                )}
+                                <p className="text-xs text-gray mt-0.5">
+                                  Since {formatDate(assignment.start_date)}
+                                </p>
+                              </div>
+                              {compliance && (
+                                <Badge 
+                                  variant={compliance.is_compliant ? 'success' : 'error'}
+                                  className="text-xs"
+                                >
+                                  {compliance.is_compliant ? 'Compliant' : 'Non-Compliant'}
+                                </Badge>
+                              )}
+                            </div>
+                            
+                            {/* Compliance Details */}
+                            {compliance && (
+                              <div className="mt-2 pt-2 border-t border-border space-y-1">
+                                <div className="flex items-center justify-between">
+                                  <span className="text-xs text-gray">Background</span>
+                                  {compliance.background_check ? (
+                                    <span className={`text-xs ${compliance.background_check.status === 'valid' ? 'text-green-600' : 'text-red-600'}`}>
+                                      {compliance.background_check.status}
+                                    </span>
+                                  ) : (
+                                    <span className="text-xs text-red-600">Missing</span>
+                                  )}
+                                </div>
+                                <div className="flex items-center justify-between">
+                                  <span className="text-xs text-gray">OIG Check</span>
+                                  {compliance.oig_exclusion_check ? (
+                                    <span className={`text-xs ${compliance.oig_exclusion_check.check_result === 'clear' ? 'text-green-600' : 'text-red-600'}`}>
+                                      {compliance.oig_exclusion_check.check_result || compliance.oig_exclusion_check.status}
+                                    </span>
+                                  ) : (
+                                    <span className="text-xs text-red-600">Missing</span>
+                                  )}
+                                </div>
+                                {compliance.alerts.length > 0 && (
+                                  <div className="mt-1">
+                                    {compliance.alerts.slice(0, 2).map((alert, i) => (
+                                      <p key={i} className="text-xs text-warning flex items-center gap-1">
+                                        <svg className="h-3 w-3 flex-shrink-0" fill="none" viewBox="0 0 24 24" stroke="currentColor">
+                                          <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M12 9v2m0 4h.01m-6.938 4h13.856c1.54 0 2.502-1.667 1.732-3L13.732 4c-.77-1.333-2.694-1.333-3.464 0L3.34 16c-.77 1.333.192 3 1.732 3z" />
+                                        </svg>
+                                        <span className="truncate">{alert}</span>
+                                      </p>
+                                    ))}
+                                  </div>
+                                )}
+                              </div>
+                            )}
+                          </div>
+                        );
+                      })}
                   </div>
                 )}
               </div>
