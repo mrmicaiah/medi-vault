@@ -41,14 +41,21 @@ app = FastAPI(
     openapi_url="/api/openapi.json",
 )
 
-# Allowed origins - include all possible domains
+# Allowed origins - include all possible domains for local dev and production
 ALLOWED_ORIGINS = [
     "https://medisvault.com",
     "https://www.medisvault.com",
     "https://medi-vault.pages.dev",
     "http://localhost:5173",
     "http://localhost:3000",
+    "http://localhost:3001",
+    "http://localhost:3002",
+    "http://localhost:3003",
     "http://127.0.0.1:5173",
+    "http://127.0.0.1:3000",
+    "http://127.0.0.1:3001",
+    "http://127.0.0.1:3002",
+    "http://127.0.0.1:3003",
 ]
 
 # CORS middleware
