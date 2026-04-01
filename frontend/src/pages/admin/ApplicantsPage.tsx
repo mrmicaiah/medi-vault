@@ -16,7 +16,7 @@ interface Applicant {
   last_name: string;
   email: string;
   location_name: string;
-  position?: string;
+  position?: string;  // Now comes from API
 }
 
 interface ApplicantDetail {
@@ -170,10 +170,9 @@ export function ApplicantsPage() {
     
     if (positionFilter !== 'all') {
       result = result.filter(a => {
-        const cached = detailCache.get(a.id);
-        if (!cached) return true;
-        const pos = cached.position_applied || cached.credential_type || '';
-        return pos?.toLowerCase() === positionFilter.toLowerCase();
+        // Use position directly from API response
+        const pos = a.position || '';
+        return pos.toLowerCase() === positionFilter.toLowerCase();
       });
     }
     
@@ -460,13 +459,6 @@ export function ApplicantsPage() {
     return labels[position.toLowerCase()] || position.toUpperCase();
   };
 
-  const getApplicantPosition = (applicant: Applicant): string => {
-    const cached = detailCache.get(applicant.id);
-    if (cached?.position_applied) return cached.position_applied;
-    if (cached?.credential_type && cached.credential_type !== 'none') return cached.credential_type;
-    return '';
-  };
-
   const formatAvailability = (days?: string[]) => {
     if (!days || days.length === 0) return '—';
     if (days.length === 7) return 'Any Day';
@@ -611,7 +603,8 @@ export function ApplicantsPage() {
               </td></tr>
             ) : (
               filteredApplicants.map((applicant) => {
-                const position = getApplicantPosition(applicant);
+                // Use position directly from API response
+                const position = applicant.position || '';
                 const positionColor = getPositionColor(position);
                 
                 return (
@@ -623,7 +616,7 @@ export function ApplicantsPage() {
                     <td className="px-6 py-4">
                       <div className="flex items-center gap-3">
                         <div className={`flex h-10 w-10 flex-shrink-0 items-center justify-center rounded-lg text-xs font-bold ${positionColor.bg} ${positionColor.text}`}>
-                          {position ? position.toUpperCase().slice(0, 3) : (applicant.first_name?.[0] || '') + (applicant.last_name?.[0] || '')}
+                          {position ? getPositionLabel(position) : '—'}
                         </div>
                         <div>
                           <p className="text-sm font-semibold text-navy">{applicant.first_name} {applicant.last_name}</p>
@@ -655,12 +648,12 @@ export function ApplicantsPage() {
                 <h2 className="text-lg font-semibold text-white">
                   {editMode ? 'Edit Applicant' : `${selectedApplicant.first_name} ${selectedApplicant.last_name}`}
                 </h2>
-                {!editMode && applicantDetail?.position_applied && (
+                {!editMode && (applicantDetail?.position_applied || selectedApplicant.position) && (
                   <span className="text-sm font-bold text-white bg-white/20 px-2 py-0.5 rounded">
-                    {getPositionLabel(applicantDetail.position_applied)}
+                    {getPositionLabel(applicantDetail?.position_applied || selectedApplicant.position)}
                   </span>
                 )}
-                {!editMode && !applicantDetail?.position_applied && applicantDetail?.credential_type && applicantDetail.credential_type !== 'none' && (
+                {!editMode && !applicantDetail?.position_applied && !selectedApplicant.position && applicantDetail?.credential_type && applicantDetail.credential_type !== 'none' && (
                   <span className="text-sm font-bold text-white bg-white/20 px-2 py-0.5 rounded">
                     {applicantDetail.credential_type.toUpperCase()}
                   </span>
@@ -786,7 +779,7 @@ export function ApplicantsPage() {
                   <div className="bg-white rounded-lg shadow-sm overflow-hidden">
                     {[
                       { label: 'City', value: applicantDetail?.city || '—' },
-                      { label: 'Position', value: getPositionLabel(applicantDetail?.position_applied) || '—' },
+                      { label: 'Position', value: getPositionLabel(applicantDetail?.position_applied || selectedApplicant.position) || '—' },
                       { label: 'Credential', value: applicantDetail?.credential_type ? applicantDetail.credential_type.toUpperCase() : '—' },
                       { label: 'Hours', value: formatHours(applicantDetail?.hours_per_week) },
                       { label: 'Transport', value: formatTransportation(applicantDetail?.has_transportation, applicantDetail?.max_travel_miles) },
