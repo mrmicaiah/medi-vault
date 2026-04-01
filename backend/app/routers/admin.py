@@ -85,6 +85,30 @@ def generate_signed_urls_batch(supabase: Client, storage_paths: List[str], expir
     return result
 
 
+def get_agency_branding(supabase: Client, location_id: Optional[str]) -> Dict[str, Optional[str]]:
+    """
+    Fetch agency branding (logo_url, name) from the agencies table via location_id.
+    Returns dict with logo_url and company_name (defaults to "Eveready HomeCare").
+    """
+    result = {"logo_url": None, "company_name": "Eveready HomeCare"}
+    
+    if not location_id:
+        return result
+    
+    try:
+        loc_res = supabase.table("locations").select("agency_id").eq("id", location_id).single().execute()
+        if loc_res.data and loc_res.data.get("agency_id"):
+            agency_res = supabase.table("agencies").select("logo_url, name").eq("id", loc_res.data["agency_id"]).single().execute()
+            if agency_res.data:
+                result["logo_url"] = agency_res.data.get("logo_url")
+                if agency_res.data.get("name"):
+                    result["company_name"] = agency_res.data.get("name")
+    except Exception as e:
+        logger.warning(f"Could not fetch agency branding: {e}")
+    
+    return result
+
+
 @router.get("/dashboard")
 async def get_dashboard_stats(
     supabase: Client = Depends(get_supabase),
@@ -144,12 +168,30 @@ async def get_pipeline(
             "id, user_id, status, created_at, submitted_at, updated_at, current_step, location_id, profiles!applications_user_id_fkey(first_name, last_name, email), locations(name)"
         ).order("created_at", desc=True).execute()
         
+        # Get all application IDs to fetch step 1 data (position_applied)
+        app_ids = [app.get("id") for app in (res.data or []) if app.get("id")]
+        
+        # Fetch step 1 (Application Basics) for all applications to get position
+        position_map = {}
+        if app_ids:
+            steps_res = supabase.table("application_steps").select(
+                "application_id, data"
+            ).eq("step_number", 1).in_("application_id", app_ids).execute()
+            
+            for step in (steps_res.data or []):
+                app_id = step.get("application_id")
+                data = step.get("data") or {}
+                position = data.get("position_applied") or data.get("position") or ""
+                if position:
+                    position_map[app_id] = position
+        
         applications = []
         for app in (res.data or []):
             profile = app.get("profiles") or {}
             location = app.get("locations") or {}
+            app_id = app.get("id")
             applications.append({
-                "id": app.get("id"),
+                "id": app_id,
                 "user_id": app.get("user_id"),
                 "status": app.get("status"),
                 "created_at": app.get("created_at"),
@@ -158,7 +200,8 @@ async def get_pipeline(
                 "first_name": profile.get("first_name", ""),
                 "last_name": profile.get("last_name", ""),
                 "email": profile.get("email", ""),
-                "location_name": location.get("name", "")
+                "location_name": location.get("name", ""),
+                "position": position_map.get(app_id, ""),  # Include position from step 1
             })
         
         return {"applications": applications}
@@ -693,19 +736,8 @@ async def preview_application_html(
                 "completed": step.get("is_completed", False)
             }
         
-        # Try to get agency logo from settings (future: query agencies table)
-        # For now, use a placeholder URL that can be configured
-        logo_url = None
-        try:
-            # Get the agency associated with this application
-            if application.get("location_id"):
-                loc_res = supabase.table("locations").select("agency_id").eq("id", application["location_id"]).single().execute()
-                if loc_res.data and loc_res.data.get("agency_id"):
-                    agency_res = supabase.table("agencies").select("logo_url, name").eq("id", loc_res.data["agency_id"]).single().execute()
-                    if agency_res.data:
-                        logo_url = agency_res.data.get("logo_url")
-        except Exception as e:
-            logger.warning(f"Could not fetch agency logo: {e}")
+        # Get agency branding
+        branding = get_agency_branding(supabase, application.get("location_id"))
         
         context = {
             "application_id": application_id,
@@ -713,8 +745,8 @@ async def preview_application_html(
             "submitted_at": application.get("submitted_at", ""),
             "steps": steps,
             "generated_at": datetime.now().strftime("%B %d, %Y at %I:%M %p"),
-            "logo_url": logo_url,
-            "company_name": "Eveready HomeCare",
+            "logo_url": branding["logo_url"],
+            "company_name": branding["company_name"],
         }
         
         templates_dir = os.path.join(os.path.dirname(__file__), '..', 'templates')
