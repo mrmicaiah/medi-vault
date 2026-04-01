@@ -7,6 +7,7 @@ import { Badge } from '../../components/ui/Badge';
 import { ProgressBar } from '../../components/ui/ProgressBar';
 import { Alert } from '../../components/ui/Alert';
 import { DocumentUploadModal } from '../../components/applicant/DocumentUploadModal';
+import { DocumentViewModal } from '../../components/applicant/DocumentViewModal';
 import { PhotoIDUploadModal } from '../../components/applicant/PhotoIDUploadModal';
 import { PhotoIDViewModal } from '../../components/applicant/PhotoIDViewModal';
 import { TOTAL_STEPS } from '../../types';
@@ -131,6 +132,14 @@ export function ApplicantDashboardPage() {
     stepNumber: number;
     stepName: string;
     existingData?: Record<string, unknown>;
+  }>({ isOpen: false, stepNumber: 0, stepName: '' });
+
+  // Single-document view modal state
+  const [viewModal, setViewModal] = useState<{
+    isOpen: boolean;
+    stepNumber: number;
+    stepName: string;
+    data?: Record<string, unknown>;
   }>({ isOpen: false, stepNumber: 0, stepName: '' });
 
   // Photo ID upload modal (blank form)
@@ -291,6 +300,7 @@ export function ApplicantDashboardPage() {
     AGREEMENT_STEP_NUMBERS.includes(s.step_number) && s.status === 'completed'
   ).length;
 
+  // Handlers for single documents
   const handleUploadClick = (doc: DocItem) => {
     setUploadModal({
       isOpen: true,
@@ -300,6 +310,16 @@ export function ApplicantDashboardPage() {
     });
   };
 
+  const handleViewClick = (doc: DocItem) => {
+    setViewModal({
+      isOpen: true,
+      stepNumber: doc.stepNumber,
+      stepName: doc.name,
+      data: doc.data,
+    });
+  };
+
+  // Handlers for Photo ID
   const handlePhotoIdUploadClick = () => {
     setPhotoIdUploadModal({
       isOpen: true,
@@ -559,7 +579,7 @@ export function ApplicantDashboardPage() {
                   </div>
                   
                   <div className="flex gap-2 ml-4">
-                    {/* Photo ID group: View + Update buttons */}
+                    {/* Photo ID group: special handling with combined modal */}
                     {groupDoc.group.id === 'photo_id' && canUpload && isSubmitted && (
                       <>
                         {hasUploads && (
@@ -591,25 +611,36 @@ export function ApplicantDashboardPage() {
                       </Link>
                     )}
                     
-                    {/* Other document groups */}
+                    {/* Other document groups: View + Update buttons */}
                     {groupDoc.group.id !== 'photo_id' && canUpload && groupDoc.items.map(item => {
                       const showUpload = item.status === 'needed' || item.status === 'expired';
-                      const buttonLabel = showUpload ? 'Upload' : 'Update';
+                      const hasFile = item.data?.file_name;
                       
                       return (
-                        <div key={item.stepNumber}>
+                        <div key={item.stepNumber} className="flex gap-2">
                           {isSubmitted ? (
-                            <Button 
-                              size="sm" 
-                              variant={showUpload ? 'primary' : 'ghost'}
-                              onClick={() => handleUploadClick(item)}
-                            >
-                              {buttonLabel}
-                            </Button>
+                            <>
+                              {hasFile && (
+                                <Button 
+                                  size="sm" 
+                                  variant="ghost"
+                                  onClick={() => handleViewClick(item)}
+                                >
+                                  View
+                                </Button>
+                              )}
+                              <Button 
+                                size="sm" 
+                                variant={showUpload ? 'primary' : 'secondary'}
+                                onClick={() => handleUploadClick(item)}
+                              >
+                                {showUpload ? 'Upload' : 'Update'}
+                              </Button>
+                            </>
                           ) : (
                             <Link to={`/applicant/application?step=${item.stepNumber}`}>
                               <Button size="sm" variant={showUpload ? 'primary' : 'ghost'}>
-                                {buttonLabel}
+                                {showUpload ? 'Upload' : 'Update'}
                               </Button>
                             </Link>
                           )}
@@ -639,6 +670,15 @@ export function ApplicantDashboardPage() {
           existingData={uploadModal.existingData}
         />
       )}
+
+      {/* Single document view modal */}
+      <DocumentViewModal
+        isOpen={viewModal.isOpen}
+        onClose={() => setViewModal({ isOpen: false, stepNumber: 0, stepName: '' })}
+        stepNumber={viewModal.stepNumber}
+        stepName={viewModal.stepName}
+        data={viewModal.data}
+      />
 
       {/* Photo ID upload modal (blank form) */}
       {application && (
