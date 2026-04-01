@@ -37,6 +37,9 @@ const DOCUMENT_STEPS: Record<number, { name: string; category: string; required:
   17: { name: 'TB Test Results', category: 'Health', required: true },
 };
 
+// Agreement steps that require signatures
+const AGREEMENT_STEP_NUMBERS = [9, 10, 18, 19, 20, 21, 22];
+
 type DocStatus = 'uploaded' | 'needed' | 'expired';
 
 interface DocItem {
@@ -166,10 +169,11 @@ export function ApplicantDashboardPage() {
   );
 
   const uploadedDocs = documents.filter(d => d.status === 'uploaded').length;
-  const agreementSteps = steps.filter(s =>
-    (s.step_number === 9 || s.step_number === 10 || s.step_number >= 18) && 
-    s.status === 'completed'
-  );
+  
+  // Count completed agreement steps
+  const completedAgreements = steps.filter(s =>
+    AGREEMENT_STEP_NUMBERS.includes(s.step_number) && s.status === 'completed'
+  ).length;
 
   const handleUploadClick = (doc: DocItem) => {
     setUploadModal({
@@ -344,7 +348,7 @@ export function ApplicantDashboardPage() {
             <div className="flex items-center justify-between">
               <span className="text-sm text-gray">Agreements Signed</span>
               <span className="text-sm font-medium text-navy">
-                {agreementSteps.length} / 6
+                {completedAgreements} / {AGREEMENT_STEP_NUMBERS.length}
               </span>
             </div>
           </div>
