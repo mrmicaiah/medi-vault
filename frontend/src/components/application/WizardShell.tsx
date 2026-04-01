@@ -57,7 +57,8 @@ const STEP_REQUIRED_FIELDS: Record<number, string[]> = {
     // 'certifications' is handled in CHECKBOX_ARRAY_REQUIREMENTS
     'has_cpr_certification',
     'has_drivers_license',
-    'eligible_to_work',
+    // Note: eligible_to_work is asked in Education.tsx but stores to step 4 data
+    // It's also asked in Step 1, so we validate it there instead
     'will_travel_30_min',
     'can_do_catheter_care',
     'can_do_vital_signs',
@@ -325,7 +326,11 @@ export function WizardShell({
           <Alert variant="warning" className="mt-4" title="Required Fields">
             {isUploadStep && missingFile
               ? 'Please upload the required document or check "I\'ll upload this later" to continue.'
-              : 'Please complete all required fields (marked with *) before continuing.'
+              : missingFields.length > 0
+                ? `Missing: ${missingFields.join(', ')}`
+                : needsArrays.length > 0
+                  ? `Please select at least one option for: ${needsArrays.join(', ')}`
+                  : 'Please complete all required fields (marked with *) before continuing.'
             }
           </Alert>
         )}
@@ -402,7 +407,7 @@ export function WizardShell({
             })}
           </ul>
         </Alert>
-      )}
+      ))}
     </div>
   );
 }
