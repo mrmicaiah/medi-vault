@@ -13,12 +13,10 @@ interface StepProps {
 }
 
 export function CPRCertification({ data, onSave, onFileSelect, pendingFile, onChange }: StepProps) {
-  // Initialize skip to false if there's already a file uploaded
   const existingFileName = (data.file_name as string) || '';
-  const initialSkip = existingFileName ? false : ((data.skip as boolean) || false);
   
   const [form, setForm] = useState({
-    skip: initialSkip,
+    skip: (data.skip as boolean) || false,
     issuing_org: (data.issuing_org as string) || '',
     expiration_date: (data.expiration_date as string) || '',
   });
@@ -27,18 +25,16 @@ export function CPRCertification({ data, onSave, onFileSelect, pendingFile, onCh
   const hasUpload = !!displayFileName;
 
   const handleChange = (field: string, value: string) => {
-    const updated = { ...form, [field]: value, skip: false };
+    const updated = { ...form, [field]: value };
     setForm(updated);
     onChange?.();
     onSave(updated);
   };
 
   const handleFileSelect = (file: File) => {
-    const updated = { ...form, skip: false };
-    setForm(updated);
+    // Just notify parent about file selection - don't save yet
     onChange?.();
     onFileSelect?.(file);
-    onSave(updated);
   };
 
   const handleSkip = (checked: boolean) => {
@@ -104,7 +100,7 @@ export function CPRCertification({ data, onSave, onFileSelect, pendingFile, onCh
         </p>
       )}
 
-      {/* Skip checkbox at the bottom - only show if nothing uploaded */}
+      {/* Skip checkbox - only show if no file uploaded or pending */}
       {!hasUpload && (
         <div className="flex items-center gap-3 rounded-lg border border-border bg-gray-50 p-4">
           <input
