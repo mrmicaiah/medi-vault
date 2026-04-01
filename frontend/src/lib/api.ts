@@ -4,7 +4,7 @@ import { supabase } from './supabase';
 // For production: https://medi-vault-api.onrender.com
 // The /api prefix is added here, not in the env var
 const BASE_URL = import.meta.env.VITE_API_URL || 'http://localhost:8000';
-const API_URL = `${BASE_URL}/api`;
+export const API_URL = `${BASE_URL}/api`;
 
 async function getAuthHeaders(): Promise<Record<string, string>> {
   const { data } = await supabase.auth.getSession();
@@ -59,6 +59,21 @@ export const api = {
 
   delete: <T>(endpoint: string) =>
     request<T>(endpoint, { method: 'DELETE' }),
+
+  // Fetch a blob (for PDFs, images, etc.)
+  fetchBlob: async (endpoint: string): Promise<Blob> => {
+    const { data } = await supabase.auth.getSession();
+    const token = data.session?.access_token;
+    const response = await fetch(`${API_URL}${endpoint}`, {
+      headers: {
+        ...(token ? { Authorization: `Bearer ${token}` } : {}),
+      },
+    });
+    if (!response.ok) {
+      throw new Error(`Failed to fetch: ${response.status}`);
+    }
+    return response.blob();
+  },
 
   upload: async <T>(endpoint: string, file: File, fields?: Record<string, string>): Promise<T> => {
     const { data } = await supabase.auth.getSession();

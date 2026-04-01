@@ -1,5 +1,4 @@
 import { useState, useEffect, useMemo } from 'react';
-import { supabase } from '../../lib/supabase';
 import { api } from '../../lib/api';
 import { Card } from '../../components/ui/Card';
 import { Button } from '../../components/ui/Button';
@@ -8,11 +7,6 @@ import { Input } from '../../components/ui/Input';
 import { Alert } from '../../components/ui/Alert';
 import { AgreementViewModal } from '../../components/admin/AgreementViewModal';
 import { formatDate } from '../../lib/utils';
-
-// Build API URL the same way as lib/api.ts
-// BASE_URL is http://localhost:8000 (no /api)
-// Endpoints from backend include /admin/... so we add /api prefix
-const BASE_URL = import.meta.env.VITE_API_URL || 'http://localhost:8000';
 
 interface Applicant {
   id: string;
@@ -75,13 +69,6 @@ export default function DocumentsPage() {
     loadApplicants();
   }, []);
 
-  async function getAuthHeaders() {
-    const { data: { session } } = await supabase.auth.getSession();
-    return {
-      'Authorization': `Bearer ${session?.access_token}`,
-    };
-  }
-
   async function loadApplicants() {
     try {
       setLoading(true);
@@ -115,17 +102,8 @@ export default function DocumentsPage() {
   async function downloadPdf(endpoint: string, filename: string) {
     try {
       setDownloadingId(endpoint);
-      const headers = await getAuthHeaders();
       
-      // endpoint is like "/admin/applicants/{id}/pdf/application"
-      // BASE_URL is "http://localhost:8000", we add /api prefix
-      const res = await fetch(`${BASE_URL}/api${endpoint}`, { headers });
-      
-      if (!res.ok) {
-        throw new Error('Failed to generate PDF');
-      }
-      
-      const blob = await res.blob();
+      const blob = await api.fetchBlob(endpoint);
       const url = window.URL.createObjectURL(blob);
       const a = document.createElement('a');
       a.href = url;
@@ -145,15 +123,7 @@ export default function DocumentsPage() {
     try {
       setAgreementModal({ isOpen: true, name, pdfUrl: null, loading: true });
       
-      const headers = await getAuthHeaders();
-      // endpoint is like "/admin/applicants/{id}/pdf/agreement/confidentiality"
-      const res = await fetch(`${BASE_URL}/api${endpoint}`, { headers });
-      
-      if (!res.ok) {
-        throw new Error('Failed to load agreement');
-      }
-      
-      const blob = await res.blob();
+      const blob = await api.fetchBlob(endpoint);
       const url = window.URL.createObjectURL(blob);
       
       setAgreementModal({ isOpen: true, name, pdfUrl: url, loading: false });
@@ -175,7 +145,6 @@ export default function DocumentsPage() {
     try {
       setDownloadingId(endpoint);
       
-      // Use api.get which handles the URL correctly
       const data = await api.get<{ signed_url: string }>(endpoint);
       if (data.signed_url) {
         window.open(data.signed_url, '_blank');
