@@ -20,36 +20,54 @@ interface Applicant {
 }
 
 interface ApplicantDetail {
-  city?: string;
-  certifications?: string[];
-  has_cpr_certification?: string;
-  has_tb_test?: string;
-  has_drivers_license?: string;
-  will_travel_30_min?: string;
-  will_work_bed_bound?: string;
-  available_days?: string[];
-  hours_per_week?: string;
-  comfortable_with_smokers?: string;
+  // Step 1: Application Basics
   position_applied?: string;
-  id_front_uploaded?: boolean;
-  id_back_uploaded?: boolean;
-  ssn_card_uploaded?: boolean;
-  work_auth_uploaded?: boolean;
-  credentials_uploaded?: boolean;
-  cpr_uploaded?: boolean;
-  tb_uploaded?: boolean;
+  employment_type?: string;
+  desired_hourly_rate?: string;
+  desired_start_date?: string;
+  speaks_other_languages?: string;
+  other_languages?: string;
+  how_heard?: string;
+  
+  // Step 2: Personal Information
   first_name?: string;
   last_name?: string;
   email?: string;
   phone?: string;
   address_line1?: string;
   address_line2?: string;
+  city?: string;
   state?: string;
   zip?: string;
   date_of_birth?: string;
+  
+  // Step 3: Emergency Contact
   emergency_name?: string;
   emergency_relationship?: string;
   emergency_phone?: string;
+  
+  // Step 8: Work Preferences
+  available_days?: string[];
+  shift_preferences?: string[];
+  hours_per_week?: string;
+  has_transportation?: string;
+  max_travel_miles?: string;
+  comfortable_with_pets?: string;
+  comfortable_with_smokers?: string;
+  
+  // Step 15: Credentials
+  credential_type?: string;
+  
+  // Document upload statuses
+  work_auth_uploaded?: boolean;
+  id_front_uploaded?: boolean;
+  id_back_uploaded?: boolean;
+  ssn_card_uploaded?: boolean;
+  credentials_uploaded?: boolean;
+  cpr_uploaded?: boolean;
+  tb_uploaded?: boolean;
+  
+  // SSN
   ssn_last_four?: string;
 }
 
@@ -154,7 +172,7 @@ export function ApplicantsPage() {
       result = result.filter(a => {
         const cached = detailCache.get(a.id);
         if (!cached) return true;
-        const pos = cached.position_applied || (cached.certifications?.[0] !== 'none' ? cached.certifications?.[0] : '');
+        const pos = cached.position_applied || cached.credential_type || '';
         return pos?.toLowerCase() === positionFilter.toLowerCase();
       });
     }
@@ -203,66 +221,75 @@ export function ApplicantsPage() {
         stepsMap.set(s.step_number, s.data || {});
       });
       
-      const step1 = stepsMap.get(1) || {};
-      const step2 = stepsMap.get(2) || {};
-      const step3 = stepsMap.get(3) || {};
-      const step4 = stepsMap.get(4) || {};
-      const step5 = stepsMap.get(5) || {};
-      const step6 = stepsMap.get(6) || {};
-      const step7 = stepsMap.get(7) || {};
-      const step8 = stepsMap.get(8) || {};
-      const step9 = stepsMap.get(9) || {};
-      const step10 = stepsMap.get(10) || {};
-      const step11 = stepsMap.get(11) || {};
-      const step12 = stepsMap.get(12) || {};
-      const step13 = stepsMap.get(13) || {};
-      const step14 = stepsMap.get(14) || {};
-      const step15 = stepsMap.get(15) || {};
-      const step16 = stepsMap.get(16) || {};
-      const step17 = stepsMap.get(17) || {};
+      // Map steps according to STEP_NAMES in types/index.ts:
+      // 1: Application Basics, 2: Personal Info, 3: Emergency Contact, 4: Education,
+      // 5: Reference 1, 6: Reference 2, 7: Employment History, 8: Work Preferences,
+      // 9: Confidentiality, 10: E-Signature, 11: Work Auth, 12: ID Front, 13: ID Back,
+      // 14: SSN Card, 15: Credentials, 16: CPR, 17: TB Test, 18+: Agreements
+      
+      const step1 = stepsMap.get(1) || {};  // Application Basics
+      const step2 = stepsMap.get(2) || {};  // Personal Information
+      const step3 = stepsMap.get(3) || {};  // Emergency Contact
+      const step8 = stepsMap.get(8) || {};  // Work Preferences
+      const step11 = stepsMap.get(11) || {}; // Work Authorization
+      const step12 = stepsMap.get(12) || {}; // ID Front
+      const step13 = stepsMap.get(13) || {}; // ID Back
+      const step14 = stepsMap.get(14) || {}; // SSN Card
+      const step15 = stepsMap.get(15) || {}; // Credentials
+      const step16 = stepsMap.get(16) || {}; // CPR Certification
+      const step17 = stepsMap.get(17) || {}; // TB Test
       
       const profile = res.profile || {};
       
-      const position = (step4.position_applying as string) || (step4.position as string) || (step4.position_applied as string) || '';
-      
-      let certifications: string[] = [];
-      if (Array.isArray(step4.certifications)) {
-        certifications = step4.certifications as string[];
-      } else if (typeof step4.certifications === 'string') {
-        certifications = [step4.certifications];
-      }
-      
       const detail: ApplicantDetail = {
-        first_name: (step1.first_name as string) || (profile.first_name as string),
-        last_name: (step1.last_name as string) || (profile.last_name as string),
-        email: (step1.email as string) || (profile.email as string),
-        phone: (step1.phone as string) || (profile.phone as string),
+        // Step 1: Application Basics
+        position_applied: step1.position_applied as string,
+        employment_type: step1.employment_type as string,
+        desired_hourly_rate: step1.desired_hourly_rate as string,
+        desired_start_date: step1.desired_start_date as string,
+        speaks_other_languages: step1.speaks_other_languages as string,
+        other_languages: step1.other_languages as string,
+        how_heard: step1.how_heard as string,
+        
+        // Step 2: Personal Information (with profile fallback)
+        first_name: (step2.first_name as string) || (profile.first_name as string),
+        last_name: (step2.last_name as string) || (profile.last_name as string),
+        email: (step2.email as string) || (profile.email as string),
+        phone: (step2.phone as string) || (profile.phone as string),
         city: step2.city as string,
         address_line1: step2.address_line1 as string,
         address_line2: step2.address_line2 as string,
         state: step2.state as string,
         zip: step2.zip as string,
         date_of_birth: step2.date_of_birth as string,
-        certifications: certifications,
-        position_applied: position,
-        has_cpr_certification: step5.has_cpr_certification as string,
-        has_tb_test: step6.has_tb_test as string,
-        has_drivers_license: step7.has_drivers_license as string,
-        will_travel_30_min: step8.will_travel_30_min as string,
-        will_work_bed_bound: step9.will_work_bed_bound as string,
-        available_days: step10.available_days as string[],
-        hours_per_week: step10.hours_per_week as string,
-        comfortable_with_smokers: step10.comfortable_with_smokers as string,
-        work_auth_uploaded: !!(step11.file_url || step11.storage_path),
-        id_front_uploaded: !!(step12.file_url || step12.storage_path),
-        id_back_uploaded: !!(step13.file_url || step13.storage_path),
-        ssn_card_uploaded: !!(step14.file_url || step14.storage_path),
-        credentials_uploaded: !!(step15.file_url || step15.storage_path),
-        cpr_uploaded: !!(step16.file_url || step16.storage_path),
-        tb_uploaded: !!(step17.file_url || step17.storage_path),
+        
+        // Step 3: Emergency Contact
         emergency_name: step3.name as string,
         emergency_relationship: step3.relationship as string,
         emergency_phone: step3.phone as string,
+        
+        // Step 8: Work Preferences
+        available_days: step8.available_days as string[],
+        shift_preferences: step8.shift_preferences as string[],
+        hours_per_week: step8.hours_per_week as string,
+        has_transportation: step8.has_transportation as string,
+        max_travel_miles: step8.max_travel_miles as string,
+        comfortable_with_pets: step8.comfortable_with_pets as string,
+        comfortable_with_smokers: step8.comfortable_with_smokers as string,
+        
+        // Step 15: Credentials
+        credential_type: step15.credential_type as string,
+        
+        // Document upload statuses (check for file_name, file_url, or storage_path)
+        work_auth_uploaded: !!(step11.file_name || step11.file_url || step11.storage_path),
+        id_front_uploaded: !!(step12.file_name || step12.file_url || step12.storage_path),
+        id_back_uploaded: !!(step13.file_name || step13.file_url || step13.storage_path),
+        ssn_card_uploaded: !!(step14.file_name || step14.file_url || step14.storage_path),
+        credentials_uploaded: !!(step15.file_name || step15.file_url || step15.storage_path),
+        cpr_uploaded: !!(step16.file_name || step16.file_url || step16.storage_path),
+        tb_uploaded: !!(step17.file_name || step17.file_url || step17.storage_path),
+        
+        // SSN
         ssn_last_four: res.ssn_last_four,
       };
       
@@ -436,13 +463,8 @@ export function ApplicantsPage() {
   const getApplicantPosition = (applicant: Applicant): string => {
     const cached = detailCache.get(applicant.id);
     if (cached?.position_applied) return cached.position_applied;
-    if (cached?.certifications?.[0] && cached.certifications[0] !== 'none') return cached.certifications[0];
+    if (cached?.credential_type && cached.credential_type !== 'none') return cached.credential_type;
     return '';
-  };
-
-  const formatCertifications = (certs?: string[]) => {
-    if (!certs || certs.length === 0 || (certs.length === 1 && certs[0] === 'none')) return 'None';
-    return certs.filter(c => c !== 'none').map(c => c.toUpperCase()).join(', ');
   };
 
   const formatAvailability = (days?: string[]) => {
@@ -453,13 +475,34 @@ export function ApplicantsPage() {
   };
 
   const formatHours = (hours?: string) => {
-    const map: Record<string, string> = { '10-20': '10–20 hrs', '20-30': '20–30 hrs', '30-40': '30–40 hrs', '40+': '40+ hrs' };
+    const map: Record<string, string> = { 
+      'part_time': 'Part Time', 
+      'full_time': 'Full Time', 
+      'fill_in': 'Fill In',
+      'live_in': 'Live-In',
+      '10-20': '10–20 hrs', 
+      '20-30': '20–30 hrs', 
+      '30-40': '30–40 hrs', 
+      '40+': '40+ hrs' 
+    };
     return map[hours || ''] || hours || '—';
   };
 
   const formatSmokerPref = (pref?: string) => {
-    const map: Record<string, string> = { yes: 'OK with', no: 'Not OK', no_preference: 'No pref' };
+    const map: Record<string, string> = { 
+      yes: 'OK with', 
+      no: 'Not OK', 
+      prefer_no_smoking: 'Prefer No',
+      no_preference: 'No pref' 
+    };
     return map[pref || ''] || pref || '—';
+  };
+
+  const formatTransportation = (hasTransport?: string, maxMiles?: string) => {
+    if (hasTransport === 'yes') {
+      return maxMiles ? `Yes (${maxMiles} mi)` : 'Yes';
+    }
+    return hasTransport === 'no' ? 'No' : '—';
   };
 
   const getStatusBadge = (status: string) => {
@@ -617,9 +660,9 @@ export function ApplicantsPage() {
                     {getPositionLabel(applicantDetail.position_applied)}
                   </span>
                 )}
-                {!editMode && !applicantDetail?.position_applied && applicantDetail?.certifications && applicantDetail.certifications.length > 0 && applicantDetail.certifications[0] !== 'none' && (
+                {!editMode && !applicantDetail?.position_applied && applicantDetail?.credential_type && applicantDetail.credential_type !== 'none' && (
                   <span className="text-sm font-bold text-white bg-white/20 px-2 py-0.5 rounded">
-                    {applicantDetail.certifications[0].toUpperCase()}
+                    {applicantDetail.credential_type.toUpperCase()}
                   </span>
                 )}
               </div>
@@ -743,13 +786,11 @@ export function ApplicantsPage() {
                   <div className="bg-white rounded-lg shadow-sm overflow-hidden">
                     {[
                       { label: 'City', value: applicantDetail?.city || '—' },
-                      { label: 'Certifications', value: formatCertifications(applicantDetail?.certifications) },
-                      { label: 'CPR / TB', value: (<><YesNo value={applicantDetail?.has_cpr_certification} /><span className="mx-2 text-gray-300">|</span><YesNo value={applicantDetail?.has_tb_test} /></>) },
-                      { label: 'Drivers Lic.', value: <YesNo value={applicantDetail?.has_drivers_license} /> },
-                      { label: 'Travel 30min', value: <YesNo value={applicantDetail?.will_travel_30_min} /> },
-                      { label: 'Bed Bound', value: <YesNo value={applicantDetail?.will_work_bed_bound} /> },
-                      { label: 'Availability', value: formatAvailability(applicantDetail?.available_days) },
+                      { label: 'Position', value: getPositionLabel(applicantDetail?.position_applied) || '—' },
+                      { label: 'Credential', value: applicantDetail?.credential_type ? applicantDetail.credential_type.toUpperCase() : '—' },
                       { label: 'Hours', value: formatHours(applicantDetail?.hours_per_week) },
+                      { label: 'Transport', value: formatTransportation(applicantDetail?.has_transportation, applicantDetail?.max_travel_miles) },
+                      { label: 'Availability', value: formatAvailability(applicantDetail?.available_days) },
                       { label: 'Smokers?', value: formatSmokerPref(applicantDetail?.comfortable_with_smokers) },
                     ].map((row, i, arr) => (
                       <div key={i} className={`grid grid-cols-[110px_1fr] px-4 py-3 items-center ${i < arr.length - 1 ? 'border-b border-gray-100' : ''}`}>
