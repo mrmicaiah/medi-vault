@@ -88,21 +88,16 @@ const getPositionColor = (position?: string) => {
   return POSITION_COLORS[position.toLowerCase()] || POSITION_COLORS.default;
 };
 
-const YesNo = ({ value }: { value: boolean | string | undefined }) => {
-  const isYes = value === true || value === 'yes';
-  return (
-    <span className={`font-semibold ${isYes ? 'text-success' : 'text-error'}`}>
-      {isYes ? 'YES' : 'NO'}
-    </span>
-  );
+// Document step mapping
+const DOC_STEPS: Record<string, number> = {
+  work_auth: 11,
+  id_front: 12,
+  id_back: 13,
+  ssn_card: 14,
+  credentials: 15,
+  cpr: 16,
+  tb: 17,
 };
-
-const DocLight = ({ uploaded, label }: { uploaded: boolean; label: string }) => (
-  <div className="flex items-center gap-1.5">
-    <div className={`w-3 h-3 rounded-full ${uploaded ? 'bg-success' : 'bg-error'}`} />
-    <span className="text-xs text-gray">{label}</span>
-  </div>
-);
 
 export function ApplicantsPage() {
   const navigate = useNavigate();
@@ -136,6 +131,10 @@ export function ApplicantsPage() {
   const [uploadType, setUploadType] = useState('');
   const [uploading, setUploading] = useState(false);
   const [uploadError, setUploadError] = useState<string | null>(null);
+  
+  // Document preview state
+  const [previewDoc, setPreviewDoc] = useState<{ url: string; name: string; type: string } | null>(null);
+  const [loadingDoc, setLoadingDoc] = useState<string | null>(null);
 
   useEffect(() => {
     loadApplicants();
@@ -196,6 +195,7 @@ export function ApplicantsPage() {
     setSsnRevealed(false);
     setRevealedSsn(null);
     setEditingSsn(false);
+    setPreviewDoc(null);
     
     const cached = detailCache.get(applicant.id);
     if (cached) {
@@ -220,28 +220,21 @@ export function ApplicantsPage() {
         stepsMap.set(s.step_number, s.data || {});
       });
       
-      // Map steps according to STEP_NAMES in types/index.ts:
-      // 1: Application Basics, 2: Personal Info, 3: Emergency Contact, 4: Education,
-      // 5: Reference 1, 6: Reference 2, 7: Employment History, 8: Work Preferences,
-      // 9: Confidentiality, 10: E-Signature, 11: Work Auth, 12: ID Front, 13: ID Back,
-      // 14: SSN Card, 15: Credentials, 16: CPR, 17: TB Test, 18+: Agreements
-      
-      const step1 = stepsMap.get(1) || {};  // Application Basics
-      const step2 = stepsMap.get(2) || {};  // Personal Information
-      const step3 = stepsMap.get(3) || {};  // Emergency Contact
-      const step8 = stepsMap.get(8) || {};  // Work Preferences
-      const step11 = stepsMap.get(11) || {}; // Work Authorization
-      const step12 = stepsMap.get(12) || {}; // ID Front
-      const step13 = stepsMap.get(13) || {}; // ID Back
-      const step14 = stepsMap.get(14) || {}; // SSN Card
-      const step15 = stepsMap.get(15) || {}; // Credentials
-      const step16 = stepsMap.get(16) || {}; // CPR Certification
-      const step17 = stepsMap.get(17) || {}; // TB Test
+      const step1 = stepsMap.get(1) || {};
+      const step2 = stepsMap.get(2) || {};
+      const step3 = stepsMap.get(3) || {};
+      const step8 = stepsMap.get(8) || {};
+      const step11 = stepsMap.get(11) || {};
+      const step12 = stepsMap.get(12) || {};
+      const step13 = stepsMap.get(13) || {};
+      const step14 = stepsMap.get(14) || {};
+      const step15 = stepsMap.get(15) || {};
+      const step16 = stepsMap.get(16) || {};
+      const step17 = stepsMap.get(17) || {};
       
       const profile = res.profile || {};
       
       const detail: ApplicantDetail = {
-        // Step 1: Application Basics
         position_applied: step1.position_applied as string,
         employment_type: step1.employment_type as string,
         desired_hourly_rate: step1.desired_hourly_rate as string,
@@ -250,7 +243,6 @@ export function ApplicantsPage() {
         other_languages: step1.other_languages as string,
         how_heard: step1.how_heard as string,
         
-        // Step 2: Personal Information (with profile fallback)
         first_name: (step2.first_name as string) || (profile.first_name as string),
         last_name: (step2.last_name as string) || (profile.last_name as string),
         email: (step2.email as string) || (profile.email as string),
@@ -262,12 +254,10 @@ export function ApplicantsPage() {
         zip: step2.zip as string,
         date_of_birth: step2.date_of_birth as string,
         
-        // Step 3: Emergency Contact (uses ec_ prefix from EmergencyContact.tsx)
         emergency_name: [step3.ec_first_name, step3.ec_last_name].filter(Boolean).join(' ') as string,
         emergency_relationship: step3.ec_relationship as string,
         emergency_phone: step3.ec_phone as string,
         
-        // Step 8: Work Preferences
         available_days: step8.available_days as string[],
         shift_preferences: step8.shift_preferences as string[],
         hours_per_week: step8.hours_per_week as string,
@@ -276,10 +266,8 @@ export function ApplicantsPage() {
         comfortable_with_pets: step8.comfortable_with_pets as string,
         comfortable_with_smokers: step8.comfortable_with_smokers as string,
         
-        // Step 15: Credentials
         credential_type: step15.credential_type as string,
         
-        // Document upload statuses (check for file_name, file_url, or storage_path)
         work_auth_uploaded: !!(step11.file_name || step11.file_url || step11.storage_path),
         id_front_uploaded: !!(step12.file_name || step12.file_url || step12.storage_path),
         id_back_uploaded: !!(step13.file_name || step13.file_url || step13.storage_path),
@@ -288,7 +276,6 @@ export function ApplicantsPage() {
         cpr_uploaded: !!(step16.file_name || step16.file_url || step16.storage_path),
         tb_uploaded: !!(step17.file_name || step17.file_url || step17.storage_path),
         
-        // SSN
         ssn_last_four: res.ssn_last_four,
       };
       
@@ -417,6 +404,7 @@ export function ApplicantsPage() {
     setSsnRevealed(false);
     setRevealedSsn(null);
     setEditingSsn(false);
+    setPreviewDoc(null);
     setTimeout(() => {
       setSelectedApplicant(null);
       setApplicantDetail(null);
@@ -447,6 +435,26 @@ export function ApplicantsPage() {
     } finally {
       setUploading(false);
       if (fileInputRef.current) fileInputRef.current.value = '';
+    }
+  };
+
+  // View document handler
+  const handleViewDoc = async (docType: string, label: string) => {
+    if (!selectedApplicant) return;
+    const stepNumber = DOC_STEPS[docType];
+    if (!stepNumber) return;
+    
+    setLoadingDoc(docType);
+    try {
+      const res = await api.get<{ signed_url: string; file_name?: string }>(`/admin/applicants/${selectedApplicant.id}/documents/${stepNumber}/url`);
+      if (res.signed_url) {
+        setPreviewDoc({ url: res.signed_url, name: res.file_name || label, type: docType });
+      }
+    } catch (err) {
+      console.error('Error loading document:', err);
+      setError(err instanceof Error ? err.message : 'Failed to load document');
+    } finally {
+      setLoadingDoc(null);
     }
   };
 
@@ -516,6 +524,35 @@ export function ApplicantsPage() {
       <span className={`inline-flex items-center px-2.5 py-0.5 rounded-full text-xs font-medium ${styles[status] || 'bg-gray-100 text-gray'}`}>
         {labels[status] || status}
       </span>
+    );
+  };
+
+  // Clickable document indicator
+  const DocLight = ({ uploaded, label, docType }: { uploaded: boolean; label: string; docType: string }) => {
+    const isLoading = loadingDoc === docType;
+    
+    return (
+      <button
+        onClick={() => uploaded && handleViewDoc(docType, label)}
+        disabled={!uploaded || isLoading}
+        className={`flex items-center gap-1.5 px-2 py-1 rounded-md transition-colors ${
+          uploaded 
+            ? 'hover:bg-success/10 cursor-pointer' 
+            : 'cursor-default opacity-60'
+        }`}
+        title={uploaded ? `View ${label}` : `${label} not uploaded`}
+      >
+        <div className={`w-3 h-3 rounded-full flex-shrink-0 ${
+          isLoading ? 'bg-warning animate-pulse' : uploaded ? 'bg-success' : 'bg-error'
+        }`} />
+        <span className="text-xs text-gray">{label}</span>
+        {uploaded && !isLoading && (
+          <svg className="w-3 h-3 text-gray-400" fill="none" viewBox="0 0 24 24" stroke="currentColor">
+            <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M15 12a3 3 0 11-6 0 3 3 0 016 0z" />
+            <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M2.458 12C3.732 7.943 7.523 5 12 5c4.478 0 8.268 2.943 9.542 7-1.274 4.057-5.064 7-9.542 7-4.477 0-8.268-2.943-9.542-7z" />
+          </svg>
+        )}
+      </button>
     );
   };
 
@@ -603,7 +640,6 @@ export function ApplicantsPage() {
               </td></tr>
             ) : (
               filteredApplicants.map((applicant) => {
-                // Use position directly from API response
                 const position = applicant.position || '';
                 const positionColor = getPositionColor(position);
                 
@@ -799,19 +835,63 @@ export function ApplicantsPage() {
                     <button onClick={() => goToHire(selectedApplicant.id)} className="py-3 bg-success text-navy text-sm font-semibold rounded-lg hover:bg-success/90 transition-colors">Onboard</button>
                   </div>
 
+                  {/* Documents Section - Now Clickable */}
                   <div className="bg-white rounded-lg shadow-sm p-4 mt-5">
-                    <span className="text-[11px] font-semibold text-gray uppercase tracking-wide block mb-3">Documents</span>
-                    <div className="flex flex-wrap gap-x-5 gap-y-2">
-                      <DocLight uploaded={applicantDetail?.id_front_uploaded || false} label="ID Front" />
-                      <DocLight uploaded={applicantDetail?.id_back_uploaded || false} label="ID Back" />
-                      <DocLight uploaded={applicantDetail?.ssn_card_uploaded || false} label="SSN Card" />
-                      <DocLight uploaded={applicantDetail?.work_auth_uploaded || false} label="Work Auth" />
+                    <div className="flex items-center justify-between mb-3">
+                      <span className="text-[11px] font-semibold text-gray uppercase tracking-wide">Documents</span>
+                      <span className="text-[10px] text-gray-400">Click to preview</span>
                     </div>
-                    <div className="flex flex-wrap gap-x-5 gap-y-2 mt-2">
-                      <DocLight uploaded={applicantDetail?.credentials_uploaded || false} label="Credentials" />
-                      <DocLight uploaded={applicantDetail?.cpr_uploaded || false} label="CPR" />
-                      <DocLight uploaded={applicantDetail?.tb_uploaded || false} label="TB" />
+                    <div className="flex flex-wrap gap-1">
+                      <DocLight uploaded={applicantDetail?.id_front_uploaded || false} label="ID Front" docType="id_front" />
+                      <DocLight uploaded={applicantDetail?.id_back_uploaded || false} label="ID Back" docType="id_back" />
+                      <DocLight uploaded={applicantDetail?.ssn_card_uploaded || false} label="SSN Card" docType="ssn_card" />
+                      <DocLight uploaded={applicantDetail?.work_auth_uploaded || false} label="Work Auth" docType="work_auth" />
                     </div>
+                    <div className="flex flex-wrap gap-1 mt-1">
+                      <DocLight uploaded={applicantDetail?.credentials_uploaded || false} label="Credentials" docType="credentials" />
+                      <DocLight uploaded={applicantDetail?.cpr_uploaded || false} label="CPR" docType="cpr" />
+                      <DocLight uploaded={applicantDetail?.tb_uploaded || false} label="TB" docType="tb" />
+                    </div>
+                    
+                    {/* Document Preview */}
+                    {previewDoc && (
+                      <div className="mt-4 border-t border-gray-100 pt-4">
+                        <div className="flex items-center justify-between mb-2">
+                          <span className="text-xs font-medium text-navy">{previewDoc.name}</span>
+                          <div className="flex gap-2">
+                            <a 
+                              href={previewDoc.url} 
+                              target="_blank" 
+                              rel="noopener noreferrer"
+                              className="text-xs text-maroon hover:underline"
+                            >
+                              Open ↗
+                            </a>
+                            <button 
+                              onClick={() => setPreviewDoc(null)}
+                              className="text-xs text-gray hover:text-navy"
+                            >
+                              Close
+                            </button>
+                          </div>
+                        </div>
+                        <div className="bg-gray-100 rounded-lg overflow-hidden" style={{ height: '200px' }}>
+                          {previewDoc.url.toLowerCase().match(/\.(jpg|jpeg|png|gif|webp)/) || previewDoc.name.toLowerCase().match(/\.(jpg|jpeg|png|gif|webp)/) ? (
+                            <img 
+                              src={previewDoc.url} 
+                              alt={previewDoc.name}
+                              className="w-full h-full object-contain"
+                            />
+                          ) : (
+                            <iframe
+                              src={previewDoc.url}
+                              className="w-full h-full"
+                              title={previewDoc.name}
+                            />
+                          )}
+                        </div>
+                      </div>
+                    )}
                   </div>
 
                   <button onClick={handleUploadClick} className="w-full mt-5 py-3 bg-white border border-border text-navy text-sm font-medium rounded-lg hover:bg-gray-50 transition-colors">Upload Document</button>
