@@ -15,14 +15,14 @@ import { ApplyPage } from '../pages/public/ApplyPage';
 
 import { ApplicantDashboardPage } from '../pages/applicant/DashboardPage';
 import { ApplicationPage } from '../pages/applicant/ApplicationPage';
-import { DocumentsPage } from '../pages/applicant/DocumentsPage';
+import { DocumentsPage as ApplicantDocumentsPage } from '../pages/applicant/DocumentsPage';
 
 import { AdminDashboardPage } from '../pages/admin/DashboardPage';
 import { ApplicantsPage } from '../pages/admin/ApplicantsPage';
 import { ApplicantDetailPage } from '../pages/admin/ApplicantDetailPage';
 import { EmployeesPage } from '../pages/admin/EmployeesPage';
 import { EmployeeDetailPage } from '../pages/admin/EmployeeDetailPage';
-import { CompliancePage } from '../pages/admin/CompliancePage';
+import AdminDocumentsPage from '../pages/admin/DocumentsPage';
 import { HirePage } from '../pages/admin/HirePage';
 import { UsersPage } from '../pages/admin/UsersPage';
 import { TrainingLeadsPage } from '../pages/admin/TrainingLeadsPage';
@@ -171,7 +171,7 @@ export function RouterConfig() {
       >
         <Route path="/applicant" element={<ApplicantDashboardPage />} />
         <Route path="/applicant/application" element={<ApplicationPage />} />
-        <Route path="/applicant/documents" element={<DocumentsPage />} />
+        <Route path="/applicant/documents" element={<ApplicantDocumentsPage />} />
       </Route>
 
       {/* Protected admin routes */}
@@ -190,7 +190,7 @@ export function RouterConfig() {
         <Route path="/admin/applicant/:id" element={<ApplicantDetailPage />} />
         <Route path="/admin/employees" element={<EmployeesPage />} />
         <Route path="/admin/employee/:id" element={<EmployeeDetailPage />} />
-        <Route path="/admin/documents" element={<CompliancePage />} />
+        <Route path="/admin/documents" element={<AdminDocumentsPage />} />
         <Route path="/admin/compliance" element={<Navigate to="/admin/documents" replace />} />
         <Route path="/admin/hire/:id" element={<HirePage />} />
         <Route path="/admin/users" element={<UsersPage />} />
