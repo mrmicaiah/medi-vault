@@ -1,5 +1,6 @@
 import { useState, useEffect, useMemo } from 'react';
-import { api } from '../../lib/api';
+import { api, API_URL } from '../../lib/api';
+import { supabase } from '../../lib/supabase';
 import { Card } from '../../components/ui/Card';
 import { Button } from '../../components/ui/Button';
 import { Badge } from '../../components/ui/Badge';
@@ -34,6 +35,7 @@ interface DocumentSummary {
       signed: boolean;
       signed_date?: string;
       endpoint: string;
+      preview_endpoint?: string;
     }>;
     uploaded: Array<{
       type: string;
@@ -56,13 +58,14 @@ export default function DocumentsPage() {
   const [error, setError] = useState<string | null>(null);
   const [downloadingId, setDownloadingId] = useState<string | null>(null);
   
-  // Agreement view modal state
+  // Agreement view modal state - now shows HTML content
   const [agreementModal, setAgreementModal] = useState<{
     isOpen: boolean;
     name: string;
-    pdfUrl: string | null;
+    htmlContent: string | null;
     loading: boolean;
-  }>({ isOpen: false, name: '', pdfUrl: null, loading: false });
+    pdfEndpoint: string | null;
+  }>({ isOpen: false, name: '', htmlContent: null, loading: false, pdfEndpoint: null });
 
   // Load applicants on mount
   useEffect(() => {
@@ -113,32 +116,39 @@ export default function DocumentsPage() {
       window.URL.revokeObjectURL(url);
       document.body.removeChild(a);
     } catch (err) {
-      setError(err instanceof Error ? err.message : 'Failed to download PDF');
+      setError(err instanceof Error ? err.message : 'Failed to download PDF. This feature requires the production server.');
     } finally {
       setDownloadingId(null);
     }
   }
 
-  async function viewAgreement(endpoint: string, name: string) {
+  async function viewAgreement(previewEndpoint: string, pdfEndpoint: string, name: string) {
     try {
-      setAgreementModal({ isOpen: true, name, pdfUrl: null, loading: true });
+      setAgreementModal({ isOpen: true, name, htmlContent: null, loading: true, pdfEndpoint });
       
-      const blob = await api.fetchBlob(endpoint);
-      const url = window.URL.createObjectURL(blob);
+      // Fetch HTML preview (works without WeasyPrint)
+      const { data: { session } } = await supabase.auth.getSession();
+      const res = await fetch(`${API_URL}${previewEndpoint}`, {
+        headers: {
+          'Authorization': `Bearer ${session?.access_token}`,
+        },
+      });
       
-      setAgreementModal({ isOpen: true, name, pdfUrl: url, loading: false });
+      if (!res.ok) {
+        throw new Error('Failed to load agreement preview');
+      }
+      
+      const htmlContent = await res.text();
+      
+      setAgreementModal({ isOpen: true, name, htmlContent, loading: false, pdfEndpoint });
     } catch (err) {
       setError(err instanceof Error ? err.message : 'Failed to view agreement');
-      setAgreementModal({ isOpen: false, name: '', pdfUrl: null, loading: false });
+      setAgreementModal({ isOpen: false, name: '', htmlContent: null, loading: false, pdfEndpoint: null });
     }
   }
 
   function closeAgreementModal() {
-    // Revoke the blob URL to free memory
-    if (agreementModal.pdfUrl) {
-      window.URL.revokeObjectURL(agreementModal.pdfUrl);
-    }
-    setAgreementModal({ isOpen: false, name: '', pdfUrl: null, loading: false });
+    setAgreementModal({ isOpen: false, name: '', htmlContent: null, loading: false, pdfEndpoint: null });
   }
 
   async function viewDocument(endpoint: string) {
@@ -367,7 +377,11 @@ export default function DocumentsPage() {
                             <Button
                               size="sm"
                               variant="ghost"
-                              onClick={() => viewAgreement(agreement.endpoint, agreement.name)}
+                              onClick={() => viewAgreement(
+                                agreement.preview_endpoint || agreement.endpoint.replace('/pdf/agreement/', '/agreement/') + '/preview',
+                                agreement.endpoint,
+                                agreement.name
+                              )}
                             >
                               <svg className="mr-1 h-4 w-4" fill="none" viewBox="0 0 24 24" stroke="currentColor">
                                 <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M15 12a3 3 0 11-6 0 3 3 0 016 0z" />
@@ -449,13 +463,21 @@ export default function DocumentsPage() {
         </div>
       </div>
 
-      {/* Agreement View Modal */}
+      {/* Agreement View Modal - now renders HTML */}
       <AgreementViewModal
         isOpen={agreementModal.isOpen}
         onClose={closeAgreementModal}
-        pdfUrl={agreementModal.pdfUrl}
+        htmlContent={agreementModal.htmlContent}
         agreementName={agreementModal.name}
         loading={agreementModal.loading}
+        onDownload={agreementModal.pdfEndpoint ? () => {
+          if (agreementModal.pdfEndpoint && documentSummary) {
+            downloadPdf(
+              agreementModal.pdfEndpoint,
+              `${documentSummary.applicant_name.replace(/\s+/g, '_')}_agreement.pdf`
+            );
+          }
+        } : undefined}
       />
     </div>
   );
