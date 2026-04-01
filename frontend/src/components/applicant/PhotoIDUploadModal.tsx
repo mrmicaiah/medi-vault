@@ -1,4 +1,4 @@
-import React, { useState, useEffect } from 'react';
+import React, { useState } from 'react';
 import { Button } from '../ui/Button';
 import { FileUpload } from '../ui/FileUpload';
 import { Input, Select } from '../ui/Input';
@@ -12,8 +12,9 @@ interface PhotoIDUploadModalProps {
   onClose: () => void;
   onSuccess: () => void;
   applicationId: string;
-  frontData?: Record<string, unknown>;
-  backData?: Record<string, unknown>;
+  /** Old data - used for deleting old files, NOT for pre-filling form */
+  existingFrontData?: Record<string, unknown>;
+  existingBackData?: Record<string, unknown>;
 }
 
 const US_STATES = [
@@ -47,50 +48,47 @@ export function PhotoIDUploadModal({
   onClose,
   onSuccess,
   applicationId,
-  frontData = {},
-  backData = {},
+  existingFrontData = {},
+  existingBackData = {},
 }: PhotoIDUploadModalProps) {
   const { user } = useAuth();
   const [saving, setSaving] = useState(false);
   const [error, setError] = useState<string | null>(null);
   const [uploadProgress, setUploadProgress] = useState<string | null>(null);
   
-  // Shared metadata (from front ID)
+  // Form starts BLANK - not pre-filled with existing data
   const [formData, setFormData] = useState({
-    id_type: (frontData.id_type as string) || '',
-    id_number: (frontData.id_number as string) || '',
-    issuing_state: (frontData.issuing_state as string) || '',
-    expiration_date: (frontData.expiration_date as string) || '',
+    id_type: '',
+    id_number: '',
+    issuing_state: '',
+    expiration_date: '',
   });
   
-  // Separate file states
   const [frontFile, setFrontFile] = useState<File | null>(null);
   const [backFile, setBackFile] = useState<File | null>(null);
-  
-  // Existing file names for display
-  const existingFrontFileName = (frontData.file_name as string) || '';
-  const existingBackFileName = (backData.file_name as string) || '';
-
-  // Reset state when modal opens
-  useEffect(() => {
-    if (isOpen) {
-      setFormData({
-        id_type: (frontData.id_type as string) || '',
-        id_number: (frontData.id_number as string) || '',
-        issuing_state: (frontData.issuing_state as string) || '',
-        expiration_date: (frontData.expiration_date as string) || '',
-      });
-      setFrontFile(null);
-      setBackFile(null);
-      setError(null);
-      setUploadProgress(null);
-    }
-  }, [isOpen, frontData]);
 
   if (!isOpen) return null;
 
   const handleFieldChange = (field: string, value: string) => {
     setFormData(prev => ({ ...prev, [field]: value }));
+  };
+
+  const resetForm = () => {
+    setFormData({
+      id_type: '',
+      id_number: '',
+      issuing_state: '',
+      expiration_date: '',
+    });
+    setFrontFile(null);
+    setBackFile(null);
+    setError(null);
+    setUploadProgress(null);
+  };
+
+  const handleClose = () => {
+    resetForm();
+    onClose();
   };
 
   const deleteOldFile = async (storagePath: string) => {
@@ -138,12 +136,15 @@ export function PhotoIDUploadModal({
   };
 
   const handleSubmit = async () => {
-    // Require at least one new file or existing files
-    const hasFrontFile = frontFile || existingFrontFileName;
-    const hasBackFile = backFile || existingBackFileName;
-    
-    if (!hasFrontFile && !hasBackFile) {
-      setError('Please select at least one file to upload');
+    // Require both files for a new upload
+    if (!frontFile || !backFile) {
+      setError('Please upload both front and back of your ID');
+      return;
+    }
+
+    // Require all metadata
+    if (!formData.id_type || !formData.id_number || !formData.issuing_state || !formData.expiration_date) {
+      setError('Please fill in all ID information fields');
       return;
     }
 
@@ -152,77 +153,59 @@ export function PhotoIDUploadModal({
 
     try {
       const now = new Date().toISOString();
-      
-      // Upload Front if new file selected
-      if (frontFile) {
-        setUploadProgress('Uploading front of ID...');
-        
-        // Delete old front file if exists
-        const oldFrontPath = frontData?.storage_path as string | undefined;
-        if (oldFrontPath) {
-          await deleteOldFile(oldFrontPath);
-        }
-        
-        const { path, url } = await uploadFileToStorage(frontFile, 'id-front');
-        
-        setUploadProgress('Saving front ID info...');
-        await api.post(`/applications/${applicationId}/steps`, {
-          step_number: 12,
-          data: {
-            ...formData,
-            skip: false,
-            file_name: frontFile.name,
-            file_size: frontFile.size,
-            file_type: frontFile.type,
-            storage_path: path,
-            storage_url: url,
-            uploaded_at: now,
-          },
-          status: 'completed',
-        });
-      } else if (existingFrontFileName) {
-        // Just update the metadata without changing the file
-        setUploadProgress('Updating ID info...');
-        await api.post(`/applications/${applicationId}/steps`, {
-          step_number: 12,
-          data: {
-            ...frontData,
-            ...formData,
-          },
-          status: 'completed',
-        });
-      }
 
-      // Upload Back if new file selected
-      if (backFile) {
-        setUploadProgress('Uploading back of ID...');
-        
-        // Delete old back file if exists
-        const oldBackPath = backData?.storage_path as string | undefined;
-        if (oldBackPath) {
-          await deleteOldFile(oldBackPath);
-        }
-        
-        const { path, url } = await uploadFileToStorage(backFile, 'id-back');
-        
-        setUploadProgress('Saving back ID info...');
-        await api.post(`/applications/${applicationId}/steps`, {
-          step_number: 13,
-          data: {
-            skip: false,
-            file_name: backFile.name,
-            file_size: backFile.size,
-            file_type: backFile.type,
-            storage_path: path,
-            storage_url: url,
-            uploaded_at: now,
-            // Note: expiration_date is on front only, dashboard inherits it
-          },
-          status: 'completed',
-        });
+      // Delete old front file if exists
+      setUploadProgress('Removing old files...');
+      const oldFrontPath = existingFrontData?.storage_path as string | undefined;
+      if (oldFrontPath) {
+        await deleteOldFile(oldFrontPath);
       }
+      const oldBackPath = existingBackData?.storage_path as string | undefined;
+      if (oldBackPath) {
+        await deleteOldFile(oldBackPath);
+      }
+      
+      // Upload front
+      setUploadProgress('Uploading front of ID...');
+      const frontResult = await uploadFileToStorage(frontFile, 'id-front');
+      
+      setUploadProgress('Saving front ID info...');
+      await api.post(`/applications/${applicationId}/steps`, {
+        step_number: 12,
+        data: {
+          ...formData,
+          skip: false,
+          file_name: frontFile.name,
+          file_size: frontFile.size,
+          file_type: frontFile.type,
+          storage_path: frontResult.path,
+          storage_url: frontResult.url,
+          uploaded_at: now,
+        },
+        status: 'completed',
+      });
+
+      // Upload back
+      setUploadProgress('Uploading back of ID...');
+      const backResult = await uploadFileToStorage(backFile, 'id-back');
+      
+      setUploadProgress('Saving back ID info...');
+      await api.post(`/applications/${applicationId}/steps`, {
+        step_number: 13,
+        data: {
+          skip: false,
+          file_name: backFile.name,
+          file_size: backFile.size,
+          file_type: backFile.type,
+          storage_path: backResult.path,
+          storage_url: backResult.url,
+          uploaded_at: now,
+        },
+        status: 'completed',
+      });
 
       setUploadProgress(null);
+      resetForm();
       onSuccess();
       onClose();
     } catch (err) {
@@ -234,12 +217,13 @@ export function PhotoIDUploadModal({
     }
   };
 
-  // Check if we can submit: need at least metadata filled out
   const canSubmit = 
     formData.id_type && 
     formData.id_number && 
     formData.issuing_state && 
     formData.expiration_date &&
+    frontFile &&
+    backFile &&
     !saving;
 
   return (
@@ -247,10 +231,10 @@ export function PhotoIDUploadModal({
       <div className="w-full max-w-xl rounded-xl bg-white p-6 shadow-xl max-h-[90vh] overflow-y-auto">
         <div className="mb-4 flex items-center justify-between">
           <h2 className="font-display text-lg font-semibold text-navy">
-            Update Photo ID
+            Upload Photo ID
           </h2>
           <button
-            onClick={onClose}
+            onClick={handleClose}
             className="text-gray hover:text-slate"
             disabled={saving}
           >
@@ -322,61 +306,37 @@ export function PhotoIDUploadModal({
             <h3 className="text-sm font-medium text-slate">Upload Images</h3>
             
             <div className="grid grid-cols-1 gap-4 sm:grid-cols-2">
-              {/* Front of ID */}
-              <div className="space-y-2">
-                <FileUpload
-                  label="Front of ID"
-                  onFileSelect={setFrontFile}
-                  accept=".pdf,.jpg,.jpeg,.png"
-                  maxSize={10 * 1024 * 1024}
-                  currentFile={
-                    frontFile 
-                      ? { name: frontFile.name } 
-                      : existingFrontFileName 
-                        ? { name: existingFrontFileName } 
-                        : null
-                  }
-                  helperText="Photo of front side"
-                />
-                {existingFrontFileName && !frontFile && (
-                  <p className="text-xs text-success">✓ On file</p>
-                )}
-              </div>
+              <FileUpload
+                label="Front of ID"
+                onFileSelect={setFrontFile}
+                accept=".pdf,.jpg,.jpeg,.png"
+                maxSize={10 * 1024 * 1024}
+                currentFile={frontFile ? { name: frontFile.name } : null}
+                helperText="Photo of front side"
+              />
               
-              {/* Back of ID */}
-              <div className="space-y-2">
-                <FileUpload
-                  label="Back of ID"
-                  onFileSelect={setBackFile}
-                  accept=".pdf,.jpg,.jpeg,.png"
-                  maxSize={10 * 1024 * 1024}
-                  currentFile={
-                    backFile 
-                      ? { name: backFile.name } 
-                      : existingBackFileName 
-                        ? { name: existingBackFileName } 
-                        : null
-                  }
-                  helperText="Photo of back side"
-                />
-                {existingBackFileName && !backFile && (
-                  <p className="text-xs text-success">✓ On file</p>
-                )}
-              </div>
+              <FileUpload
+                label="Back of ID"
+                onFileSelect={setBackFile}
+                accept=".pdf,.jpg,.jpeg,.png"
+                maxSize={10 * 1024 * 1024}
+                currentFile={backFile ? { name: backFile.name } : null}
+                helperText="Photo of back side"
+              />
             </div>
             
             <p className="text-xs text-gray">
-              Both front and back are required. You can update one or both images.
+              Both front and back images are required.
             </p>
           </div>
         </div>
 
         <div className="mt-6 flex justify-end gap-3">
-          <Button variant="secondary" onClick={onClose} disabled={saving}>
+          <Button variant="secondary" onClick={handleClose} disabled={saving}>
             Cancel
           </Button>
           <Button onClick={handleSubmit} loading={saving} disabled={!canSubmit}>
-            {saving ? 'Uploading...' : 'Save Photo ID'}
+            {saving ? 'Uploading...' : 'Upload Photo ID'}
           </Button>
         </div>
       </div>
