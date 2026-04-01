@@ -8,16 +8,102 @@ import { Alert } from '../ui/Alert';
 // Upload steps that can be skipped
 const UPLOAD_STEPS = [11, 12, 13, 14, 15, 16, 17];
 
-// Required fields for each upload step (when not skipped)
-// Note: file_name is now derived from pendingFile or existing data
-const UPLOAD_STEP_REQUIRED_FIELDS: Record<number, string[]> = {
-  11: ['worker_type', 'document_type'], // Work Auth - file checked separately
-  12: ['id_type', 'id_number', 'issuing_state', 'expiration_date'], // ID Front
-  13: [], // ID Back - file only
-  14: [], // SSN Card - file only
-  15: [], // Credentials - optional
-  16: [], // CPR - optional
-  17: [], // TB Test - optional
+// Agreement steps - just need signature
+const AGREEMENT_STEPS = [9, 10, 18, 19, 20, 21];
+
+// Required fields for each step
+// Form steps require specific fields to be filled
+// Upload steps require file + metadata
+// Agreement steps require signature
+const STEP_REQUIRED_FIELDS: Record<number, string[]> = {
+  // Step 1: Application Basics
+  1: [
+    'position_applied',
+    'employment_type',
+    'desired_hourly_rate',
+    'desired_start_date',
+    'is_18_or_older',
+    'convicted_violent_crime',
+    'background_check_consent',
+    'citizenship_status',
+    'eligible_to_work',
+    'speaks_other_languages',
+    'worked_for_eveready_before',
+  ],
+  // Step 2: Personal Information
+  2: [
+    'first_name',
+    'middle_name',
+    'last_name',
+    'date_of_birth',
+    'address_line1',
+    'city',
+    'state',
+    'zip',
+    'phone',
+    'email',
+  ],
+  // Step 3: Emergency Contact
+  3: [
+    'ec_first_name',
+    'ec_last_name',
+    'ec_relationship',
+    'ec_phone',
+  ],
+  // Step 4: Education & Certifications
+  4: [
+    'highest_education',
+    'credential_type',
+  ],
+  // Step 5: Reference 1
+  5: [
+    'ref1_name',
+    'ref1_relationship',
+    'ref1_phone',
+  ],
+  // Step 6: Reference 2
+  6: [
+    'ref2_name',
+    'ref2_relationship',
+    'ref2_phone',
+  ],
+  // Step 7: Employment History
+  7: [], // Has its own validation (at least one employer or no experience checkbox)
+  // Step 8: Work Preferences
+  8: [
+    'has_transportation',
+    'comfortable_with_pets',
+    'comfortable_with_smokers',
+  ],
+  // Steps 9-10: Agreements
+  9: ['signature'],
+  10: ['signature'],
+  // Steps 11-17: Upload steps
+  11: ['worker_type', 'document_type'],
+  12: ['id_type', 'id_number', 'issuing_state', 'expiration_date'],
+  13: [],
+  14: [],
+  15: [],
+  16: [],
+  17: [],
+  // Steps 18-21: More agreements
+  18: ['signature'],
+  19: ['signature', 'attestation_confirmed'],
+  20: ['signature', 'disclosure_confirmed'],
+  21: ['signature'],
+  // Step 22: Final submission
+  22: [],
+};
+
+// Steps that require a file upload (when not skipped)
+const REQUIRED_FILE_STEPS = [11, 12, 13, 14];
+
+// Steps that require checkbox array to have at least one selection
+const CHECKBOX_ARRAY_REQUIREMENTS: Record<number, { field: string; minCount: number }[]> = {
+  8: [
+    { field: 'available_days', minCount: 1 },
+    { field: 'shift_preferences', minCount: 1 },
+  ],
 };
 
 interface WizardShellProps {
@@ -62,27 +148,55 @@ export function WizardShell({
   // Check if file is available (either pending or already uploaded)
   const hasFile = pendingFile !== null || Boolean(stepData.file_name);
 
+  // Check if a field has a valid value
+  const hasValidValue = (field: string): boolean => {
+    const value = stepData[field];
+    if (value === undefined || value === null) return false;
+    if (typeof value === 'string' && value.trim() === '') return false;
+    if (Array.isArray(value) && value.length === 0) return false;
+    return true;
+  };
+
   // Check if current step can proceed
   const canProceed = (): boolean => {
-    if (isUploadStep) {
-      if (currentStepSkipped) return true;
-      
-      const requiredFields = UPLOAD_STEP_REQUIRED_FIELDS[currentStep] || [];
-      
-      // Check required form fields
-      const formFieldsComplete = requiredFields.every(field => {
-        const value = stepData[field];
-        return value !== undefined && value !== null && value !== '';
-      });
+    // Upload steps that are skipped can proceed
+    if (isUploadStep && currentStepSkipped) return true;
+    
+    const requiredFields = STEP_REQUIRED_FIELDS[currentStep] || [];
+    
+    // Check all required fields
+    const allFieldsComplete = requiredFields.every(field => hasValidValue(field));
+    if (!allFieldsComplete) return false;
 
-      // For required upload steps (11-14), also need a file
-      const needsFile = [11, 12, 13, 14].includes(currentStep);
-      if (needsFile && !hasFile) {
+    // Check checkbox array requirements
+    const arrayReqs = CHECKBOX_ARRAY_REQUIREMENTS[currentStep] || [];
+    const arraysComplete = arrayReqs.every(req => {
+      const arr = stepData[req.field];
+      return Array.isArray(arr) && arr.length >= req.minCount;
+    });
+    if (!arraysComplete) return false;
+
+    // For required upload steps, also need a file
+    if (REQUIRED_FILE_STEPS.includes(currentStep) && !currentStepSkipped && !hasFile) {
+      return false;
+    }
+
+    // Step 7 (Employment History) special case - need either employers or "no experience" checked
+    if (currentStep === 7) {
+      const employers = stepData.employers as Array<unknown> | undefined;
+      const noExperience = stepData.no_experience === true;
+      if (!noExperience && (!employers || employers.length === 0)) {
         return false;
       }
-      
-      return formFieldsComplete;
     }
+
+    // Step 1 special validations
+    if (currentStep === 1) {
+      if (stepData.is_18_or_older === 'no') return false;
+      if (stepData.background_check_consent === 'no_consent') return false;
+      if (stepData.eligible_to_work === 'no') return false;
+    }
+    
     return true;
   };
 
@@ -102,22 +216,43 @@ export function WizardShell({
     return step?.data?.skip === true;
   }).length;
 
-  const getMissingItems = (): { fields: string[]; needsFile: boolean } => {
-    if (!isUploadStep || currentStepSkipped) return { fields: [], needsFile: false };
+  const getMissingItems = (): { fields: string[]; needsFile: boolean; needsArrays: string[] } => {
+    if (isUploadStep && currentStepSkipped) {
+      return { fields: [], needsFile: false, needsArrays: [] };
+    }
     
-    const requiredFields = UPLOAD_STEP_REQUIRED_FIELDS[currentStep] || [];
-    const missingFields = requiredFields.filter(field => {
-      const value = stepData[field];
-      return value === undefined || value === null || value === '';
-    });
+    const requiredFields = STEP_REQUIRED_FIELDS[currentStep] || [];
+    const missingFields = requiredFields.filter(field => !hasValidValue(field));
 
-    const needsFile = [11, 12, 13, 14].includes(currentStep) && !hasFile;
+    const needsFile = REQUIRED_FILE_STEPS.includes(currentStep) && !currentStepSkipped && !hasFile;
     
-    return { fields: missingFields, needsFile };
+    const arrayReqs = CHECKBOX_ARRAY_REQUIREMENTS[currentStep] || [];
+    const needsArrays = arrayReqs
+      .filter(req => {
+        const arr = stepData[req.field];
+        return !Array.isArray(arr) || arr.length < req.minCount;
+      })
+      .map(req => req.field);
+
+    return { fields: missingFields, needsFile, needsArrays };
   };
 
-  const { fields: missingFields, needsFile: missingFile } = getMissingItems();
-  const showValidationError = isUploadStep && !currentStepSkipped && (missingFields.length > 0 || missingFile);
+  const { fields: missingFields, needsFile: missingFile, needsArrays } = getMissingItems();
+  const hasValidationErrors = missingFields.length > 0 || missingFile || needsArrays.length > 0;
+  
+  // Also check special step validations
+  const hasSpecialErrors = 
+    (currentStep === 1 && (
+      stepData.is_18_or_older === 'no' ||
+      stepData.background_check_consent === 'no_consent' ||
+      stepData.eligible_to_work === 'no'
+    )) ||
+    (currentStep === 7 && (
+      stepData.no_experience !== true &&
+      (!stepData.employers || (stepData.employers as Array<unknown>).length === 0)
+    ));
+
+  const showValidationError = hasValidationErrors || hasSpecialErrors;
 
   return (
     <div className="mx-auto max-w-3xl">
@@ -130,14 +265,6 @@ export function WizardShell({
             Step {currentStep} of {TOTAL_STEPS}
           </p>
         </div>
-        <Button
-          variant="ghost"
-          size="sm"
-          onClick={onSaveAndExit}
-          disabled={saving}
-        >
-          Save & Exit
-        </Button>
       </div>
 
       <ProgressBar
@@ -183,13 +310,11 @@ export function WizardShell({
           onChange={onChange}
         />
 
-        {showValidationError && (
-          <Alert variant="error" className="mt-4" title="Required Fields Missing">
-            {missingFile && missingFields.length === 0 
-              ? 'Please upload the document, or check "I\'ll upload this later" to continue.'
-              : missingFile
-                ? 'Please fill in all required fields and upload the document, or check "I\'ll upload this later" to continue.'
-                : 'Please fill in all required fields, or check "I\'ll upload this later" to continue.'
+        {showValidationError && !canProceed() && (
+          <Alert variant="warning" className="mt-4" title="Required Fields">
+            {isUploadStep && missingFile
+              ? 'Please upload the required document or check "I\'ll upload this later" to continue.'
+              : 'Please complete all required fields (marked with *) before continuing.'
             }
           </Alert>
         )}
@@ -207,7 +332,17 @@ export function WizardShell({
           Back
         </Button>
 
-        <div className="flex gap-3">
+        <div className="flex items-center gap-3">
+          {/* Save & Continue Later - always available */}
+          <Button
+            variant="ghost"
+            size="sm"
+            onClick={onSaveAndExit}
+            disabled={saving}
+          >
+            Save & Continue Later
+          </Button>
+
           {isLast ? (
             hasSkippedUploads ? (
               <div className="flex flex-col items-end gap-2">
@@ -219,7 +354,7 @@ export function WizardShell({
                 </p>
               </div>
             ) : (
-              <Button onClick={onSubmit} loading={saving}>
+              <Button onClick={onSubmit} loading={saving} disabled={!canProceed()}>
                 Submit Application
               </Button>
             )
@@ -227,7 +362,7 @@ export function WizardShell({
             <Button 
               onClick={handleNextClick} 
               loading={saving}
-              disabled={showValidationError}
+              disabled={!canProceed()}
             >
               Next
               <svg className="h-4 w-4" fill="none" viewBox="0 0 24 24" stroke="currentColor">
