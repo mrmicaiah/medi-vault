@@ -10,8 +10,9 @@ import { AgreementViewModal } from '../../components/admin/AgreementViewModal';
 import { formatDate } from '../../lib/utils';
 
 // Build API URL the same way as lib/api.ts
+// BASE_URL is http://localhost:8000 (no /api)
+// Endpoints from backend include /admin/... so we add /api prefix
 const BASE_URL = import.meta.env.VITE_API_URL || 'http://localhost:8000';
-const API_URL = `${BASE_URL}/api`;
 
 interface Applicant {
   id: string;
@@ -78,7 +79,6 @@ export default function DocumentsPage() {
     const { data: { session } } = await supabase.auth.getSession();
     return {
       'Authorization': `Bearer ${session?.access_token}`,
-      'Content-Type': 'application/json'
     };
   }
 
@@ -117,7 +117,9 @@ export default function DocumentsPage() {
       setDownloadingId(endpoint);
       const headers = await getAuthHeaders();
       
-      const res = await fetch(`${API_URL}${endpoint}`, { headers });
+      // endpoint is like "/admin/applicants/{id}/pdf/application"
+      // BASE_URL is "http://localhost:8000", we add /api prefix
+      const res = await fetch(`${BASE_URL}/api${endpoint}`, { headers });
       
       if (!res.ok) {
         throw new Error('Failed to generate PDF');
@@ -144,7 +146,8 @@ export default function DocumentsPage() {
       setAgreementModal({ isOpen: true, name, pdfUrl: null, loading: true });
       
       const headers = await getAuthHeaders();
-      const res = await fetch(`${API_URL}${endpoint}`, { headers });
+      // endpoint is like "/admin/applicants/{id}/pdf/agreement/confidentiality"
+      const res = await fetch(`${BASE_URL}/api${endpoint}`, { headers });
       
       if (!res.ok) {
         throw new Error('Failed to load agreement');
@@ -172,6 +175,7 @@ export default function DocumentsPage() {
     try {
       setDownloadingId(endpoint);
       
+      // Use api.get which handles the URL correctly
       const data = await api.get<{ signed_url: string }>(endpoint);
       if (data.signed_url) {
         window.open(data.signed_url, '_blank');
