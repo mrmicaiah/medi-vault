@@ -32,10 +32,20 @@ const US_STATES = [
   { value: 'WI', label: 'Wisconsin' }, { value: 'WY', label: 'Wyoming' }, { value: 'DC', label: 'District of Columbia' },
 ];
 
+const CREDENTIAL_TYPES = [
+  { value: 'cna', label: 'CNA (Certified Nursing Assistant)' },
+  { value: 'lpn', label: 'LPN (Licensed Practical Nurse)' },
+  { value: 'rn', label: 'RN (Registered Nurse)' },
+  { value: 'hha', label: 'Home Health Aide Certification' },
+  { value: 'pca', label: 'PCA (Personal Care Aide)' },
+  { value: 'other', label: 'Other Healthcare License' },
+];
+
 export function Credentials({ data, onSave, onFileSelect, pendingFile, onChange }: StepProps) {
   const [form, setForm] = useState({
     skip: (data.skip as boolean) || false,
     credential_type: (data.credential_type as string) || '',
+    other_credential_type: (data.other_credential_type as string) || '',
     credential_number: (data.credential_number as string) || '',
     issuing_state: (data.issuing_state as string) || '',
     expiration_date: (data.expiration_date as string) || '',
@@ -87,22 +97,21 @@ export function Credentials({ data, onSave, onFileSelect, pendingFile, onChange 
 
       {!form.skip && (
         <>
-          <Alert variant="info" title="Accepted Credentials">
-            <ul className="mt-1 list-disc pl-4 space-y-1">
-              <li>CNA (Certified Nursing Assistant)</li>
-              <li>LPN (Licensed Practical Nurse)</li>
-              <li>RN (Registered Nurse)</li>
-              <li>Home Health Aide Certification</li>
-              <li>Other healthcare licenses</li>
-            </ul>
-          </Alert>
-
-          <Input
+          <Select
             label="Credential Type"
             value={form.credential_type}
             onChange={(e) => handleChange('credential_type', e.target.value)}
-            placeholder="e.g., CNA, LPN, RN"
+            options={CREDENTIAL_TYPES}
           />
+
+          {form.credential_type === 'other' && (
+            <Input
+              label="Specify Credential Type"
+              value={form.other_credential_type}
+              onChange={(e) => handleChange('other_credential_type', e.target.value)}
+              placeholder="Enter your credential type"
+            />
+          )}
 
           <div className="grid grid-cols-1 gap-4 sm:grid-cols-2">
             <Input
