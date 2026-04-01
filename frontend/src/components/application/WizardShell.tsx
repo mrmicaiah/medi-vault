@@ -407,7 +407,7 @@ export function WizardShell({
             })}
           </ul>
         </Alert>
-      ))}
+      )}
     </div>
   );
 }
