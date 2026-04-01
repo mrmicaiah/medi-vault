@@ -9,13 +9,12 @@
         <!-- Header -->
         <header class="header">
             <div class="logo-placeholder">
-                <!-- Logo will go here -->
                 <div class="company-name">EVEREADY HOMECARE</div>
                 <div class="tagline">"Always Ready to Meet Your Needs"</div>
             </div>
             <div class="document-title">
                 <h1>Employment Application</h1>
-                <p class="generated-date">Generated: {{ generated_date }}</p>
+                <p class="generated-date">Generated: {{ generated_at }}</p>
             </div>
         </header>
 
@@ -24,28 +23,16 @@
             <h2>Application Information</h2>
             <table class="info-table">
                 <tr>
+                    <td class="label">Application ID:</td>
+                    <td>{{ application_id }}</td>
+                    <td class="label">Status:</td>
+                    <td>{{ status | upper }}</td>
+                </tr>
+                <tr>
                     <td class="label">Position Applied For:</td>
-                    <td>{{ position | upper }}</td>
-                    <td class="label">Application Date:</td>
-                    <td>{{ submitted_at or generated_date }}</td>
-                </tr>
-                <tr>
-                    <td class="label">Are you 18 or older?</td>
-                    <td>{{ 'Yes' if is_18_or_older == 'yes' else 'No' }}</td>
-                    <td class="label">Primary Language:</td>
-                    <td>{{ primary_language }}</td>
-                </tr>
-                <tr>
-                    <td class="label">Citizenship Status:</td>
-                    <td colspan="3">{{ citizenship_status }}</td>
-                </tr>
-                <tr>
-                    <td class="label">Background Check Consent:</td>
-                    <td colspan="3">{{ 'Yes - I consent' if background_check_consent == 'consent' else 'No - I do not consent' }}</td>
-                </tr>
-                <tr>
-                    <td class="label">Convicted of Violent Crime:</td>
-                    <td colspan="3">{{ 'Yes' if convicted_violent_crime == 'yes' else 'No' }}</td>
+                    <td>{{ steps.get(4, {}).get('data', {}).get('position', steps.get(3, {}).get('data', {}).get('position', 'PCA / HHA')) | upper }}</td>
+                    <td class="label">Submitted:</td>
+                    <td>{{ submitted_at or 'Not yet submitted' }}</td>
                 </tr>
             </table>
         </section>
@@ -53,39 +40,30 @@
         <!-- Personal Information -->
         <section class="section">
             <h2>Personal Information</h2>
+            {% set step1 = steps.get(1, {}).get('data', {}) %}
+            {% set step2 = steps.get(2, {}).get('data', {}) %}
+            {% set personal = step2 if step2.get('first_name') else step1 %}
             <table class="info-table">
                 <tr>
                     <td class="label">Full Name:</td>
-                    <td colspan="3">{{ first_name }} {{ middle_name }} {{ last_name }}</td>
+                    <td colspan="3">{{ personal.get('first_name', '') }} {{ personal.get('middle_name', '') }} {{ personal.get('last_name', '') }}</td>
                 </tr>
-                {% if other_last_names %}
-                <tr>
-                    <td class="label">Other Names Used:</td>
-                    <td colspan="3">{{ other_last_names }}</td>
-                </tr>
-                {% endif %}
                 <tr>
                     <td class="label">Date of Birth:</td>
-                    <td>{{ date_of_birth }}</td>
-                    <td class="label">SSN (Last 4):</td>
-                    <td>***-**-{{ ssn_last_four }}</td>
+                    <td>{{ personal.get('date_of_birth', 'N/A') }}</td>
+                    <td class="label">Phone:</td>
+                    <td>{{ personal.get('phone', 'N/A') }}</td>
+                </tr>
+                <tr>
+                    <td class="label">Email:</td>
+                    <td colspan="3">{{ personal.get('email', 'N/A') }}</td>
                 </tr>
                 <tr>
                     <td class="label">Address:</td>
                     <td colspan="3">
-                        {{ address_line1 }}{% if address_line2 %}, {{ address_line2 }}{% endif %}<br>
-                        {{ city }}, {{ state }} {{ zip }}
+                        {{ personal.get('address_line1', '') }}{% if personal.get('address_line2') %}, {{ personal.get('address_line2') }}{% endif %}<br>
+                        {{ personal.get('city', '') }}, {{ personal.get('state', '') }} {{ personal.get('zip', personal.get('zip_code', '')) }}
                     </td>
-                </tr>
-                <tr>
-                    <td class="label">Phone:</td>
-                    <td>{{ phone }}</td>
-                    <td class="label">Alt Phone:</td>
-                    <td>{{ alt_phone or 'N/A' }}</td>
-                </tr>
-                <tr>
-                    <td class="label">Email:</td>
-                    <td colspan="3">{{ email }}</td>
                 </tr>
             </table>
         </section>
@@ -93,60 +71,77 @@
         <!-- Emergency Contact -->
         <section class="section">
             <h2>Emergency Contact</h2>
+            {% set step3 = steps.get(3, {}).get('data', {}) %}
             <table class="info-table">
                 <tr>
                     <td class="label">Name:</td>
-                    <td>{{ emergency_name }}</td>
+                    <td>{{ step3.get('name', step3.get('ec_name', 'N/A')) }}</td>
                     <td class="label">Relationship:</td>
-                    <td>{{ emergency_relationship }}</td>
+                    <td>{{ step3.get('relationship', step3.get('ec_relationship', 'N/A')) }}</td>
                 </tr>
                 <tr>
                     <td class="label">Phone:</td>
-                    <td colspan="3">{{ emergency_phone }}</td>
+                    <td colspan="3">{{ step3.get('phone', step3.get('ec_phone', 'N/A')) }}</td>
                 </tr>
             </table>
         </section>
 
-        <!-- Education & Qualifications -->
+        <!-- Qualifications -->
         <section class="section">
-            <h2>Education & Qualifications</h2>
+            <h2>Qualifications & Skills</h2>
+            {% set step4 = steps.get(4, {}).get('data', {}) %}
+            {% set step5 = steps.get(5, {}).get('data', {}) %}
+            {% set step7 = steps.get(7, {}).get('data', {}) %}
+            {% set step8 = steps.get(8, {}).get('data', {}) %}
             <table class="info-table">
                 <tr>
-                    <td class="label">High School Graduate:</td>
-                    <td>{{ 'Yes' if high_school_graduate == 'yes' else 'No' }}</td>
+                    <td class="label">18 or Older:</td>
+                    <td>{{ 'Yes' if step4.get('is_18_or_older') == 'yes' else ('No' if step4.get('is_18_or_older') == 'no' else 'N/A') }}</td>
                     <td class="label">Licensed Driver:</td>
-                    <td>{{ 'Yes' if licensed_driver == 'yes' else 'No' }}</td>
+                    <td>{{ 'Yes' if step4.get('licensed_driver') == 'yes' else ('No' if step4.get('licensed_driver') == 'no' else 'N/A') }}</td>
+                </tr>
+                <tr>
+                    <td class="label">High School Graduate:</td>
+                    <td>{{ 'Yes' if step4.get('high_school_graduate') == 'yes' else ('No' if step4.get('high_school_graduate') == 'no' else 'N/A') }}</td>
+                    <td class="label">CPR Certified:</td>
+                    <td>{{ 'Yes' if step5.get('cpr_certified') == 'yes' else ('No' if step5.get('cpr_certified') == 'no' else 'N/A') }}</td>
+                </tr>
+                <tr>
+                    <td class="label">TB Test (Past Year):</td>
+                    <td>{{ 'Yes' if step5.get('tb_test_recent') == 'yes' else ('No' if step5.get('tb_test_recent') == 'no' else 'N/A') }}</td>
+                    <td class="label">Eligible to Work in US:</td>
+                    <td>{{ 'Yes' if step4.get('eligible_to_work') == 'yes' else ('No' if step4.get('eligible_to_work') == 'no' else 'N/A') }}</td>
                 </tr>
                 <tr>
                     <td class="label">Certifications:</td>
-                    <td colspan="3">{{ certifications | join(', ') if certifications else 'None' }}</td>
+                    <td colspan="3">
+                        {% if step5.get('certifications') %}
+                            {{ step5.get('certifications') | join(', ') if step5.get('certifications') is iterable and step5.get('certifications') is not string else step5.get('certifications') }}
+                        {% else %}
+                            N/A
+                        {% endif %}
+                    </td>
                 </tr>
+            </table>
+
+            <h3>Care Skills</h3>
+            <table class="info-table">
                 <tr>
-                    <td class="label">CPR Certified:</td>
-                    <td>{{ 'Yes' if cpr_certified == 'yes' else 'No' }}</td>
-                    <td class="label">TB Test (Past Year):</td>
-                    <td>{{ 'Yes' if tb_test_recent == 'yes' else 'No' }}</td>
+                    <td class="label">Can Do Catheter Care:</td>
+                    <td>{{ 'Yes' if step7.get('can_do_catheter_care') == 'yes' else ('No' if step7.get('can_do_catheter_care') == 'no' else 'N/A') }}</td>
+                    <td class="label">Can Do Vital Signs:</td>
+                    <td>{{ 'Yes' if step7.get('can_do_vitals') == 'yes' else ('No' if step7.get('can_do_vitals') == 'no' else 'N/A') }}</td>
                 </tr>
                 <tr>
                     <td class="label">Will Travel 30 Min:</td>
-                    <td>{{ 'Yes' if will_travel_30_min == 'yes' else 'No' }}</td>
-                    <td class="label">Eligible to Work in US:</td>
-                    <td>{{ 'Yes' if eligible_to_work == 'yes' else 'No' }}</td>
-                </tr>
-                <tr>
-                    <td class="label">Can Do Catheter Care:</td>
-                    <td>{{ 'Yes' if can_do_catheter == 'yes' else 'No' }}</td>
-                    <td class="label">Can Do Vital Signs:</td>
-                    <td>{{ 'Yes' if can_do_vitals == 'yes' else 'No' }}</td>
-                </tr>
-                <tr>
+                    <td>{{ 'Yes' if step7.get('will_travel_30_min') == 'yes' else ('No' if step7.get('will_travel_30_min') == 'no' else 'N/A') }}</td>
                     <td class="label">Work with Bedbound:</td>
-                    <td colspan="3">{{ work_bedbound }}</td>
+                    <td>{{ step7.get('work_bedbound', 'N/A') }}</td>
                 </tr>
-                {% if special_skills %}
+                {% if step7.get('special_skills') %}
                 <tr>
                     <td class="label">Special Skills:</td>
-                    <td colspan="3">{{ special_skills }}</td>
+                    <td colspan="3">{{ step7.get('special_skills') }}</td>
                 </tr>
                 {% endif %}
             </table>
@@ -155,28 +150,25 @@
         <!-- References -->
         <section class="section">
             <h2>Personal References</h2>
+            {% set step6 = steps.get(6, {}).get('data', {}) %}
             <table class="info-table">
                 <tr>
-                    <th>Reference</th>
+                    <th>#</th>
                     <th>Name</th>
                     <th>Relationship</th>
                     <th>Phone</th>
                 </tr>
                 <tr>
                     <td>1</td>
-                    <td>{{ ref1_name }}</td>
-                    <td>{{ ref1_relationship }}</td>
-                    <td>{{ ref1_phone }}</td>
+                    <td>{{ step6.get('ref1_name', 'N/A') }}</td>
+                    <td>{{ step6.get('ref1_relationship', 'N/A') }}</td>
+                    <td>{{ step6.get('ref1_phone', 'N/A') }}</td>
                 </tr>
                 <tr>
                     <td>2</td>
-                    <td>{{ ref2_name }}</td>
-                    <td>{{ ref2_relationship }}</td>
-                    <td>{{ ref2_phone }}</td>
-                </tr>
-                <tr>
-                    <td class="label" colspan="2">Consent to Contact References:</td>
-                    <td colspan="2">{{ 'Yes' if contact_references_consent == 'yes' else 'No' }}</td>
+                    <td>{{ step6.get('ref2_name', 'N/A') }}</td>
+                    <td>{{ step6.get('ref2_relationship', 'N/A') }}</td>
+                    <td>{{ step6.get('ref2_phone', 'N/A') }}</td>
                 </tr>
             </table>
         </section>
@@ -184,62 +176,63 @@
         <!-- Employment History -->
         <section class="section">
             <h2>Employment History</h2>
+            {% set emp = steps.get(5, {}).get('data', {}) %}
             
-            {% if currently_employed == 'yes' %}
+            {% if emp.get('currently_employed') == 'yes' %}
             <h3>Current Employment</h3>
             <table class="info-table">
                 <tr>
                     <td class="label">Employer:</td>
-                    <td>{{ current_employer }}</td>
+                    <td>{{ emp.get('current_employer', 'N/A') }}</td>
                     <td class="label">Supervisor:</td>
-                    <td>{{ current_supervisor }}</td>
+                    <td>{{ emp.get('current_supervisor', 'N/A') }}</td>
                 </tr>
                 <tr>
                     <td class="label">Phone:</td>
-                    <td>{{ current_supervisor_phone }}</td>
-                    <td class="label">Dates:</td>
-                    <td>{{ current_start_date }} - {{ current_end_date or 'Present' }}</td>
+                    <td>{{ emp.get('current_supervisor_phone', 'N/A') }}</td>
+                    <td class="label">Start Date:</td>
+                    <td>{{ emp.get('current_start_date', 'N/A') }}</td>
                 </tr>
             </table>
             {% else %}
             <p><em>Not currently employed</em></p>
             {% endif %}
             
-            {% if employer1_name %}
+            {% if emp.get('employer1_name') %}
             <h3>Previous Employer 1</h3>
             <table class="info-table">
                 <tr>
                     <td class="label">Employer:</td>
-                    <td>{{ employer1_name }}</td>
+                    <td>{{ emp.get('employer1_name') }}</td>
                     <td class="label">Supervisor:</td>
-                    <td>{{ employer1_supervisor }}</td>
+                    <td>{{ emp.get('employer1_supervisor', 'N/A') }}</td>
                 </tr>
                 <tr>
                     <td class="label">Phone:</td>
-                    <td>{{ employer1_phone }}</td>
+                    <td>{{ emp.get('employer1_phone', 'N/A') }}</td>
                     <td class="label">Dates:</td>
-                    <td>{{ employer1_start }} - {{ employer1_end }}</td>
+                    <td>{{ emp.get('employer1_start', '') }} - {{ emp.get('employer1_end', '') }}</td>
                 </tr>
             </table>
             {% endif %}
             
-            {% if employer2_name and not no_second_employer %}
+            {% if emp.get('employer2_name') and not emp.get('no_second_employer') %}
             <h3>Previous Employer 2</h3>
             <table class="info-table">
                 <tr>
                     <td class="label">Employer:</td>
-                    <td>{{ employer2_name }}</td>
+                    <td>{{ emp.get('employer2_name') }}</td>
                     <td class="label">Supervisor:</td>
-                    <td>{{ employer2_supervisor }}</td>
+                    <td>{{ emp.get('employer2_supervisor', 'N/A') }}</td>
                 </tr>
                 <tr>
                     <td class="label">Phone:</td>
-                    <td>{{ employer2_phone }}</td>
+                    <td>{{ emp.get('employer2_phone', 'N/A') }}</td>
                     <td class="label">Dates:</td>
-                    <td>{{ employer2_start }} - {{ employer2_end }}</td>
+                    <td>{{ emp.get('employer2_start', '') }} - {{ emp.get('employer2_end', '') }}</td>
                 </tr>
             </table>
-            {% elif no_second_employer %}
+            {% elif emp.get('no_second_employer') %}
             <p><em>Applicant does not have a second employer to list</em></p>
             {% endif %}
         </section>
@@ -247,43 +240,50 @@
         <!-- Work Preferences -->
         <section class="section">
             <h2>Work Preferences</h2>
+            {% set pref = steps.get(8, {}).get('data', {}) %}
             <table class="info-table">
                 <tr>
                     <td class="label">Desired Hourly Rate:</td>
-                    <td>${{ desired_hourly_rate }}/hr</td>
+                    <td>${{ pref.get('desired_hourly_rate', 'Negotiable') }}/hr</td>
                     <td class="label">Hours Per Week:</td>
-                    <td>{{ hours_per_week }}</td>
+                    <td>{{ pref.get('hours_per_week', 'N/A') }}</td>
                 </tr>
                 <tr>
                     <td class="label">Available Shifts:</td>
-                    <td colspan="3">{{ available_shifts | join(', ') if available_shifts else 'Not specified' }}</td>
+                    <td colspan="3">
+                        {% if pref.get('available_shifts') %}
+                            {{ pref.get('available_shifts') | join(', ') if pref.get('available_shifts') is iterable and pref.get('available_shifts') is not string else pref.get('available_shifts') }}
+                        {% else %}
+                            Not specified
+                        {% endif %}
+                    </td>
                 </tr>
                 <tr>
                     <td class="label">Available Days:</td>
-                    <td colspan="3">{{ available_days | join(', ') if available_days else 'Not specified' }}</td>
+                    <td colspan="3">
+                        {% if pref.get('available_days') %}
+                            {{ pref.get('available_days') | join(', ') if pref.get('available_days') is iterable and pref.get('available_days') is not string else pref.get('available_days') }}
+                        {% else %}
+                            Not specified
+                        {% endif %}
+                    </td>
                 </tr>
                 <tr>
                     <td class="label">Work Weekends:</td>
-                    <td>{{ 'Yes' if work_weekends == 'yes' else 'No' }}</td>
+                    <td>{{ 'Yes' if pref.get('work_weekends') == 'yes' else ('No' if pref.get('work_weekends') == 'no' else 'N/A') }}</td>
                     <td class="label">Comfortable with Pets:</td>
-                    <td>{{ comfortable_pets }}</td>
+                    <td>{{ pref.get('comfortable_pets', 'N/A') }}</td>
                 </tr>
                 <tr>
                     <td class="label">Comfortable with Smokers:</td>
-                    <td colspan="3">{{ comfortable_smokers }}</td>
+                    <td colspan="3">{{ pref.get('comfortable_smokers', 'N/A') }}</td>
                 </tr>
-                {% if conditions_not_wanted %}
-                <tr>
-                    <td class="label">Conditions Not Wanted:</td>
-                    <td colspan="3">{{ conditions_not_wanted }}</td>
-                </tr>
-                {% endif %}
             </table>
         </section>
 
-        <!-- Signature -->
+        <!-- Certification -->
         <section class="section signature-section">
-            <h2>Certification & Signature</h2>
+            <h2>Applicant Certification</h2>
             <p class="certification-text">
                 I certify that the information provided in this application is true and complete to the best of my knowledge. 
                 I understand that any false statement or omission may disqualify me from further consideration for employment 
@@ -293,13 +293,14 @@
                 I authorize Eveready HomeCare to investigate all statements contained in this application and to contact 
                 the references I have provided. I understand that this application is not a contract of employment.
             </p>
+            {% set final = steps.get(22, {}).get('data', {}) %}
             <div class="signature-line">
                 <div class="signature">
-                    <span class="sig-value">{{ signature_name }}</span>
+                    <span class="sig-value">{{ final.get('signature', 'Pending') }}</span>
                     <span class="sig-label">Applicant Signature (Electronic)</span>
                 </div>
                 <div class="date">
-                    <span class="sig-value">{{ signature_date or generated_date }}</span>
+                    <span class="sig-value">{{ final.get('signed_date', submitted_at or generated_at) }}</span>
                     <span class="sig-label">Date</span>
                 </div>
             </div>
