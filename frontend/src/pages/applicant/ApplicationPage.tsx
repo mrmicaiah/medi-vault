@@ -1,4 +1,4 @@
-import React, { useEffect } from 'react';
+import React, { useEffect, useRef } from 'react';
 import { useNavigate, useSearchParams } from 'react-router-dom';
 import { WizardShell } from '../../components/application/WizardShell';
 import { ReadOnlyApplication } from '../../components/application/ReadOnlyApplication';
@@ -8,6 +8,8 @@ import { Alert } from '../../components/ui/Alert';
 export function ApplicationPage() {
   const navigate = useNavigate();
   const [searchParams] = useSearchParams();
+  const stepParamApplied = useRef(false);
+  
   const {
     currentStep,
     completedCount,
@@ -34,16 +36,19 @@ export function ApplicationPage() {
     loadApplication();
   }, [loadApplication]);
 
-  // Handle step query parameter after application loads
+  // Handle step query parameter ONCE after application loads
   useEffect(() => {
-    const stepParam = searchParams.get('step');
-    if (stepParam && !loading) {
-      const stepNumber = parseInt(stepParam, 10);
-      if (stepNumber >= 1 && stepNumber <= 22) {
-        goToStep(stepNumber);
+    if (!loading && !stepParamApplied.current) {
+      const stepParam = searchParams.get('step');
+      if (stepParam) {
+        const stepNumber = parseInt(stepParam, 10);
+        if (stepNumber >= 1 && stepNumber <= 22) {
+          goToStep(stepNumber);
+        }
       }
+      stepParamApplied.current = true;
     }
-  }, [searchParams, loading, goToStep]);
+  }, [loading, searchParams, goToStep]);
 
   const handleSave = (data: Record<string, unknown>, completed?: boolean) => {
     // For regular saves (form field changes), just update local state
