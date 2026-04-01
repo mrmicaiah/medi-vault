@@ -1,5 +1,5 @@
 from fastapi import APIRouter, Depends, HTTPException, Header
-from fastapi.responses import Response
+from fastapi.responses import Response, HTMLResponse
 from supabase import Client
 from datetime import datetime, timedelta
 from typing import Optional, Dict, List
@@ -558,7 +558,87 @@ async def update_application_status(
 
 
 # =============================================================================
-# PDF Generation Endpoints
+# Agreement HTML Preview Endpoint (no WeasyPrint needed)
+# =============================================================================
+
+@router.get("/applicants/{application_id}/agreement/{agreement_type}/preview")
+async def preview_agreement_html(
+    application_id: str,
+    agreement_type: str,
+    supabase: Client = Depends(get_supabase),
+    user: dict = Depends(get_staff_user)
+):
+    """
+    Return rendered HTML for agreement preview (no PDF generation).
+    Works on Windows without WeasyPrint/GTK.
+    """
+    from jinja2 import Environment, FileSystemLoader
+    
+    try:
+        app_res = supabase.table("applications").select("*").eq("id", application_id).single().execute()
+        if not app_res.data:
+            raise HTTPException(status_code=404, detail="Application not found")
+        
+        agreement_step_map = {
+            "confidentiality": 9,
+            "esignature": 10,
+            "orientation": 18,
+            "criminal_background": 19,
+            "va_code_disclosure": 20,
+            "job_description": 21,
+            "final_signature": 22,
+        }
+        
+        step_number = agreement_step_map.get(agreement_type)
+        if not step_number:
+            raise HTTPException(status_code=400, detail=f"Invalid agreement type: {agreement_type}")
+        
+        step_res = supabase.table("application_steps").select("data, is_completed, updated_at").eq("application_id", application_id).eq("step_number", step_number).single().execute()
+        if not step_res.data:
+            raise HTTPException(status_code=404, detail="Agreement step not found")
+        
+        step_data = step_res.data.get("data") or {}
+        
+        step2_res = supabase.table("application_steps").select("data").eq("application_id", application_id).eq("step_number", 2).single().execute()
+        personal_info = step2_res.data.get("data") if step2_res.data else {}
+        
+        context = {
+            "applicant_name": f"{personal_info.get('first_name', '')} {personal_info.get('last_name', '')}".strip() or "Applicant",
+            "signature_text": step_data.get("signature", ""),
+            "signed_at": step_data.get("signed_date", ""),
+            "ip_address": step_data.get("ip_address", "Recorded"),
+            "agreed": step_data.get("agreed", False),
+            "generated_at": datetime.now().strftime("%B %d, %Y at %I:%M %p"),
+            "company_name": "Eveready HomeCare",
+        }
+        
+        template_map = {
+            "confidentiality": "confidentiality_agreement.html",
+            "esignature": "esignature_consent.html",
+            "orientation": "orientation_acknowledgment.html",
+            "criminal_background": "criminal_background_attestation.html",
+            "va_code_disclosure": "va_code_disclosure.html",
+            "job_description": "job_description_acknowledgment.html",
+            "final_signature": "master_onboarding_consent.html",
+        }
+        
+        template_name = template_map.get(agreement_type)
+        
+        templates_dir = os.path.join(os.path.dirname(__file__), '..', 'templates')
+        jinja_env = Environment(loader=FileSystemLoader(templates_dir), autoescape=True)
+        template = jinja_env.get_template(template_name)
+        html_content = template.render(**context)
+        
+        return HTMLResponse(content=html_content)
+    except HTTPException:
+        raise
+    except Exception as e:
+        logger.error(f"Agreement preview error: {e}")
+        raise HTTPException(status_code=500, detail=str(e))
+
+
+# =============================================================================
+# PDF Generation Endpoints (require WeasyPrint - work on Render/Docker)
 # =============================================================================
 
 @router.get("/applicants/{application_id}/pdf/application")
@@ -687,9 +767,7 @@ async def generate_agreement_pdf(
 ):
     """
     Generate a signed agreement as a PDF.
-    
-    Agreement types: confidentiality, esignature, criminal_background, orientation, 
-                     va_code_disclosure, job_description, final_signature
+    Requires WeasyPrint - works on Render/Docker, not on Windows without GTK.
     """
     from jinja2 import Environment, FileSystemLoader
     from weasyprint import HTML, CSS
@@ -724,13 +802,11 @@ async def generate_agreement_pdf(
         
         context = {
             "applicant_name": f"{personal_info.get('first_name', '')} {personal_info.get('last_name', '')}".strip() or "Applicant",
-            "signature": step_data.get("signature", ""),
-            "signed_date": step_data.get("signed_date", ""),
+            "signature_text": step_data.get("signature", ""),
+            "signed_at": step_data.get("signed_date", ""),
+            "ip_address": step_data.get("ip_address", "Recorded"),
             "agreed": step_data.get("agreed", False),
-            "agreed_truthful": step_data.get("agreed_truthful", False),
-            "agreed_at_will": step_data.get("agreed_at_will", False),
-            "agreed_policies": step_data.get("agreed_policies", False),
-            "generated_date": datetime.now().strftime("%B %d, %Y"),
+            "generated_at": datetime.now().strftime("%B %d, %Y at %I:%M %p"),
             "company_name": "Eveready HomeCare",
         }
         
@@ -912,7 +988,7 @@ async def get_applicant_documents_summary(
                         "endpoint": f"/admin/applicants/{application_id}/documents/{step_num}/url"
                     })
         
-        # Get agreements
+        # Get agreements - now include preview_endpoint for HTML preview
         agreement_steps = [
             (9, "confidentiality", "Confidentiality Agreement"),
             (10, "esignature", "E-Signature Consent"),
@@ -935,7 +1011,8 @@ async def get_applicant_documents_summary(
                     "name": name,
                     "signed": bool(data.get("signature")),
                     "signed_date": data.get("signed_date"),
-                    "endpoint": f"/admin/applicants/{application_id}/pdf/agreement/{agreement_type}"
+                    "endpoint": f"/admin/applicants/{application_id}/pdf/agreement/{agreement_type}",
+                    "preview_endpoint": f"/admin/applicants/{application_id}/agreement/{agreement_type}/preview"
                 })
         
         return {
