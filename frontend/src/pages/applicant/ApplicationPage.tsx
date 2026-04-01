@@ -1,4 +1,4 @@
-import React, { useEffect, useRef } from 'react';
+import React, { useEffect } from 'react';
 import { useNavigate, useSearchParams } from 'react-router-dom';
 import { WizardShell } from '../../components/application/WizardShell';
 import { ReadOnlyApplication } from '../../components/application/ReadOnlyApplication';
@@ -8,7 +8,6 @@ import { Alert } from '../../components/ui/Alert';
 export function ApplicationPage() {
   const navigate = useNavigate();
   const [searchParams] = useSearchParams();
-  const stepParamApplied = useRef(false);
   
   const {
     currentStep,
@@ -25,7 +24,6 @@ export function ApplicationPage() {
     submitApplication,
     nextStep,
     prevStep,
-    goToStep,
     getStepData,
     markDirty,
     setPendingFile,
@@ -33,22 +31,13 @@ export function ApplicationPage() {
   } = useApplication();
 
   useEffect(() => {
-    loadApplication();
-  }, [loadApplication]);
-
-  // Handle step query parameter ONCE after application loads
-  useEffect(() => {
-    if (!loading && !stepParamApplied.current) {
-      const stepParam = searchParams.get('step');
-      if (stepParam) {
-        const stepNumber = parseInt(stepParam, 10);
-        if (stepNumber >= 1 && stepNumber <= 22) {
-          goToStep(stepNumber);
-        }
-      }
-      stepParamApplied.current = true;
-    }
-  }, [loading, searchParams, goToStep]);
+    // Get step from URL query param
+    const stepParam = searchParams.get('step');
+    const initialStep = stepParam ? parseInt(stepParam, 10) : undefined;
+    
+    // Pass initial step to loadApplication
+    loadApplication(initialStep);
+  }, [loadApplication, searchParams]);
 
   const handleSave = (data: Record<string, unknown>, completed?: boolean) => {
     // For regular saves (form field changes), just update local state

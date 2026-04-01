@@ -66,7 +66,8 @@ export function useApplication() {
     return () => window.removeEventListener('beforeunload', handleBeforeUnload);
   }, [state.hasUnsavedChanges, state.pendingFiles]);
 
-  const loadApplication = useCallback(async () => {
+  // Load application, optionally starting at a specific step
+  const loadApplication = useCallback(async (initialStep?: number) => {
     setState((prev) => ({ ...prev, loading: true, error: null }));
     try {
       const res = await api.get<{
@@ -79,13 +80,18 @@ export function useApplication() {
         stepsMap[step.step_number] = { data: step.data || {}, status: step.status };
       });
 
-      initialDataRef.current = stepsMap[res.application.current_step]?.data || {};
+      // Use initialStep if provided, otherwise use server's current_step
+      const stepToUse = initialStep && initialStep >= 1 && initialStep <= 22 
+        ? initialStep 
+        : res.application.current_step;
+
+      initialDataRef.current = stepsMap[stepToUse]?.data || {};
 
       setState((prev) => ({
         ...prev,
         applicationId: res.application.id,
         applicationStatus: res.application.status,
-        currentStep: res.application.current_step,
+        currentStep: stepToUse,
         steps: stepsMap,
         pendingFiles: {},
         loading: false,
