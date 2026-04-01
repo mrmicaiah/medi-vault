@@ -69,9 +69,10 @@ class ClientService:
         location_id: Optional[str] = None,
     ) -> Tuple[List[ClientResponse], int]:
         """List clients with optional filtering."""
+        # Don't join on locations since FK doesn't exist
         query = (
             self.supabase.table("clients")
-            .select("*, locations(name)", count="exact")
+            .select("*", count="exact")
             .eq("agency_id", agency_id)
         )
 
@@ -104,7 +105,7 @@ class ClientService:
         """Get a single client with their assignments."""
         result = (
             self.supabase.table("clients")
-            .select("*, locations(name)")
+            .select("*")
             .eq("id", client_id)
             .eq("agency_id", agency_id)
             .single()
@@ -154,8 +155,8 @@ class ClientService:
                 detail="Client not found",
             )
 
-        # Refetch with location
-        return self.get_client(client_id, agency_id)
+        # Refetch
+        return self._to_response(result.data[0])
 
     def delete_client(self, client_id: str, agency_id: str) -> bool:
         """Soft delete a client by setting status to 'discharged'."""
@@ -175,9 +176,7 @@ class ClientService:
         """Get all employee assignments for a client."""
         result = (
             self.supabase.table("employee_client_assignments")
-            .select(
-                "*, employees(id, employee_number, profiles(first_name, last_name))"
-            )
+            .select("*, employees(id, employee_number, user_id)")
             .eq("client_id", client_id)
             .order("start_date", desc=True)
             .execute()
@@ -186,13 +185,24 @@ class ClientService:
         assignments = []
         for a in result.data or []:
             emp = a.get("employees", {}) or {}
-            profile = emp.get("profiles", {}) or {}
             
-            name_parts = [
-                profile.get("first_name", ""),
-                profile.get("last_name", ""),
-            ]
-            employee_name = " ".join(p for p in name_parts if p).strip() or "Unknown"
+            # Get profile for name
+            employee_name = "Unknown"
+            if emp.get("user_id"):
+                profile_result = (
+                    self.supabase.table("profiles")
+                    .select("first_name, last_name")
+                    .eq("id", emp["user_id"])
+                    .single()
+                    .execute()
+                )
+                if profile_result.data:
+                    profile = profile_result.data
+                    name_parts = [
+                        profile.get("first_name", ""),
+                        profile.get("last_name", ""),
+                    ]
+                    employee_name = " ".join(p for p in name_parts if p).strip() or "Unknown"
 
             assignments.append(
                 ClientAssignmentInfo(
@@ -212,8 +222,6 @@ class ClientService:
 
     def _to_response(self, data: dict) -> ClientResponse:
         """Convert database row to response model."""
-        location = data.get("locations", {}) or {}
-        
         # Count active assignments
         assignment_result = (
             self.supabase.table("employee_client_assignments")
@@ -223,6 +231,19 @@ class ClientService:
             .execute()
         )
         active_count = assignment_result.count or 0
+
+        # Get location name if location_id exists
+        location_name = None
+        if data.get("location_id"):
+            loc_result = (
+                self.supabase.table("locations")
+                .select("name")
+                .eq("id", data["location_id"])
+                .single()
+                .execute()
+            )
+            if loc_result.data:
+                location_name = loc_result.data.get("name")
 
         return ClientResponse(
             id=data["id"],
@@ -236,7 +257,7 @@ class ClientService:
             date_of_birth=data.get("date_of_birth"),
             medicaid_id=data.get("medicaid_id"),
             medicare_id=data.get("medicare_id"),
-            location_name=location.get("name"),
+            location_name=location_name,
             active_assignments=active_count,
             created_at=data.get("created_at"),
             updated_at=data.get("updated_at"),
