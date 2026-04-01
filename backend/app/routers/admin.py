@@ -586,7 +586,7 @@ async def update_application_status(
 
 
 # =============================================================================
-# Agreement HTML Preview Endpoint (no WeasyPrint needed)
+# HTML Preview Endpoints (no WeasyPrint needed - work on Windows)
 # =============================================================================
 
 @router.get("/applicants/{application_id}/agreement/{agreement_type}/preview")
@@ -662,6 +662,71 @@ async def preview_agreement_html(
         raise
     except Exception as e:
         logger.error(f"Agreement preview error: {e}")
+        raise HTTPException(status_code=500, detail=str(e))
+
+
+@router.get("/applicants/{application_id}/application/preview")
+async def preview_application_html(
+    application_id: str,
+    supabase: Client = Depends(get_supabase),
+    user: dict = Depends(get_staff_user)
+):
+    """
+    Return rendered HTML for employment application preview (no PDF generation).
+    Works on Windows without WeasyPrint/GTK.
+    """
+    from jinja2 import Environment, FileSystemLoader
+    
+    try:
+        app_res = supabase.table("applications").select("*").eq("id", application_id).single().execute()
+        if not app_res.data:
+            raise HTTPException(status_code=404, detail="Application not found")
+        
+        application = app_res.data
+        
+        steps_res = supabase.table("application_steps").select("step_number, data, is_completed").eq("application_id", application_id).order("step_number").execute()
+        
+        steps = {}
+        for step in (steps_res.data or []):
+            steps[step["step_number"]] = {
+                "data": step.get("data") or {},
+                "completed": step.get("is_completed", False)
+            }
+        
+        # Try to get agency logo from settings (future: query agencies table)
+        # For now, use a placeholder URL that can be configured
+        logo_url = None
+        try:
+            # Get the agency associated with this application
+            if application.get("location_id"):
+                loc_res = supabase.table("locations").select("agency_id").eq("id", application["location_id"]).single().execute()
+                if loc_res.data and loc_res.data.get("agency_id"):
+                    agency_res = supabase.table("agencies").select("logo_url, name").eq("id", loc_res.data["agency_id"]).single().execute()
+                    if agency_res.data:
+                        logo_url = agency_res.data.get("logo_url")
+        except Exception as e:
+            logger.warning(f"Could not fetch agency logo: {e}")
+        
+        context = {
+            "application_id": application_id,
+            "status": application.get("status", ""),
+            "submitted_at": application.get("submitted_at", ""),
+            "steps": steps,
+            "generated_at": datetime.now().strftime("%B %d, %Y at %I:%M %p"),
+            "logo_url": logo_url,
+            "company_name": "Eveready HomeCare",
+        }
+        
+        templates_dir = os.path.join(os.path.dirname(__file__), '..', 'templates')
+        jinja_env = Environment(loader=FileSystemLoader(templates_dir), autoescape=True)
+        template = jinja_env.get_template("employment_application.html")
+        html_content = template.render(**context)
+        
+        return HTMLResponse(content=html_content)
+    except HTTPException:
+        raise
+    except Exception as e:
+        logger.error(f"Application preview error: {e}")
         raise HTTPException(status_code=500, detail=str(e))
 
 
@@ -977,14 +1042,24 @@ async def get_applicant_documents_summary(
         
         documents = {
             "uploaded": [],
-            "agreements": [],
+            "onboarding_agreements": [],
             "generated": []
         }
         
-        # Generated PDFs always available
+        # Generated/Signed documents (Employment Application with View+Download)
         documents["generated"] = [
-            {"type": "application", "name": "Employment Application", "endpoint": f"/admin/applicants/{application_id}/pdf/application"},
-            {"type": "i9", "name": "I-9 Form", "endpoint": f"/admin/applicants/{application_id}/pdf/i9"},
+            {
+                "type": "application", 
+                "name": "Employment Application", 
+                "endpoint": f"/admin/applicants/{application_id}/pdf/application",
+                "preview_endpoint": f"/admin/applicants/{application_id}/application/preview"
+            },
+            {
+                "type": "i9", 
+                "name": "I-9 Form", 
+                "endpoint": f"/admin/applicants/{application_id}/pdf/i9",
+                "preview_endpoint": None  # I-9 is a fillable PDF, no HTML preview
+            },
         ]
         
         # Get uploaded documents from steps
@@ -1016,7 +1091,7 @@ async def get_applicant_documents_summary(
                         "endpoint": f"/admin/applicants/{application_id}/documents/{step_num}/url"
                     })
         
-        # Get agreements - now include preview_endpoint for HTML preview
+        # Get onboarding agreements - include preview_endpoint for HTML preview
         agreement_steps = [
             (9, "confidentiality", "Confidentiality Agreement"),
             (10, "esignature", "E-Signature Consent"),
@@ -1034,7 +1109,7 @@ async def get_applicant_documents_summary(
             step = agreement_steps_data.get(step_num)
             if step and step.get("is_completed"):
                 data = step.get("data") or {}
-                documents["agreements"].append({
+                documents["onboarding_agreements"].append({
                     "type": agreement_type,
                     "name": name,
                     "signed": bool(data.get("signature")),
