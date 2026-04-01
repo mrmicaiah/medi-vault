@@ -114,8 +114,8 @@ export function ApplicantDashboardPage() {
     let status: DocStatus;
     let expirationDate: string | undefined;
 
-    if (step?.status === 'completed' && data.file_name && !data.skip) {
-      // Has a file uploaded
+    // Document is uploaded if file_name exists (regardless of skip flag or step status)
+    if (data.file_name) {
       status = 'uploaded';
       const expDate = data.expiration_date as string | undefined;
       if (expDate) {
@@ -125,7 +125,7 @@ export function ApplicantDashboardPage() {
         }
       }
     } else {
-      // Not uploaded - all docs are required
+      // No file uploaded
       status = 'needed';
     }
 
@@ -424,7 +424,7 @@ export function ApplicantDashboardPage() {
                 </div>
               </div>
             );
-          })})
+          })}
         </div>
         <p className="mt-4 text-xs text-gray">
           <span className="text-maroon">*</span> All documents are required and must be uploaded before you can be hired.
