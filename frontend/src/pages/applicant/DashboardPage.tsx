@@ -197,20 +197,19 @@ export function ApplicantDashboardPage() {
       );
     }
     
+    // If submitted (even in_progress with 100% completion), show status badge
+    if (isSubmitted || completedSteps === TOTAL_STEPS) {
+      return (
+        <Badge variant="success">Submitted</Badge>
+      );
+    }
+    
     if (isInProgress) {
       // Navigate to the first incomplete step
       const firstIncomplete = getFirstIncompleteStep();
       return (
         <Link to={`/applicant/application?step=${firstIncomplete}`}>
           <Button>Continue Application</Button>
-        </Link>
-      );
-    }
-    
-    if (isSubmitted || isApproved) {
-      return (
-        <Link to="/applicant/application">
-          <Button variant="secondary">View Application</Button>
         </Link>
       );
     }
@@ -305,16 +304,13 @@ export function ApplicantDashboardPage() {
                   )}
                 </div>
                 <div className="flex items-center gap-3">
-                  {isSubmitted && !isApproved && (
-                    <Badge variant="warning">Under Review</Badge>
-                  )}
                   {isApproved && (
                     <Badge variant="success">Approved</Badge>
                   )}
                   {isRejected && (
                     <Badge variant="error">Not Approved</Badge>
                   )}
-                  {!isRejected && getApplicationButton()}
+                  {!isRejected && !isApproved && getApplicationButton()}
                 </div>
               </div>
             </div>
@@ -328,15 +324,15 @@ export function ApplicantDashboardPage() {
               <Badge variant={
                 isApproved ? 'success' : 
                 isRejected ? 'error' :
-                isSubmitted ? 'warning' : 
+                isSubmitted ? 'success' : 
                 completedSteps === TOTAL_STEPS ? 'success' : 
                 completedSteps > 0 ? 'warning' : 'neutral'
               }>
                 {isApproved ? 'Approved' :
                  isRejected ? 'Not Approved' :
-                 isSubmitted ? 'Under Review' :
-                 completedSteps === 0 ? 'Not Started' : 
-                 completedSteps === TOTAL_STEPS ? 'Ready to Submit' : 'In Progress'}
+                 isSubmitted ? 'Submitted' :
+                 completedSteps === TOTAL_STEPS ? 'Submitted' :
+                 completedSteps === 0 ? 'Not Started' : 'In Progress'}
               </Badge>
             </div>
             <div className="flex items-center justify-between">
