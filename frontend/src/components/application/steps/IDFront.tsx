@@ -56,11 +56,11 @@ export function IDFront({ data, onSave, onFileSelect, pendingFile, onChange }: S
   };
 
   const handleFileSelect = (file: File) => {
-    const updated = { ...form, skip: false };
-    setForm(updated);
+    // Update local state to uncheck skip
+    setForm(prev => ({ ...prev, skip: false }));
+    // Just notify parent about file selection - don't save yet
     onChange?.();
     onFileSelect?.(file);
-    onSave(updated);
   };
 
   const handleSkip = (checked: boolean) => {
