@@ -3,7 +3,35 @@
 -- Run this in Supabase SQL Editor
 
 -- ============================================================================
--- CLIENTS TABLE
+-- STEP 1: Add agency_id and location_id to profiles table if missing
+-- ============================================================================
+DO $$ 
+BEGIN
+    -- Add agency_id to profiles if it doesn't exist
+    IF NOT EXISTS (
+        SELECT 1 FROM information_schema.columns 
+        WHERE table_name = 'profiles' AND column_name = 'agency_id'
+    ) THEN
+        ALTER TABLE profiles ADD COLUMN agency_id UUID REFERENCES agencies(id) ON DELETE SET NULL;
+    END IF;
+
+    -- Add location_id to profiles if it doesn't exist
+    IF NOT EXISTS (
+        SELECT 1 FROM information_schema.columns 
+        WHERE table_name = 'profiles' AND column_name = 'location_id'
+    ) THEN
+        ALTER TABLE profiles ADD COLUMN location_id UUID REFERENCES locations(id) ON DELETE SET NULL;
+    END IF;
+END $$;
+
+-- Set default agency for existing admin users (grab first agency)
+UPDATE profiles 
+SET agency_id = (SELECT id FROM agencies LIMIT 1)
+WHERE role IN ('admin', 'superadmin', 'manager') 
+AND agency_id IS NULL;
+
+-- ============================================================================
+-- STEP 2: CLIENTS TABLE
 -- Care recipients who receive home care services
 -- ============================================================================
 CREATE TABLE IF NOT EXISTS clients (
@@ -39,57 +67,34 @@ CREATE INDEX IF NOT EXISTS idx_clients_status ON clients(status);
 CREATE INDEX IF NOT EXISTS idx_clients_nickname ON clients(nickname);
 
 -- ============================================================================
--- EMPLOYEES TABLE
--- Hired staff created from approved applicants
+-- STEP 3: Add agency_id to employees table if missing
 -- ============================================================================
-CREATE TABLE IF NOT EXISTS employees (
-    id UUID PRIMARY KEY DEFAULT gen_random_uuid(),
-    
-    -- Links to user and original application
-    user_id UUID NOT NULL REFERENCES profiles(id) ON DELETE CASCADE,
-    application_id UUID NOT NULL REFERENCES applications(id),
-    
-    -- Agency/location assignment
-    agency_id UUID NOT NULL REFERENCES agencies(id) ON DELETE CASCADE,
-    location_id UUID REFERENCES locations(id) ON DELETE SET NULL,
-    
-    -- Employee identification
-    employee_number VARCHAR(20) UNIQUE,
-    
-    -- Employment details
-    status VARCHAR(20) DEFAULT 'active' CHECK (status IN ('active', 'inactive', 'suspended', 'terminated')),
-    hire_date DATE NOT NULL,
-    start_date DATE,
-    job_title VARCHAR(100),
-    department VARCHAR(100),
-    
-    -- Compensation
-    pay_rate DECIMAL(10,2),
-    pay_type VARCHAR(20) CHECK (pay_type IN ('hourly', 'salary')),
-    
-    -- Termination tracking
-    termination_date DATE,
-    termination_reason TEXT,
-    
-    -- Notes
-    notes TEXT,
-    
-    -- Audit fields
-    created_at TIMESTAMPTZ DEFAULT now(),
-    updated_at TIMESTAMPTZ DEFAULT now(),
-    
-    -- Ensure one employee record per application
-    CONSTRAINT unique_employee_per_application UNIQUE (application_id)
-);
+DO $$ 
+BEGIN
+    -- Add agency_id to employees if it doesn't exist
+    IF NOT EXISTS (
+        SELECT 1 FROM information_schema.columns 
+        WHERE table_name = 'employees' AND column_name = 'agency_id'
+    ) THEN
+        ALTER TABLE employees ADD COLUMN agency_id UUID REFERENCES agencies(id) ON DELETE CASCADE;
+    END IF;
 
--- Indexes
-CREATE INDEX IF NOT EXISTS idx_employees_agency ON employees(agency_id);
-CREATE INDEX IF NOT EXISTS idx_employees_user ON employees(user_id);
-CREATE INDEX IF NOT EXISTS idx_employees_status ON employees(status);
-CREATE INDEX IF NOT EXISTS idx_employees_hire_date ON employees(hire_date);
+    -- Add location_id to employees if it doesn't exist
+    IF NOT EXISTS (
+        SELECT 1 FROM information_schema.columns 
+        WHERE table_name = 'employees' AND column_name = 'location_id'
+    ) THEN
+        ALTER TABLE employees ADD COLUMN location_id UUID REFERENCES locations(id) ON DELETE SET NULL;
+    END IF;
+END $$;
+
+-- Set default agency for existing employees (grab first agency)
+UPDATE employees 
+SET agency_id = (SELECT id FROM agencies LIMIT 1)
+WHERE agency_id IS NULL;
 
 -- ============================================================================
--- EMPLOYEE CLIENT ASSIGNMENTS
+-- STEP 4: EMPLOYEE CLIENT ASSIGNMENTS
 -- Junction table linking employees to clients they serve
 -- ============================================================================
 CREATE TABLE IF NOT EXISTS employee_client_assignments (
@@ -124,7 +129,7 @@ CREATE INDEX IF NOT EXISTS idx_assignments_active ON employee_client_assignments
 CREATE INDEX IF NOT EXISTS idx_assignments_dates ON employee_client_assignments(start_date, end_date);
 
 -- ============================================================================
--- EMPLOYEE COMPLIANCE DOCUMENTS
+-- STEP 5: EMPLOYEE COMPLIANCE DOCUMENTS
 -- Track compliance documents that must be uploaded/renewed for employees
 -- Background checks, OIG exclusion checks, licenses, etc.
 -- ============================================================================
@@ -195,7 +200,7 @@ CREATE INDEX IF NOT EXISTS idx_compliance_employee_type_date
     ON employee_compliance_documents(employee_id, document_type, effective_date DESC);
 
 -- ============================================================================
--- HELPER VIEW: Current compliance status per employee
+-- STEP 6: HELPER VIEW - Current compliance status per employee
 -- Makes it easy to see who's compliant vs who needs attention
 -- ============================================================================
 CREATE OR REPLACE VIEW employee_compliance_status AS
@@ -244,37 +249,29 @@ LEFT JOIN latest_docs oig ON e.id = oig.employee_id AND oig.document_type = 'oig
 WHERE e.status = 'active';
 
 -- ============================================================================
--- RLS POLICIES
+-- STEP 7: RLS POLICIES
 -- ============================================================================
 
 -- Enable RLS
 ALTER TABLE clients ENABLE ROW LEVEL SECURITY;
-ALTER TABLE employees ENABLE ROW LEVEL SECURITY;
 ALTER TABLE employee_client_assignments ENABLE ROW LEVEL SECURITY;
 ALTER TABLE employee_compliance_documents ENABLE ROW LEVEL SECURITY;
 
 -- Clients: Admins can do everything within their agency
+DROP POLICY IF EXISTS clients_admin_all ON clients;
 CREATE POLICY clients_admin_all ON clients
     FOR ALL
     USING (is_admin())
     WITH CHECK (is_admin());
 
--- Employees: Admins can do everything, employees can view their own record
-CREATE POLICY employees_admin_all ON employees
-    FOR ALL
-    USING (is_admin())
-    WITH CHECK (is_admin());
-
-CREATE POLICY employees_self_view ON employees
-    FOR SELECT
-    USING (user_id = auth.uid());
-
 -- Assignments: Admins manage, employees view their own
+DROP POLICY IF EXISTS assignments_admin_all ON employee_client_assignments;
 CREATE POLICY assignments_admin_all ON employee_client_assignments
     FOR ALL
     USING (is_admin())
     WITH CHECK (is_admin());
 
+DROP POLICY IF EXISTS assignments_employee_view ON employee_client_assignments;
 CREATE POLICY assignments_employee_view ON employee_client_assignments
     FOR SELECT
     USING (
@@ -284,11 +281,13 @@ CREATE POLICY assignments_employee_view ON employee_client_assignments
     );
 
 -- Compliance docs: Admins manage all, employees view their own
+DROP POLICY IF EXISTS compliance_admin_all ON employee_compliance_documents;
 CREATE POLICY compliance_admin_all ON employee_compliance_documents
     FOR ALL
     USING (is_admin())
     WITH CHECK (is_admin());
 
+DROP POLICY IF EXISTS compliance_employee_view ON employee_compliance_documents;
 CREATE POLICY compliance_employee_view ON employee_compliance_documents
     FOR SELECT
     USING (
@@ -298,7 +297,7 @@ CREATE POLICY compliance_employee_view ON employee_compliance_documents
     );
 
 -- ============================================================================
--- UPDATE TRIGGERS
+-- STEP 8: UPDATE TRIGGERS
 -- ============================================================================
 
 CREATE OR REPLACE FUNCTION update_updated_at_column()
@@ -309,28 +308,26 @@ BEGIN
 END;
 $$ LANGUAGE plpgsql;
 
+DROP TRIGGER IF EXISTS clients_updated_at ON clients;
 CREATE TRIGGER clients_updated_at
     BEFORE UPDATE ON clients
     FOR EACH ROW
     EXECUTE FUNCTION update_updated_at_column();
 
-CREATE TRIGGER employees_updated_at
-    BEFORE UPDATE ON employees
-    FOR EACH ROW
-    EXECUTE FUNCTION update_updated_at_column();
-
+DROP TRIGGER IF EXISTS assignments_updated_at ON employee_client_assignments;
 CREATE TRIGGER assignments_updated_at
     BEFORE UPDATE ON employee_client_assignments
     FOR EACH ROW
     EXECUTE FUNCTION update_updated_at_column();
 
+DROP TRIGGER IF EXISTS compliance_updated_at ON employee_compliance_documents;
 CREATE TRIGGER compliance_updated_at
     BEFORE UPDATE ON employee_compliance_documents
     FOR EACH ROW
     EXECUTE FUNCTION update_updated_at_column();
 
 -- ============================================================================
--- AUTO-EXPIRE COMPLIANCE DOCUMENTS
+-- STEP 9: AUTO-EXPIRE COMPLIANCE DOCUMENTS
 -- Function to mark expired documents (run via cron or scheduled job)
 -- ============================================================================
 CREATE OR REPLACE FUNCTION expire_compliance_documents()
@@ -353,10 +350,9 @@ END;
 $$ LANGUAGE plpgsql;
 
 -- ============================================================================
--- COMMENTS
+-- STEP 10: COMMENTS
 -- ============================================================================
 COMMENT ON TABLE clients IS 'Care recipients who receive home care services from the agency';
-COMMENT ON TABLE employees IS 'Staff members hired from approved applicants';
 COMMENT ON TABLE employee_client_assignments IS 'Links employees to clients they serve';
 COMMENT ON TABLE employee_compliance_documents IS 'Tracks compliance documents required for Medicare/Medicaid audits';
 COMMENT ON VIEW employee_compliance_status IS 'Dashboard view showing compliance status per employee';
