@@ -74,7 +74,6 @@ export function AgreementViewModal({
               ref={iframeRef}
               className="w-full h-full border border-gray-200 rounded bg-white"
               title={agreementName}
-              sandbox="allow-same-origin"
               style={{ minHeight: '100%' }}
             />
           ) : (
