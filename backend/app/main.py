@@ -39,11 +39,11 @@ logger.info(f"[CORS] Parsed origins list: {settings.cors_origin_list}")
 app = FastAPI(
     title="MediVault API",
     description="Home care agency applicant-to-employee management platform",
-    version="1.0.4",
+    version="1.0.5",
     docs_url="/api/docs",
     redoc_url="/api/redoc",
     openapi_url="/api/openapi.json",
-    redirect_slashes=False,  # Prevent 307 redirects that strip auth headers
+    # Keep default redirect_slashes=True to handle both /employees and /employees/
 )
 
 # Allowed origins - include all possible domains for local dev and production
@@ -112,7 +112,7 @@ async def health_check():
     return {
         "status": "healthy", 
         "service": "medivault-api", 
-        "version": "1.0.4",
+        "version": "1.0.5",
         "cors_origins": ALLOWED_ORIGINS,
     }
 
