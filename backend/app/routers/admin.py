@@ -109,6 +109,25 @@ def get_agency_branding(supabase: Client, location_id: Optional[str]) -> Dict[st
     return result
 
 
+def get_staff_location_filter(user: dict) -> Optional[str]:
+    """
+    Get the location_id to filter queries by.
+    
+    - Superadmin: Returns None (no filter, sees everything)
+    - Admin/Manager: Returns their assigned location_id
+    """
+    role = user.get("role", "")
+    profile = user.get("profile", {})
+    
+    # Superadmins see everything
+    if role == "superadmin":
+        return None
+    
+    # Admins and managers see only their location
+    location_id = profile.get("location_id")
+    return location_id
+
+
 @router.get("/dashboard")
 @router.get("/dashboard/")
 async def get_dashboard_stats(
@@ -119,6 +138,9 @@ async def get_dashboard_stats(
         now = datetime.utcnow()
         thirty_days_ago = (now - timedelta(days=30)).isoformat()
         
+        # Get location filter for this staff member
+        location_filter = get_staff_location_filter(user)
+        
         stats = {
             "total_applicants": 0,
             "pending_review": 0,
@@ -127,13 +149,26 @@ async def get_dashboard_stats(
             "recent_activity": []
         }
         
-        apps_res = supabase.table("applications").select("id", count="exact").execute()
+        # Build queries with optional location filter
+        apps_query = supabase.table("applications").select("id", count="exact")
+        pending_query = supabase.table("applications").select("id", count="exact").eq("status", "submitted")
+        approved_query = supabase.table("applications").select("id", count="exact").eq("status", "approved").gte("updated_at", thirty_days_ago)
+        recent_query = supabase.table("applications").select("id, status, updated_at, profiles!applications_user_id_fkey(first_name, last_name)").order("updated_at", desc=True).limit(5)
+        
+        # Apply location filter if not superadmin
+        if location_filter:
+            apps_query = apps_query.eq("location_id", location_filter)
+            pending_query = pending_query.eq("location_id", location_filter)
+            approved_query = approved_query.eq("location_id", location_filter)
+            recent_query = recent_query.eq("location_id", location_filter)
+        
+        apps_res = apps_query.execute()
         stats["total_applicants"] = apps_res.count or 0
         
-        pending_res = supabase.table("applications").select("id", count="exact").eq("status", "submitted").execute()
+        pending_res = pending_query.execute()
         stats["pending_review"] = pending_res.count or 0
         
-        approved_res = supabase.table("applications").select("id", count="exact").eq("status", "approved").gte("updated_at", thirty_days_ago).execute()
+        approved_res = approved_query.execute()
         stats["approved_this_month"] = approved_res.count or 0
         
         thirty_days_future = (now + timedelta(days=30)).isoformat()
@@ -143,7 +178,7 @@ async def get_dashboard_stats(
         except:
             pass
         
-        recent_res = supabase.table("applications").select("id, status, updated_at, profiles!applications_user_id_fkey(first_name, last_name)").order("updated_at", desc=True).limit(5).execute()
+        recent_res = recent_query.execute()
         for app in (recent_res.data or []):
             profile = app.get("profiles") or {}
             stats["recent_activity"].append({
@@ -166,9 +201,18 @@ async def get_pipeline(
     user: dict = Depends(get_staff_user)
 ):
     try:
-        res = supabase.table("applications").select(
+        # Get location filter for this staff member
+        location_filter = get_staff_location_filter(user)
+        
+        query = supabase.table("applications").select(
             "id, user_id, status, created_at, submitted_at, updated_at, current_step, location_id, profiles!applications_user_id_fkey(first_name, last_name, email), locations(name)"
-        ).order("created_at", desc=True).execute()
+        ).order("created_at", desc=True)
+        
+        # Apply location filter if not superadmin
+        if location_filter:
+            query = query.eq("location_id", location_filter)
+        
+        res = query.execute()
         
         # Get all application IDs to fetch step 1 data (position_applied)
         app_ids = [app.get("id") for app in (res.data or []) if app.get("id")]
@@ -203,7 +247,8 @@ async def get_pipeline(
                 "last_name": profile.get("last_name", ""),
                 "email": profile.get("email", ""),
                 "location_name": location.get("name", ""),
-                "position": position_map.get(app_id, ""),  # Include position from step 1
+                "location_id": app.get("location_id"),
+                "position": position_map.get(app_id, ""),
             })
         
         return {"applications": applications}
@@ -320,7 +365,6 @@ async def get_applicant_detail(
                         "uploaded_at": step.get("updated_at")
                     })
         
-        # Transform steps to include status field for frontend compatibility
         steps_with_status = []
         for step in (steps_res.data or []):
             step_copy = dict(step)
@@ -434,9 +478,16 @@ async def get_employees(
     user: dict = Depends(get_staff_user)
 ):
     try:
-        res = supabase.table("employees").select(
-            "id, user_id, status, position, hire_date, termination_date, created_at, profiles(first_name, last_name, email, phone), locations(name)"
-        ).order("created_at", desc=True).execute()
+        location_filter = get_staff_location_filter(user)
+        
+        query = supabase.table("employees").select(
+            "id, user_id, status, position, hire_date, termination_date, created_at, location_id, profiles(first_name, last_name, email, phone), locations(name)"
+        ).order("created_at", desc=True)
+        
+        if location_filter:
+            query = query.eq("location_id", location_filter)
+        
+        res = query.execute()
         
         employees = []
         for emp in (res.data or []):
@@ -453,6 +504,7 @@ async def get_employees(
                 "last_name": profile.get("last_name", ""),
                 "email": profile.get("email", ""),
                 "phone": profile.get("phone", ""),
+                "location_id": emp.get("location_id"),
                 "location_name": location.get("name", "")
             })
         
@@ -532,13 +584,6 @@ async def get_document_url(
     supabase: Client = Depends(get_supabase),
     user: dict = Depends(get_staff_user)
 ):
-    """
-    Get a signed URL for viewing an uploaded document.
-    
-    Tries multiple approaches:
-    1. Generate a fresh signed URL from storage_path (preferred, ensures file exists)
-    2. Fall back to storage_url if it exists (pre-signed URL from upload, may be expired)
-    """
     try:
         step_res = supabase.table("application_steps").select("data").eq("application_id", application_id).eq("step_number", step_number).single().execute()
         if not step_res.data:
@@ -546,28 +591,23 @@ async def get_document_url(
         
         data = step_res.data.get("data") or {}
         storage_path = data.get("storage_path")
-        storage_url = data.get("storage_url")  # Pre-signed URL from upload time
+        storage_url = data.get("storage_url")
         file_name = data.get("file_name") or data.get("original_filename")
         
-        # No file at all
         if not storage_path and not storage_url:
             raise HTTPException(status_code=404, detail="No file uploaded for this step")
         
-        # Try to generate a fresh signed URL from storage_path
         signed_url = None
         if storage_path:
             signed_url = generate_signed_url(supabase, storage_path, expires_in=3600)
         
-        # If that failed but we have a storage_url, use it (may be expired but worth trying)
         if not signed_url and storage_url:
             logger.info(f"Using stored URL for step {step_number} (fresh URL generation failed)")
             return {"signed_url": storage_url, "file_name": file_name, "expires_in": 0, "note": "Using cached URL"}
         
-        # If we got a fresh signed URL, return it
         if signed_url:
             return {"signed_url": signed_url, "file_name": file_name, "expires_in": 3600}
         
-        # Both methods failed
         raise HTTPException(
             status_code=404, 
             detail=f"File not found in storage. Path: {storage_path}. The file may have been deleted."
@@ -605,7 +645,6 @@ async def get_agreement_pdf_url(
 
 
 @router.post("/applicant/{application_id}/status")
-@router.post("/applicant/{application_id}/status/")
 async def update_application_status(
     application_id: str,
     status_update: dict,
@@ -632,104 +671,6 @@ async def update_application_status(
         raise HTTPException(status_code=500, detail=str(e))
 
 
-# =============================================================================
-# Training Leads Endpoint
-# =============================================================================
-
-@router.get("/training-leads")
-@router.get("/training-leads/")
-async def get_training_leads(
-    supabase: Client = Depends(get_supabase),
-    user: dict = Depends(get_staff_user)
-):
-    """
-    Get applicants who expressed interest in HHA or CPR certification training.
-    
-    Returns lists of leads separated by certification type, including their
-    interest level and current application status.
-    """
-    try:
-        # Get all applications with their profile info and step 1 data (where certification interests are stored)
-        apps_res = supabase.table("applications").select(
-            "id, user_id, status, submitted_at, updated_at, location_id, "
-            "profiles!applications_user_id_fkey(first_name, last_name, email, phone), "
-            "locations(name)"
-        ).order("updated_at", desc=True).execute()
-        
-        if not apps_res.data:
-            return {
-                "hha_leads": [],
-                "cpr_leads": [],
-                "total_hha": 0,
-                "total_cpr": 0
-            }
-        
-        # Get step 1 data for all applications (contains certification interests)
-        app_ids = [app["id"] for app in apps_res.data]
-        steps_res = supabase.table("application_steps").select(
-            "application_id, data"
-        ).eq("step_number", 1).in_("application_id", app_ids).execute()
-        
-        # Map step data by application_id
-        step_data_map = {}
-        for step in (steps_res.data or []):
-            step_data_map[step["application_id"]] = step.get("data") or {}
-        
-        hha_leads = []
-        cpr_leads = []
-        
-        for app in apps_res.data:
-            app_id = app["id"]
-            profile = app.get("profiles") or {}
-            location = app.get("locations") or {}
-            step_data = step_data_map.get(app_id, {})
-            
-            # Check certification interests from step 1
-            interested_in_hha = step_data.get("interested_in_hha")
-            interested_in_cpr = step_data.get("interested_in_cpr")
-            has_cpr = step_data.get("has_cpr")
-            certifications = step_data.get("certifications") or []
-            
-            lead_data = {
-                "application_id": app_id,
-                "user_id": app.get("user_id"),
-                "first_name": profile.get("first_name", ""),
-                "last_name": profile.get("last_name", ""),
-                "email": profile.get("email", ""),
-                "phone": profile.get("phone"),
-                "location_name": location.get("name"),
-                "interested_in_hha": interested_in_hha,
-                "interested_in_cpr": interested_in_cpr,
-                "has_cpr": has_cpr,
-                "certifications": certifications if isinstance(certifications, list) else [],
-                "application_status": app.get("status"),
-                "submitted_at": app.get("submitted_at"),
-                "updated_at": app.get("updated_at"),
-            }
-            
-            # Add to HHA leads if interested
-            if interested_in_hha in ("yes", "maybe"):
-                hha_leads.append(lead_data)
-            
-            # Add to CPR leads if interested or doesn't have CPR
-            if interested_in_cpr in ("yes", "maybe") or has_cpr == "no":
-                cpr_leads.append(lead_data)
-        
-        return {
-            "hha_leads": hha_leads,
-            "cpr_leads": cpr_leads,
-            "total_hha": len(hha_leads),
-            "total_cpr": len(cpr_leads)
-        }
-    except Exception as e:
-        logger.error(f"Training leads fetch error: {e}")
-        raise HTTPException(status_code=500, detail=str(e))
-
-
-# =============================================================================
-# HTML Preview Endpoints (no WeasyPrint needed - work on Windows)
-# =============================================================================
-
 @router.get("/applicants/{application_id}/agreement/{agreement_type}/preview")
 async def preview_agreement_html(
     application_id: str,
@@ -737,10 +678,6 @@ async def preview_agreement_html(
     supabase: Client = Depends(get_supabase),
     user: dict = Depends(get_staff_user)
 ):
-    """
-    Return rendered HTML for agreement preview (no PDF generation).
-    Works on Windows without WeasyPrint/GTK.
-    """
     from jinja2 import Environment, FileSystemLoader
     
     try:
@@ -812,10 +749,6 @@ async def preview_application_html(
     supabase: Client = Depends(get_supabase),
     user: dict = Depends(get_staff_user)
 ):
-    """
-    Return rendered HTML for employment application preview (no PDF generation).
-    Works on Windows without WeasyPrint/GTK.
-    """
     from jinja2 import Environment, FileSystemLoader
     
     try:
@@ -834,7 +767,6 @@ async def preview_application_html(
                 "completed": step.get("is_completed", False)
             }
         
-        # Get agency branding
         branding = get_agency_branding(supabase, application.get("location_id"))
         
         context = {
@@ -860,17 +792,12 @@ async def preview_application_html(
         raise HTTPException(status_code=500, detail=str(e))
 
 
-# =============================================================================
-# PDF Generation Endpoints (require WeasyPrint - work on Render/Docker)
-# =============================================================================
-
 @router.get("/applicants/{application_id}/pdf/application")
 async def generate_application_pdf(
     application_id: str,
     supabase: Client = Depends(get_supabase),
     user: dict = Depends(get_staff_user)
 ):
-    """Generate and return the full employment application as a PDF."""
     from ..services.pdf_service import pdf_service
     
     try:
@@ -923,7 +850,6 @@ async def generate_i9_pdf(
     supabase: Client = Depends(get_supabase),
     user: dict = Depends(get_staff_user)
 ):
-    """Generate and return a pre-filled I-9 form as a PDF."""
     from ..services.pdf_service import pdf_service
     
     try:
@@ -988,10 +914,6 @@ async def generate_agreement_pdf(
     supabase: Client = Depends(get_supabase),
     user: dict = Depends(get_staff_user)
 ):
-    """
-    Generate a signed agreement as a PDF.
-    Requires WeasyPrint - works on Render/Docker, not on Windows without GTK.
-    """
     from jinja2 import Environment, FileSystemLoader
     from weasyprint import HTML, CSS
     
@@ -1081,7 +1003,6 @@ async def get_employee_documents(
     supabase: Client = Depends(get_supabase),
     user: dict = Depends(get_staff_user)
 ):
-    """Get all documents for an employee including agreements, uploaded docs, and generated PDFs."""
     try:
         emp_res = supabase.table("employees").select("*, user_id").eq("id", employee_id).single().execute()
         if not emp_res.data:
@@ -1156,13 +1077,11 @@ async def get_employee_documents(
 
 
 @router.get("/applicants/{application_id}/documents-summary")
-@router.get("/applicants/{application_id}/documents-summary/")
 async def get_applicant_documents_summary(
     application_id: str,
     supabase: Client = Depends(get_supabase),
     user: dict = Depends(get_staff_user)
 ):
-    """Get all documents for an applicant including agreements, uploaded docs, and generated PDFs."""
     try:
         app_res = supabase.table("applications").select("*, user_id, profiles!applications_user_id_fkey(first_name, last_name)").eq("id", application_id).single().execute()
         if not app_res.data:
@@ -1177,7 +1096,6 @@ async def get_applicant_documents_summary(
             "generated": []
         }
         
-        # Generated/Signed documents (Employment Application with View+Download)
         documents["generated"] = [
             {
                 "type": "application", 
@@ -1189,11 +1107,10 @@ async def get_applicant_documents_summary(
                 "type": "i9", 
                 "name": "I-9 Form", 
                 "endpoint": f"/admin/applicants/{application_id}/pdf/i9",
-                "preview_endpoint": None  # I-9 is a fillable PDF, no HTML preview
+                "preview_endpoint": None
             },
         ]
         
-        # Get uploaded documents from steps
         upload_steps = [
             (11, "work_authorization", "Work Authorization"),
             (12, "id_front", "ID Front"),
@@ -1222,7 +1139,6 @@ async def get_applicant_documents_summary(
                         "endpoint": f"/admin/applicants/{application_id}/documents/{step_num}/url"
                     })
         
-        # Get onboarding agreements - include preview_endpoint for HTML preview
         agreement_steps = [
             (9, "confidentiality", "Confidentiality Agreement"),
             (10, "esignature", "E-Signature Consent"),
@@ -1259,4 +1175,89 @@ async def get_applicant_documents_summary(
         raise
     except Exception as e:
         logger.error(f"Applicant documents summary error: {e}")
+        raise HTTPException(status_code=500, detail=str(e))
+
+
+@router.get("/training-leads")
+@router.get("/training-leads/")
+async def get_training_leads(
+    supabase: Client = Depends(get_supabase),
+    user: dict = Depends(get_staff_user)
+):
+    try:
+        location_filter = get_staff_location_filter(user)
+        
+        query = supabase.table("applications").select(
+            "id, user_id, status, submitted_at, updated_at, location_id, "
+            "profiles!applications_user_id_fkey(first_name, last_name, email, phone), "
+            "locations(name)"
+        ).order("updated_at", desc=True)
+        
+        if location_filter:
+            query = query.eq("location_id", location_filter)
+        
+        apps_res = query.execute()
+        
+        if not apps_res.data:
+            return {
+                "hha_leads": [],
+                "cpr_leads": [],
+                "total_hha": 0,
+                "total_cpr": 0
+            }
+        
+        app_ids = [app["id"] for app in apps_res.data]
+        steps_res = supabase.table("application_steps").select(
+            "application_id, data"
+        ).eq("step_number", 1).in_("application_id", app_ids).execute()
+        
+        step_data_map = {}
+        for step in (steps_res.data or []):
+            step_data_map[step["application_id"]] = step.get("data") or {}
+        
+        hha_leads = []
+        cpr_leads = []
+        
+        for app in apps_res.data:
+            app_id = app["id"]
+            profile = app.get("profiles") or {}
+            location = app.get("locations") or {}
+            step_data = step_data_map.get(app_id, {})
+            
+            interested_in_hha = step_data.get("interested_in_hha")
+            interested_in_cpr = step_data.get("interested_in_cpr")
+            has_cpr = step_data.get("has_cpr")
+            certifications = step_data.get("certifications") or []
+            
+            lead_data = {
+                "application_id": app_id,
+                "user_id": app.get("user_id"),
+                "first_name": profile.get("first_name", ""),
+                "last_name": profile.get("last_name", ""),
+                "email": profile.get("email", ""),
+                "phone": profile.get("phone"),
+                "location_name": location.get("name"),
+                "interested_in_hha": interested_in_hha,
+                "interested_in_cpr": interested_in_cpr,
+                "has_cpr": has_cpr,
+                "certifications": certifications if isinstance(certifications, list) else [],
+                "application_status": app.get("status"),
+                "submitted_at": app.get("submitted_at"),
+                "updated_at": app.get("updated_at"),
+            }
+            
+            if interested_in_hha in ("yes", "maybe"):
+                hha_leads.append(lead_data)
+            
+            if interested_in_cpr in ("yes", "maybe") or has_cpr == "no":
+                cpr_leads.append(lead_data)
+        
+        return {
+            "hha_leads": hha_leads,
+            "cpr_leads": cpr_leads,
+            "total_hha": len(hha_leads),
+            "total_cpr": len(cpr_leads)
+        }
+    except Exception as e:
+        logger.error(f"Training leads fetch error: {e}")
         raise HTTPException(status_code=500, detail=str(e))
