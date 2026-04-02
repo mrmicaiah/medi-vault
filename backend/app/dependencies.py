@@ -120,6 +120,23 @@ async def require_staff(
     return user
 
 
+async def require_admin_or_manager(
+    user: UserProfile = Depends(get_current_user),
+) -> UserProfile:
+    """
+    Require the current user to have admin or manager role.
+    
+    Both admins and managers can perform location transfers.
+    This is an alias for require_staff but excludes superadmin for clarity.
+    """
+    if user.role not in (UserRole.ADMIN, UserRole.SUPERADMIN, UserRole.MANAGER):
+        raise HTTPException(
+            status_code=status.HTTP_403_FORBIDDEN,
+            detail="Admin or Manager access required",
+        )
+    return user
+
+
 async def require_superadmin(
     user: UserProfile = Depends(get_current_user),
 ) -> UserProfile:
