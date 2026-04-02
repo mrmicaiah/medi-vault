@@ -88,6 +88,32 @@ STATUS_MAP = {
     "6 Hired": "hired",
 }
 
+# Step definitions: (step_number, step_name, step_type)
+STEP_DEFINITIONS = [
+    (1, "Application Basics", "form"),
+    (2, "Personal Information", "form"),
+    (3, "Emergency Contact", "form"),
+    (4, "Education & Certifications", "form"),
+    (5, "Reference 1", "form"),
+    (6, "Reference 2", "form"),
+    (7, "Employment History", "form"),
+    (8, "Work Preferences", "form"),
+    (9, "Confidentiality Agreement", "agreement"),
+    (10, "E-Signature Consent", "agreement"),
+    (11, "Work Authorization Upload", "upload"),
+    (12, "ID Front Upload", "upload"),
+    (13, "ID Back Upload", "upload"),
+    (14, "SSN Card Upload", "upload"),
+    (15, "Credentials Upload", "upload"),
+    (16, "CPR Certification Upload", "upload"),
+    (17, "TB Test Upload", "upload"),
+    (18, "Orientation Agreement", "agreement"),
+    (19, "Criminal Attestation", "agreement"),
+    (20, "VA Code Disclosure", "agreement"),
+    (21, "Job Description Acknowledgment", "agreement"),
+    (22, "Final Signature", "agreement"),
+]
+
 # ============================================================================
 # COLUMN MAPPINGS - Quickbase column names
 # ============================================================================
@@ -600,42 +626,57 @@ def migrate_applicant(supabase: Client, row: Dict, index: int) -> Optional[Dict]
     else:
         jd_col = COL_JOB_DESC_CNA
     
-    steps_data = [
-        (1, build_step1_data(row)),
-        (2, build_step2_data(row)),
-        (3, build_step3_data(row)),
-        (4, build_step4_data(row)),
-        (5, build_step5_data(row)),
-        (6, build_step6_data(row)),
-        (7, build_step7_data(row)),
-        (8, build_step8_data(row)),
-        (9, build_agreement_step(row, COL_CONFIDENTIALITY_AGREED)),
-        (10, build_agreement_step(row, COL_ESIGNATURE_AGREED)),
-        (11, build_upload_step()),  # Work Authorization
-        (12, build_upload_step()),  # ID Front
-        (13, build_upload_step()),  # ID Back
-        (14, build_upload_step()),  # SSN Card
-        (15, build_upload_step()),  # Credentials
-        (16, build_upload_step()),  # CPR
-        (17, build_upload_step()),  # TB Test
-        (18, build_agreement_step(row, COL_ORIENTATION_AGREED)),
-        (19, build_agreement_step(row, COL_CRIMINAL_ATTEST)),
-        (20, build_agreement_step(row, COL_CRIMINAL_ATTEST)),  # VA Code Disclosure
-        (21, build_agreement_step(row, jd_col)),
-        (22, build_agreement_step(row, COL_ESIGNATURE_AGREED)),  # Final Signature
-    ]
+    # Build step data based on step number
+    def get_step_data(step_num: int) -> Dict:
+        if step_num == 1:
+            return build_step1_data(row)
+        elif step_num == 2:
+            return build_step2_data(row)
+        elif step_num == 3:
+            return build_step3_data(row)
+        elif step_num == 4:
+            return build_step4_data(row)
+        elif step_num == 5:
+            return build_step5_data(row)
+        elif step_num == 6:
+            return build_step6_data(row)
+        elif step_num == 7:
+            return build_step7_data(row)
+        elif step_num == 8:
+            return build_step8_data(row)
+        elif step_num == 9:
+            return build_agreement_step(row, COL_CONFIDENTIALITY_AGREED)
+        elif step_num == 10:
+            return build_agreement_step(row, COL_ESIGNATURE_AGREED)
+        elif step_num in (11, 12, 13, 14, 15, 16, 17):
+            return build_upload_step()
+        elif step_num == 18:
+            return build_agreement_step(row, COL_ORIENTATION_AGREED)
+        elif step_num == 19:
+            return build_agreement_step(row, COL_CRIMINAL_ATTEST)
+        elif step_num == 20:
+            return build_agreement_step(row, COL_CRIMINAL_ATTEST)
+        elif step_num == 21:
+            return build_agreement_step(row, jd_col)
+        elif step_num == 22:
+            return build_agreement_step(row, COL_ESIGNATURE_AGREED)
+        else:
+            return {}
     
     try:
-        for step_num, data in steps_data:
-            is_upload = step_num in (11, 12, 13, 14, 15, 16, 17)
+        for step_num, step_name, step_type in STEP_DEFINITIONS:
+            data = get_step_data(step_num)
+            is_upload = step_type == "upload"
             is_completed = not is_upload or data.get("skip", False)
             
             step_record = {
                 "application_id": application_id,
                 "step_number": step_num,
+                "step_name": step_name,
+                "step_type": step_type,
                 "data": data,
                 "is_completed": is_completed,
-                "status": "completed" if is_completed else "pending",
+                "completed_at": datetime.now().isoformat() if is_completed else None,
             }
             
             supabase.table("application_steps").insert(step_record).execute()
