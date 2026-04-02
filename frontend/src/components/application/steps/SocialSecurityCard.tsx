@@ -1,6 +1,7 @@
 import React, { useState } from 'react';
 import { FileUpload } from '../../ui/FileUpload';
 import { Alert } from '../../ui/Alert';
+import { PhotoTips } from '../../ui/PhotoTips';
 
 interface StepProps {
   data: Record<string, unknown>;
@@ -44,7 +45,7 @@ export function SocialSecurityCard({ data, onSave, onFileSelect, pendingFile, on
   return (
     <div className="space-y-6">
       <p className="text-sm text-gray">
-        Upload a copy of your Social Security card for verification purposes.
+        Upload an image of your Social Security card. This is required for employment verification and tax purposes.
       </p>
 
       {/* Show success message if already uploaded */}
@@ -55,21 +56,26 @@ export function SocialSecurityCard({ data, onSave, onFileSelect, pendingFile, on
         </Alert>
       )}
 
-      <Alert variant="info" title="Social Security Card Tips">
+      <Alert variant="warning" title="Important">
         <ul className="mt-1 list-disc pl-4 space-y-1">
-          <li>Photo or scan must be clearly readable</li>
-          <li>All text and numbers must be visible</li>
-          <li>Card should fill most of the image</li>
+          <li>Your Social Security card is sensitive — it will be stored securely</li>
+          <li>Make sure your full name and SSN are clearly visible</li>
+          <li>Do not upload a photo of your SSN written on paper</li>
         </ul>
       </Alert>
+
+      {/* Photo Tips */}
+      <PhotoTips documentType="ssn" />
 
       <FileUpload
         label="Social Security Card"
         onFileSelect={handleFileSelect}
-        accept=".pdf,.jpg,.jpeg,.png"
+        accept=".pdf,.jpg,.jpeg,.png,.heic,.heif"
         maxSize={10 * 1024 * 1024}
         currentFile={displayFileName ? { name: displayFileName } : null}
-        helperText="Upload a clear photo or scan of your Social Security card"
+        helperText="Upload or take a photo of your Social Security card"
+        optimizeImages={true}
+        allowCamera={true}
       />
 
       {pendingFile && (

@@ -1,7 +1,8 @@
 import React, { useState } from 'react';
 import { FileUpload } from '../../ui/FileUpload';
-import { Input, Select } from '../../ui/Input';
+import { Input } from '../../ui/Input';
 import { Alert } from '../../ui/Alert';
+import { PhotoTips } from '../../ui/PhotoTips';
 
 interface StepProps {
   data: Record<string, unknown>;
@@ -19,33 +20,19 @@ export function TBTest({ data, onSave, onFileSelect, pendingFile, onChange }: St
   
   const [form, setForm] = useState({
     skip: initialSkip,
-    test_type: (data.test_type as string) || '',
     test_date: (data.test_date as string) || '',
+    test_type: (data.test_type as string) || '',
     result: (data.result as string) || '',
   });
 
   const displayFileName = pendingFile?.name || existingFileName;
   const hasUpload = !!displayFileName;
 
-  // Calculate expiration date (1 year from test date)
-  const calculateExpiration = (testDate: string): string => {
-    if (!testDate) return '';
-    const date = new Date(testDate);
-    date.setFullYear(date.getFullYear() + 1);
-    return date.toISOString().split('T')[0];
-  };
-
   const handleChange = (field: string, value: string) => {
     const updated = { ...form, [field]: value, skip: false };
     setForm(updated);
     onChange?.();
-    
-    // Auto-calculate expiration when test_date changes
-    if (field === 'test_date') {
-      onSave({ ...updated, expiration_date: calculateExpiration(value) });
-    } else {
-      onSave({ ...updated, expiration_date: calculateExpiration(updated.test_date) });
-    }
+    onSave(updated);
   };
 
   const handleFileSelect = (file: File) => {
@@ -63,13 +50,13 @@ export function TBTest({ data, onSave, onFileSelect, pendingFile, onChange }: St
     if (checked) {
       onFileSelect?.(null);
     }
-    onSave({ ...updated, expiration_date: calculateExpiration(updated.test_date) });
+    onSave(updated);
   };
 
   return (
     <div className="space-y-6">
       <p className="text-sm text-gray">
-        Upload your TB (tuberculosis) test results. This is typically required for healthcare workers.
+        Upload your TB (Tuberculosis) test results. This is required for healthcare workers.
       </p>
 
       {/* Show success message if already uploaded */}
@@ -80,66 +67,63 @@ export function TBTest({ data, onSave, onFileSelect, pendingFile, onChange }: St
         </Alert>
       )}
 
-      <Alert variant="info" title="Accepted TB Tests">
+      <Alert variant="info" title="TB Test Requirements">
         <ul className="mt-1 list-disc pl-4 space-y-1">
-          <li>PPD Skin Test (within last 12 months)</li>
-          <li>QuantiFERON-TB Gold Blood Test</li>
-          <li>T-SPOT Blood Test</li>
-          <li>Chest X-Ray (if needed for positive screening)</li>
+          <li>TB skin test (PPD) or QuantiFERON blood test accepted</li>
+          <li>Test must be completed within the last 12 months</li>
+          <li>If you have a positive TB history, upload chest X-ray clearance</li>
         </ul>
       </Alert>
 
-      <Select
-        label="Test Type"
-        value={form.test_type}
-        onChange={(e) => handleChange('test_type', e.target.value)}
-        options={[
-          { value: 'ppd', label: 'PPD Skin Test' },
-          { value: 'quantiferon', label: 'QuantiFERON-TB Gold' },
-          { value: 'tspot', label: 'T-SPOT' },
-          { value: 'xray', label: 'Chest X-Ray' },
-        ]}
-      />
+      <div className="grid grid-cols-1 gap-4 sm:grid-cols-2">
+        <Input
+          label="Test Date"
+          type="date"
+          value={form.test_date}
+          onChange={(e) => handleChange('test_date', e.target.value)}
+        />
 
-      <Input
-        label="Test Date"
-        type="date"
-        required
-        value={form.test_date}
-        onChange={(e) => handleChange('test_date', e.target.value)}
-        helperText="TB tests are valid for 12 months from the test date"
-      />
-
-      {form.test_date && (
-        <div className="rounded-lg bg-gray-50 border border-border p-3">
-          <p className="text-sm text-gray">
-            <span className="font-medium">Expires:</span>{' '}
-            {new Date(calculateExpiration(form.test_date)).toLocaleDateString('en-US', {
-              month: 'long',
-              day: 'numeric', 
-              year: 'numeric'
-            })}
-          </p>
+        <div>
+          <label className="block text-sm font-medium text-navy mb-1">Test Type</label>
+          <select
+            value={form.test_type}
+            onChange={(e) => handleChange('test_type', e.target.value)}
+            className="w-full rounded-lg border border-border px-3 py-2 text-sm focus:border-maroon focus:outline-none focus:ring-2 focus:ring-maroon/20"
+          >
+            <option value="">Select test type...</option>
+            <option value="ppd">TB Skin Test (PPD)</option>
+            <option value="quantiferon">QuantiFERON Blood Test</option>
+            <option value="tspot">T-SPOT Blood Test</option>
+            <option value="chest_xray">Chest X-Ray</option>
+          </select>
         </div>
-      )}
+      </div>
 
-      <Select
-        label="Result"
-        value={form.result}
-        onChange={(e) => handleChange('result', e.target.value)}
-        options={[
-          { value: 'negative', label: 'Negative' },
-          { value: 'positive_cleared', label: 'Positive - Cleared by physician' },
-        ]}
-      />
+      <div>
+        <label className="block text-sm font-medium text-navy mb-1">Test Result</label>
+        <select
+          value={form.result}
+          onChange={(e) => handleChange('result', e.target.value)}
+          className="w-full rounded-lg border border-border px-3 py-2 text-sm focus:border-maroon focus:outline-none focus:ring-2 focus:ring-maroon/20"
+        >
+          <option value="">Select result...</option>
+          <option value="negative">Negative</option>
+          <option value="positive_cleared">Positive (with clearance)</option>
+        </select>
+      </div>
+
+      {/* Photo Tips */}
+      <PhotoTips documentType="credential" />
 
       <FileUpload
         label="TB Test Results"
         onFileSelect={handleFileSelect}
-        accept=".pdf,.jpg,.jpeg,.png"
+        accept=".pdf,.jpg,.jpeg,.png,.heic,.heif"
         maxSize={10 * 1024 * 1024}
         currentFile={displayFileName ? { name: displayFileName } : null}
-        helperText="Upload a clear photo or scan of your TB test results"
+        helperText="Upload or take a photo of your TB test results document"
+        optimizeImages={true}
+        allowCamera={true}
       />
 
       {pendingFile && (

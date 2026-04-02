@@ -1,7 +1,7 @@
 import React, { useState } from 'react';
 import { FileUpload } from '../../ui/FileUpload';
-import { Input, Select } from '../../ui/Input';
 import { Alert } from '../../ui/Alert';
+import { PhotoTips } from '../../ui/PhotoTips';
 
 interface StepProps {
   data: Record<string, unknown>;
@@ -12,13 +12,6 @@ interface StepProps {
   saving: boolean;
 }
 
-const DOCUMENT_TYPES = [
-  { value: 'birth_certificate', label: 'Birth Certificate' },
-  { value: 'us_passport', label: 'US Passport' },
-  { value: 'naturalization', label: 'Certificate of Naturalization' },
-  { value: 'work_authorization', label: 'Work Authorization Card' },
-];
-
 export function WorkAuthorization({ data, onSave, onFileSelect, pendingFile, onChange }: StepProps) {
   // Initialize skip to false if there's already a file uploaded
   const existingFileName = (data.file_name as string) || '';
@@ -26,10 +19,7 @@ export function WorkAuthorization({ data, onSave, onFileSelect, pendingFile, onC
   
   const [form, setForm] = useState({
     skip: initialSkip,
-    worker_type: (data.worker_type as string) || '',
-    document_type: (data.document_type as string) || '',
-    issuing_authority: (data.issuing_authority as string) || 'United States',
-    document_number: (data.document_number as string) || '',
+    authorization_type: (data.authorization_type as string) || '',
   });
 
   const displayFileName = pendingFile?.name || existingFileName;
@@ -43,11 +33,11 @@ export function WorkAuthorization({ data, onSave, onFileSelect, pendingFile, onC
   };
 
   const handleFileSelect = (file: File) => {
-    const updated = { ...form, skip: false };
-    setForm(updated);
+    // Update local state to uncheck skip
+    setForm(prev => ({ ...prev, skip: false }));
+    // Just notify parent about file selection - don't save yet
     onChange?.();
     onFileSelect?.(file);
-    onSave(updated);
   };
 
   const handleSkip = (checked: boolean) => {
@@ -63,7 +53,7 @@ export function WorkAuthorization({ data, onSave, onFileSelect, pendingFile, onC
   return (
     <div className="space-y-6">
       <p className="text-sm text-gray">
-        Upload a document that proves your authorization to work in the United States.
+        Upload documentation proving your eligibility to work in the United States.
       </p>
 
       {/* Show success message if already uploaded */}
@@ -76,55 +66,41 @@ export function WorkAuthorization({ data, onSave, onFileSelect, pendingFile, onC
 
       <Alert variant="info" title="Accepted Documents">
         <ul className="mt-1 list-disc pl-4 space-y-1">
-          <li>Birth Certificate (US)</li>
-          <li>US Passport</li>
-          <li>Certificate of Naturalization</li>
-          <li>Work Authorization Card</li>
+          <li><strong>US Citizens:</strong> US Passport, Birth Certificate, or Naturalization Certificate</li>
+          <li><strong>Permanent Residents:</strong> Permanent Resident Card (Green Card)</li>
+          <li><strong>Work Visa Holders:</strong> Employment Authorization Document (EAD) or valid work visa</li>
         </ul>
       </Alert>
 
-      <Select
-        label="Worker Type"
-        required
-        value={form.worker_type}
-        onChange={(e) => handleChange('worker_type', e.target.value)}
-        options={[
-          { value: 'employee', label: 'Employee (W-2)' },
-          { value: 'contractor', label: 'Independent Contractor (1099)' },
-        ]}
-      />
+      <div>
+        <label className="block text-sm font-medium text-navy mb-1">Document Type</label>
+        <select
+          value={form.authorization_type}
+          onChange={(e) => handleChange('authorization_type', e.target.value)}
+          className="w-full rounded-lg border border-border px-3 py-2 text-sm focus:border-maroon focus:outline-none focus:ring-2 focus:ring-maroon/20"
+        >
+          <option value="">Select document type...</option>
+          <option value="us_passport">US Passport</option>
+          <option value="birth_certificate">US Birth Certificate</option>
+          <option value="naturalization">Certificate of Naturalization</option>
+          <option value="green_card">Permanent Resident Card (Green Card)</option>
+          <option value="ead">Employment Authorization Document (EAD)</option>
+          <option value="work_visa">Work Visa</option>
+        </select>
+      </div>
 
-      <Select
-        label="Document Type"
-        required
-        value={form.document_type}
-        onChange={(e) => handleChange('document_type', e.target.value)}
-        options={DOCUMENT_TYPES}
-      />
-
-      <Input
-        label="Issuing Authority"
-        required
-        value={form.issuing_authority}
-        onChange={(e) => handleChange('issuing_authority', e.target.value)}
-        placeholder="United States"
-      />
-
-      <Input
-        label="Document ID Number"
-        required
-        value={form.document_number}
-        onChange={(e) => handleChange('document_number', e.target.value)}
-        placeholder="Enter the document number"
-      />
+      {/* Photo Tips */}
+      <PhotoTips documentType="general" />
 
       <FileUpload
         label="Work Authorization Document"
         onFileSelect={handleFileSelect}
-        accept=".pdf,.jpg,.jpeg,.png"
+        accept=".pdf,.jpg,.jpeg,.png,.heic,.heif"
         maxSize={10 * 1024 * 1024}
         currentFile={displayFileName ? { name: displayFileName } : null}
-        helperText="Upload a clear photo or scan of your work authorization document"
+        helperText="Upload or take a photo of your work authorization document"
+        optimizeImages={true}
+        allowCamera={true}
       />
 
       {pendingFile && (

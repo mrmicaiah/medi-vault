@@ -2,6 +2,7 @@ import React, { useState } from 'react';
 import { FileUpload } from '../../ui/FileUpload';
 import { Input } from '../../ui/Input';
 import { Alert } from '../../ui/Alert';
+import { PhotoTips } from '../../ui/PhotoTips';
 
 interface StepProps {
   data: Record<string, unknown>;
@@ -13,25 +14,30 @@ interface StepProps {
 }
 
 export function CPRCertification({ data, onSave, onFileSelect, pendingFile, onChange }: StepProps) {
+  // Initialize skip to false if there's already a file uploaded
   const existingFileName = (data.file_name as string) || '';
+  const initialSkip = existingFileName ? false : ((data.skip as boolean) || false);
   
   const [form, setForm] = useState({
-    skip: (data.skip as boolean) || false,
-    issuing_org: (data.issuing_org as string) || '',
+    skip: initialSkip,
+    certification_date: (data.certification_date as string) || '',
     expiration_date: (data.expiration_date as string) || '',
+    issuing_organization: (data.issuing_organization as string) || '',
   });
 
   const displayFileName = pendingFile?.name || existingFileName;
   const hasUpload = !!displayFileName;
 
   const handleChange = (field: string, value: string) => {
-    const updated = { ...form, [field]: value };
+    const updated = { ...form, [field]: value, skip: false };
     setForm(updated);
     onChange?.();
     onSave(updated);
   };
 
   const handleFileSelect = (file: File) => {
+    // Update local state to uncheck skip
+    setForm(prev => ({ ...prev, skip: false }));
     // Just notify parent about file selection - don't save yet
     onChange?.();
     onFileSelect?.(file);
@@ -50,8 +56,7 @@ export function CPRCertification({ data, onSave, onFileSelect, pendingFile, onCh
   return (
     <div className="space-y-6">
       <p className="text-sm text-gray">
-        If you have a current CPR certification, upload it here.
-        This step is optional but may be required for certain positions.
+        Upload your CPR/First Aid certification. This is required for most home care positions.
       </p>
 
       {/* Show success message if already uploaded */}
@@ -67,31 +72,45 @@ export function CPRCertification({ data, onSave, onFileSelect, pendingFile, onCh
           <li>American Heart Association (AHA)</li>
           <li>American Red Cross</li>
           <li>National Safety Council</li>
-          <li>Other accredited organizations</li>
+          <li>Other nationally recognized certifications</li>
         </ul>
       </Alert>
 
+      <div className="grid grid-cols-1 gap-4 sm:grid-cols-2">
+        <Input
+          label="Certification Date"
+          type="date"
+          value={form.certification_date}
+          onChange={(e) => handleChange('certification_date', e.target.value)}
+        />
+
+        <Input
+          label="Expiration Date"
+          type="date"
+          value={form.expiration_date}
+          onChange={(e) => handleChange('expiration_date', e.target.value)}
+        />
+      </div>
+
       <Input
         label="Issuing Organization"
-        value={form.issuing_org}
-        onChange={(e) => handleChange('issuing_org', e.target.value)}
+        value={form.issuing_organization}
+        onChange={(e) => handleChange('issuing_organization', e.target.value)}
         placeholder="e.g., American Heart Association"
       />
 
-      <Input
-        label="Expiration Date"
-        type="date"
-        value={form.expiration_date}
-        onChange={(e) => handleChange('expiration_date', e.target.value)}
-      />
+      {/* Photo Tips */}
+      <PhotoTips documentType="credential" />
 
       <FileUpload
         label="CPR Certification"
         onFileSelect={handleFileSelect}
-        accept=".pdf,.jpg,.jpeg,.png"
+        accept=".pdf,.jpg,.jpeg,.png,.heic,.heif"
         maxSize={10 * 1024 * 1024}
         currentFile={displayFileName ? { name: displayFileName } : null}
-        helperText="Upload a clear photo or scan of your CPR card or certificate"
+        helperText="Upload or take a photo of your CPR card or certificate"
+        optimizeImages={true}
+        allowCamera={true}
       />
 
       {pendingFile && (
@@ -100,7 +119,7 @@ export function CPRCertification({ data, onSave, onFileSelect, pendingFile, onCh
         </p>
       )}
 
-      {/* Skip checkbox - only show if no file uploaded or pending */}
+      {/* Skip checkbox at the bottom - only show if nothing uploaded */}
       {!hasUpload && (
         <div className="flex items-center gap-3 rounded-lg border border-border bg-gray-50 p-4">
           <input
@@ -111,7 +130,7 @@ export function CPRCertification({ data, onSave, onFileSelect, pendingFile, onCh
             className="h-4 w-4 rounded border-gray-300 text-maroon focus:ring-maroon"
           />
           <label htmlFor="skip_cpr" className="text-sm text-slate">
-            I don't have CPR certification / I'll upload later
+            I don't have a CPR certification / I'll upload later
           </label>
         </div>
       )}

@@ -1,6 +1,7 @@
 import React, { useState } from 'react';
 import { FileUpload } from '../../ui/FileUpload';
 import { Alert } from '../../ui/Alert';
+import { PhotoTips } from '../../ui/PhotoTips';
 
 interface StepProps {
   data: Record<string, unknown>;
@@ -63,13 +64,18 @@ export function IDBack({ data, onSave, onFileSelect, pendingFile, onChange }: St
         </ul>
       </Alert>
 
+      {/* Photo Tips */}
+      <PhotoTips documentType="id" />
+
       <FileUpload
         label="Back of ID"
         onFileSelect={handleFileSelect}
-        accept=".pdf,.jpg,.jpeg,.png"
+        accept=".pdf,.jpg,.jpeg,.png,.heic,.heif"
         maxSize={10 * 1024 * 1024}
         currentFile={displayFileName ? { name: displayFileName } : null}
-        helperText="Upload a clear photo or scan of the back of your ID"
+        helperText="Upload or take a photo of the back of your ID"
+        optimizeImages={true}
+        allowCamera={true}
       />
 
       {pendingFile && (

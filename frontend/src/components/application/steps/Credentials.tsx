@@ -2,6 +2,7 @@ import React, { useState } from 'react';
 import { FileUpload } from '../../ui/FileUpload';
 import { Input, Select } from '../../ui/Input';
 import { Alert } from '../../ui/Alert';
+import { PhotoTips } from '../../ui/PhotoTips';
 
 interface StepProps {
   data: Record<string, unknown>;
@@ -137,13 +138,18 @@ export function Credentials({ data, onSave, onFileSelect, pendingFile, onChange 
         onChange={(e) => handleChange('expiration_date', e.target.value)}
       />
 
+      {/* Photo Tips */}
+      <PhotoTips documentType="credential" />
+
       <FileUpload
         label="Credential Document"
         onFileSelect={handleFileSelect}
-        accept=".pdf,.jpg,.jpeg,.png"
+        accept=".pdf,.jpg,.jpeg,.png,.heic,.heif"
         maxSize={10 * 1024 * 1024}
         currentFile={displayFileName ? { name: displayFileName } : null}
-        helperText="Upload a clear photo or scan of your credential"
+        helperText="Upload or take a photo of your credential (PDF preferred for multi-page documents)"
+        optimizeImages={true}
+        allowCamera={true}
       />
 
       {pendingFile && (
