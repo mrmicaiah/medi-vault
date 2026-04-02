@@ -2,12 +2,238 @@
 
 {% block title %}Job Description Acknowledgment - {{ company_name }}{% endblock %}
 {% block document_title %}Job Description Acknowledgment{% endblock %}
-{% block subtitle %}Position Duties and Responsibilities{% endblock %}
+{% block subtitle %}{{ position_title }} - Position Duties and Responsibilities{% endblock %}
 
 {% block content %}
-<p>I, <strong>{{ applicant_name }}</strong>, acknowledge that I have received and reviewed the job description for the position I am being considered for with <strong>{{ company_name }}</strong>.</p>
+<p>I, <strong>{{ applicant_name }}</strong>, acknowledge that I have received and reviewed the job description for the <strong>{{ position_title }}</strong> position with <strong>{{ company_name }}</strong>.</p>
 
-<h2>1. General Responsibilities</h2>
+<div class="warning-box" style="background-color: #fff3cd; border-left: 4px solid #ffc107; padding: 10px 15px; margin: 15px 0;">
+    <strong>RISK OF EXPOSURE TO BLOODBORNE PATHOGENS - HIGH</strong>
+</div>
+
+{% if position_type in ['cna', 'hha', 'pca'] %}
+{# CNA / HHA / PCA Job Description #}
+
+<h2>Position Overview</h2>
+<p><strong>Title:</strong> Certified Nursing Assistant / Home Health Aide<br>
+<strong>Reports To:</strong> Registered Nurse / Director of Nursing<br>
+<strong>Role:</strong> Provides personal care and related services in the home under the direction, instruction, and supervision of the staff nurse and Director of Nursing. Tasks must be assigned by and performed under supervision of an RN who is responsible for client care.</p>
+
+<h2>Position Responsibilities</h2>
+<ul>
+    <li>Follow plan of care to provide safe, competent care to client</li>
+    <li>Assist client with personal hygiene and maintain safe environment</li>
+    <li>Plan and prepare nutritious meals; market when instructed</li>
+    <li>Assist with ambulation and prescribed exercises per physician orders</li>
+    <li>Encourage client independence according to nursing care plan</li>
+    <li>Communicate client response to nurse and family professionally</li>
+    <li>Report any change in client mental/physical condition or home situation</li>
+    <li>Perform routine housekeeping for safe, comfortable environment</li>
+    <li>Document services and prepare visit reports promptly</li>
+    <li>Confirm weekly scheduling of visits for coordination</li>
+    <li>Work with families and community agencies as directed</li>
+    <li>Attend in-service training as required</li>
+    <li>Take and record vital signs if specified in plan of service</li>
+</ul>
+
+<h2>Restrictions</h2>
+<p>Under no circumstances may an Attendant be assigned to receive or reduce any intravenous procedures, or any other sterile or invasive procedures, other than rectal temperatures.</p>
+
+<h2>Job Conditions and Physical Requirements</h2>
+<ul>
+    <li>Ability to drive and access client homes (may not be wheelchair accessible)</li>
+    <li>Hearing, eyesight, and physical dexterity sufficient for assessment and safe transfers</li>
+    <li>May be required to bend, stoop, reach, and move client weight up to 250 lbs</li>
+    <li>Must be able to lift and/or carry up to 30 lbs</li>
+    <li>Must effectively communicate in English</li>
+</ul>
+
+<h2>Equipment Operation</h2>
+<p>BP Cuff, Thermometer, Stethoscope, and Hand Washing Materials</p>
+
+<h2>Confidentiality</h2>
+<p>Has access to all client medical records which may be discussed with the Registered Nurse and Director of Nursing only.</p>
+
+<h2>Qualifications</h2>
+<p>Must speak, read, and write English AND meet one of the following:</p>
+<ul>
+    <li>Completed nursing program for RN or LPN licensure</li>
+    <li>Completed nurse aide program approved by Virginia Board of Nursing</li>
+    <li>Certified as nurse aide by Virginia Board of Nursing</li>
+    <li>Enrolled in nursing program with at least one clinical course completed</li>
+    <li>Passed competency evaluation per 42 CFR 484.36</li>
+    <li>Completed DMAS Personal Care Aide Training Curriculum (personal care only)</li>
+</ul>
+
+<h2>Additional Requirements</h2>
+<ul>
+    <li>Must have criminal background check</li>
+    <li>Must have current CPR certification</li>
+    <li>Must be free from health problems injurious to patient, self, or co-workers with appropriate evidence</li>
+    <li>Must understand and respect client rights including ethics and confidentiality</li>
+</ul>
+
+{% elif position_type == 'lpn' %}
+{# LPN Job Description #}
+
+<h2>Position Overview</h2>
+<p><strong>Title:</strong> Licensed Practical Nurse (LPN)<br>
+<strong>Reports To:</strong> Director of Nursing<br>
+<strong>Role:</strong> Provide skilled nursing care under the direct supervision of the Registered Nurse. Perform selected skilled actions in the provision of curative, rehabilitative, palliative, or preventative nursing care. Responsible and accountable for making decisions based on individual nursing experience and educational preparation.</p>
+
+<h2>Clinical Responsibilities</h2>
+<ul>
+    <li>Assist the RN in carrying out the plan of care</li>
+    <li>Assist RN in performing specialized procedures under physician orders</li>
+    <li>Assist with preparation, implementation, and evaluation of client care plan</li>
+    <li>Prepare care plan for Home Attendant</li>
+    <li>Help teach client appropriate self-care techniques</li>
+    <li>Assist in rehabilitation by reporting abnormalities in range of motion, body mechanics, or alignment</li>
+    <li>Participate in development and revision of physician plan of treatment</li>
+    <li>Process change orders as needed</li>
+    <li>Participate in client discharge planning</li>
+    <li>Maintain ongoing knowledge of current drug therapy</li>
+</ul>
+
+<h2>Observation and Reporting</h2>
+<p>Observe, record, and report to appropriate person:</p>
+<ul>
+    <li>General physical and mental condition of clients</li>
+    <li>Signs and symptoms indicative of untoward changes</li>
+    <li>Client symptoms, reactions, and changes</li>
+    <li>Stress in relationships between clients and staff, families, or visitors</li>
+    <li>Signs and symptoms indicative of medical conditions</li>
+</ul>
+
+<h2>Documentation</h2>
+<ul>
+    <li>Prepare clinical and progress notes (not to include admission)</li>
+    <li>Submit clinical notes no less than weekly</li>
+    <li>Complete progress notes and other clinical record forms as indicated</li>
+</ul>
+
+<h2>Professional Development</h2>
+<ul>
+    <li>Recognize and understand effects of social and economic problems on clients</li>
+    <li>Provide for emotional and physical comfort and safety of clients</li>
+    <li>Foster cooperative effort among personnel by understanding functions of others</li>
+    <li>Active participation in team and staff conferences</li>
+    <li>Participate in nursing organizations and in-service programs</li>
+</ul>
+
+<h2>Job Conditions and Physical Requirements</h2>
+<ul>
+    <li>Must have valid driver license and be able to drive to client residences</li>
+    <li>Ability to access client homes (may not be wheelchair accessible)</li>
+    <li>Hearing, eyesight, and physical dexterity sufficient for assessment and safe transfers</li>
+    <li>Physical activities include walking, sitting, stooping, standing</li>
+    <li>Minimal to maximum lifting and turning of clients</li>
+    <li>Effective verbal and written communication in English required</li>
+</ul>
+
+<h2>Equipment Operation</h2>
+<p>Thermometer, BP Cuff, Glucometer, Penlight, Hand Washing Materials</p>
+
+<h2>Confidentiality</h2>
+<p>Has access to client medical records, personnel records, and client financial accounts which may be discussed with Director of Nursing only.</p>
+
+<h2>Qualifications</h2>
+<ul>
+    <li>Graduate from accredited School of Nursing</li>
+    <li>Licensed in Virginia as a Practical Nurse</li>
+    <li>Minimum one year experience in community/home health or hospital (home care preferred)</li>
+    <li>Knowledge of Medicare regulations and guidelines</li>
+    <li>Working knowledge of home health care principles and documentation</li>
+    <li>Understanding of time management and management processes</li>
+    <li>Ability to communicate effectively with nursing staff, physicians, and others</li>
+    <li>Criminal background check required</li>
+    <li>Current CPR certification required</li>
+</ul>
+
+{% elif position_type == 'rn' %}
+{# RN Job Description #}
+
+<h2>Position Overview</h2>
+<p><strong>Title:</strong> Registered Nurse (RN)<br>
+<strong>Reports To:</strong> Director of Nursing<br>
+<strong>Role:</strong> Provides nursing care in accordance with the client plan of care including comprehensive health and psychosocial evaluation, monitoring of client condition, health promotion and prevention, coordination of services, teaching and training activities, and direct nursing care.</p>
+
+<h2>Care Coordination Responsibilities</h2>
+<ul>
+    <li>Coordinate total client care through comprehensive health and psychosocial evaluations</li>
+    <li>Monitor client condition and promote sound preventive practices</li>
+    <li>Evaluate effectiveness of nursing service to client and family on ongoing basis</li>
+    <li>Coordinate client services and discuss involvement of health team members</li>
+    <li>Consult with attending physician concerning alterations to care plans</li>
+    <li>Participate in case conferences and discuss client concerns with supervisor</li>
+    <li>Obtain orders for paraprofessional services and submit referrals</li>
+    <li>May be requested to fill in for other nurses on vacation or sick leave</li>
+</ul>
+
+<h2>Client Admission Coordination</h2>
+<ul>
+    <li>Conduct initial and ongoing comprehensive assessment including OASIS assessments</li>
+    <li>Obtain medical history from client and/or family member</li>
+    <li>Conduct physical examination including vital signs, physical and mental status assessment</li>
+    <li>Evaluate client, family, and home situation to determine health teaching needs</li>
+    <li>Evaluate client environment and available family assistance</li>
+    <li>Determine if Home Attendant services are required and frequency needed</li>
+    <li>Explain nursing and agency services to clients and families</li>
+    <li>Develop and implement the nursing care plan</li>
+</ul>
+
+<h2>Skilled Nursing Care</h2>
+<ul>
+    <li>Provide nursing services, treatments, and preventative procedures as ordered by physician</li>
+    <li>Initiate preventative and rehabilitative nursing procedures for client care and safety</li>
+    <li>Observe signs and symptoms; report to physician reactions to treatments and drug reactions</li>
+    <li>Report changes in client physical or emotional condition</li>
+    <li>Teach, supervise, and counsel client and caregivers regarding nursing care needs</li>
+</ul>
+
+<h2>Home Attendant Supervision</h2>
+<ul>
+    <li>Supervise and evaluate care given by Home Attendant at minimum every 14 days</li>
+    <li>Provide written evaluation of Home Attendants in geographical area</li>
+    <li>Participate in periodic conferences concerning Home Attendant performance</li>
+    <li>Chart services rendered on client by Home Attendant</li>
+    <li>Report to agency and physician any alterations in client condition or home environment</li>
+    <li>Submit incident reports and clinical records outlining services and problems</li>
+</ul>
+
+<h2>Documentation Requirements</h2>
+<ul>
+    <li>Perform admission, transfer, recertification, resumption of care, and discharge OASIS</li>
+    <li>Submit clinical notes within 72 hours</li>
+    <li>Submit progress notes and clinical record forms no less than weekly</li>
+    <li>Submit tally of client care visits made each day</li>
+    <li>Prepare and present client record to Clinical Record Review Committee as indicated</li>
+</ul>
+
+<h2>Professional Development and Compliance</h2>
+<ul>
+    <li>Participate in staff development meetings and in-service education</li>
+    <li>Participate in development and revision of policies and procedures</li>
+    <li>Coordinate implementation of ordered nursing procedures</li>
+    <li>Provide in-service education and orientation for health team members</li>
+    <li>Participate in educational experiences for student nurses</li>
+    <li>Maintain ongoing knowledge of current drug therapy</li>
+    <li>Adhere to Federal, State, and accreditation requirements including Medicare and Medicaid regulations</li>
+</ul>
+
+<h2>Discharge Planning</h2>
+<ul>
+    <li>Participate in client discharge planning process</li>
+    <li>Participate in development and revision of physician plan of care</li>
+    <li>Assist with discharge planning and documentation</li>
+    <li>Plan for clients and families including in-service education and in-home orientation</li>
+    <li>Refer clients for social services when necessary</li>
+</ul>
+
+{% else %}
+{# Default/Generic Job Description (fallback) #}
+
+<h2>General Responsibilities</h2>
 <p>As a home care worker with the Agency, my responsibilities may include but are not limited to:</p>
 <ol>
     <li><strong>Personal Care:</strong> Assisting clients with activities of daily living (ADLs) including bathing, dressing, grooming, toileting, and mobility</li>
@@ -20,7 +246,7 @@
     <li><strong>Communication:</strong> Reporting changes in client condition to supervisors and care coordinators promptly</li>
 </ol>
 
-<h2>2. Physical Requirements</h2>
+<h2>Physical Requirements</h2>
 <p>I understand that the position may require:</p>
 <ul>
     <li>Standing, walking, bending, and lifting for extended periods</li>
@@ -29,7 +255,7 @@
     <li>Working in various home environments</li>
 </ul>
 
-<h2>3. Professional Standards</h2>
+<h2>Professional Standards</h2>
 <p>I understand that I am expected to:</p>
 <ul>
     <li>Maintain professional boundaries with clients and their families</li>
@@ -38,8 +264,10 @@
     <li>Report to assigned shifts on time and communicate scheduling changes in advance</li>
 </ul>
 
-<h2>4. Acknowledgment</h2>
+{% endif %}
+
+<h2>Acknowledgment</h2>
 <p>I understand that this acknowledgment does not constitute an employment contract and that the specific duties of my position may be modified at any time based on client needs and Agency requirements.</p>
 
-<p><strong>By signing below, I confirm that I have read, understand, and accept the responsibilities and requirements described in this Job Description Acknowledgment.</strong></p>
+<p><strong>By signing below, I confirm that I have read, understand, and accept the responsibilities and requirements described in this Job Description Acknowledgment for the {{ position_title }} position.</strong></p>
 {% endblock %}
