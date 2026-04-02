@@ -58,6 +58,11 @@ class ResetPasswordRequest(BaseModel):
     new_password: str
 
 
+class SendPasswordResetRequest(BaseModel):
+    """Send password reset email to user."""
+    redirect_url: Optional[str] = None
+
+
 def get_user_agency_id(supabase: Client, user_id: str) -> Optional[str]:
     """Get the agency_id for a user."""
     result = (
@@ -70,13 +75,13 @@ def get_user_agency_id(supabase: Client, user_id: str) -> Optional[str]:
     return result.data.get("agency_id") if result.data else None
 
 
-@router.get("", response_model=UsersListResponse)
-@router.get("/", response_model=UsersListResponse)
+@router.get("")
+@router.get("/")
 async def list_users(
     role: Optional[str] = None,
     admin: UserProfile = Depends(require_admin),
     supabase: Client = Depends(get_supabase),
-):
+) -> UsersListResponse:
     """List all users (optionally filtered by role)."""
     query = supabase.table("profiles").select("*, locations(name)").order("created_at", desc=True)
     
@@ -106,12 +111,12 @@ async def list_users(
     return UsersListResponse(users=users, total=len(users))
 
 
-@router.get("/staff", response_model=UsersListResponse)
-@router.get("/staff/", response_model=UsersListResponse)
+@router.get("/staff")
+@router.get("/staff/")
 async def list_staff(
     admin: UserProfile = Depends(require_admin),
     supabase: Client = Depends(get_supabase),
-):
+) -> UsersListResponse:
     """List admin and manager users only."""
     agency_id = get_user_agency_id(supabase, admin.id)
     
@@ -149,13 +154,13 @@ async def list_staff(
     return UsersListResponse(users=users, total=len(users))
 
 
-@router.post("", response_model=UserResponse)
-@router.post("/", response_model=UserResponse)
+@router.post("")
+@router.post("/")
 async def create_staff_user(
     request: CreateStaffRequest,
     admin: UserProfile = Depends(require_admin),
     supabase: Client = Depends(get_supabase),
-):
+) -> UserResponse:
     """
     Create a new staff user (admin or manager) with direct credentials.
     
@@ -274,13 +279,13 @@ async def create_staff_user(
         )
 
 
-@router.patch("/{user_id}", response_model=UserResponse)
+@router.patch("/{user_id}")
 async def update_user(
     user_id: str,
     request: UpdateUserRequest,
     admin: UserProfile = Depends(require_admin),
     supabase: Client = Depends(get_supabase),
-):
+) -> UserResponse:
     """Update a user's details (name, location assignment)."""
     agency_id = get_user_agency_id(supabase, admin.id)
     
@@ -356,13 +361,13 @@ async def update_user(
     )
 
 
-@router.patch("/{user_id}/role", response_model=SuccessResponse)
+@router.patch("/{user_id}/role")
 async def update_user_role(
     user_id: str,
     request: UpdateUserRoleRequest,
     admin: UserProfile = Depends(require_admin),
     supabase: Client = Depends(get_supabase),
-):
+) -> SuccessResponse:
     """Update a user's role."""
     # Validate role
     valid_roles = ["applicant", "employee", "manager", "admin"]
@@ -410,24 +415,24 @@ async def update_user_role(
     return SuccessResponse(message=f"User role updated to {request.role}")
 
 
-@router.post("/{user_id}/reset-password", response_model=SuccessResponse)
-async def reset_user_password(
+@router.post("/{user_id}/send-password-reset")
+async def send_password_reset_email(
     user_id: str,
-    request: ResetPasswordRequest,
     admin: UserProfile = Depends(require_admin),
     supabase: Client = Depends(get_supabase),
-):
+) -> SuccessResponse:
     """
-    Reset a user's password (admin action).
+    Send a password reset email to the user.
     
-    Sets a new temporary password that the admin can share with the user.
+    This uses Supabase's built-in password recovery flow.
+    The user will receive an email with a link to reset their password.
     """
     agency_id = get_user_agency_id(supabase, admin.id)
     
     # Check user exists
     user_result = (
         supabase.table("profiles")
-        .select("id, role, agency_id")
+        .select("id, email, role, agency_id")
         .eq("id", user_id)
         .single()
         .execute()
@@ -439,6 +444,7 @@ async def reset_user_password(
         )
     
     user_data = user_result.data
+    user_email = user_data.get("email")
     
     # Can't reset your own password this way
     if user_id == admin.id:
@@ -454,35 +460,28 @@ async def reset_user_password(
             detail="Cannot reset superadmin passwords",
         )
     
-    # Validate password
-    if len(request.new_password) < 8:
-        raise HTTPException(
-            status_code=status.HTTP_400_BAD_REQUEST,
-            detail="Password must be at least 8 characters",
-        )
-    
     try:
-        # Use Supabase admin API to update password
-        supabase.auth.admin.update_user_by_id(
-            user_id,
-            {"password": request.new_password}
-        )
+        # Use Supabase's password recovery email
+        supabase.auth.reset_password_email(user_email)
         
-        return SuccessResponse(message="Password reset successfully")
+        return SuccessResponse(
+            message=f"Password reset email sent to {user_email}",
+            data={"email": user_email}
+        )
         
     except Exception as e:
         raise HTTPException(
             status_code=status.HTTP_500_INTERNAL_SERVER_ERROR,
-            detail=f"Failed to reset password: {str(e)}",
+            detail=f"Failed to send reset email: {str(e)}",
         )
 
 
-@router.delete("/{user_id}", response_model=SuccessResponse)
+@router.delete("/{user_id}")
 async def delete_user(
     user_id: str,
     admin: UserProfile = Depends(require_admin),
     supabase: Client = Depends(get_supabase),
-):
+) -> SuccessResponse:
     """Delete a user account."""
     # Can't delete yourself
     if user_id == admin.id:
