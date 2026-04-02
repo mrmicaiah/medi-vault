@@ -129,6 +129,7 @@ export function ApplicantsPage() {
   const [positionFilter, setPositionFilter] = useState<string>('all');
   const [sortBy, setSortBy] = useState<'recent' | 'oldest'>('recent');
   const [showRejected, setShowRejected] = useState(false);
+  const [showNotStarted, setShowNotStarted] = useState(false);
   
   const [editMode, setEditMode] = useState(false);
   const [editForm, setEditForm] = useState<Record<string, string>>({});
@@ -231,6 +232,10 @@ export function ApplicantsPage() {
       result = result.filter(a => a.status !== 'rejected');
     }
     
+    if (!showNotStarted) {
+      result = result.filter(a => a.status !== 'not_started');
+    }
+    
     if (positionFilter !== 'all') {
       result = result.filter(a => {
         // Use position directly from API response
@@ -246,10 +251,14 @@ export function ApplicantsPage() {
     });
     
     return result;
-  }, [applicants, positionFilter, sortBy, showRejected]);
+  }, [applicants, positionFilter, sortBy, showRejected, showNotStarted]);
 
   const rejectedCount = useMemo(() => {
     return applicants.filter(a => a.status === 'rejected').length;
+  }, [applicants]);
+
+  const notStartedCount = useMemo(() => {
+    return applicants.filter(a => a.status === 'not_started').length;
   }, [applicants]);
 
   const selectApplicant = async (applicant: Applicant) => {
@@ -571,6 +580,7 @@ export function ApplicantsPage() {
 
   const getStatusBadge = (status: string) => {
     const styles: Record<string, string> = {
+      not_started: 'bg-gray-100 text-gray',
       in_progress: 'bg-info/10 text-info',
       submitted: 'bg-warning/10 text-warning',
       under_review: 'bg-maroon/10 text-maroon',
@@ -578,6 +588,7 @@ export function ApplicantsPage() {
       rejected: 'bg-error/10 text-error',
     };
     const labels: Record<string, string> = {
+      not_started: 'Not Started',
       in_progress: 'In Progress',
       submitted: 'Submitted',
       under_review: 'Under Review',
@@ -670,6 +681,20 @@ export function ApplicantsPage() {
             ))}
           </select>
         </div>
+
+        {notStartedCount > 0 && (
+          <button
+            onClick={() => setShowNotStarted(!showNotStarted)}
+            className={`flex items-center gap-2 px-3 py-2 rounded-lg border text-sm transition-colors ${
+              showNotStarted 
+                ? 'bg-gray-100 border-gray-300 text-gray' 
+                : 'bg-white border-border text-gray hover:border-gray-300'
+            }`}
+          >
+            <span>{showNotStarted ? 'Hide' : 'Show'} Not Started</span>
+            <span className="bg-gray-200 text-gray text-xs px-1.5 py-0.5 rounded-full font-medium">{notStartedCount}</span>
+          </button>
+        )}
 
         {rejectedCount > 0 && (
           <button
@@ -980,7 +1005,7 @@ export function ApplicantsPage() {
             </div>
 
             <div className="px-6 py-3 border-t border-gray-100 bg-white flex-shrink-0">
-              <p className="text-[10px] text-gray-400 text-center">Powered by MediSVault</p>
+              <p className="text-[10px] text-gray-400 text-center">Powered by MediVault</p>
             </div>
           </div>
         </>
