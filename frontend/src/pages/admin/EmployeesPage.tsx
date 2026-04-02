@@ -60,6 +60,13 @@ interface AssignmentHistoryEntry {
   end_reason?: string;
 }
 
+// Union type for both assignment types that can be ended
+interface EndableAssignment {
+  id: string;
+  client_name: string;
+  start_date?: string;
+}
+
 interface ComplianceStatus {
   background_check?: {
     status: string;
@@ -157,7 +164,7 @@ export function EmployeesPage() {
 
   // End Assignment modal
   const [showEndModal, setShowEndModal] = useState(false);
-  const [endingAssignment, setEndingAssignment] = useState<AssignmentHistoryEntry | null>(null);
+  const [endingAssignment, setEndingAssignment] = useState<EndableAssignment | null>(null);
   const [endReason, setEndReason] = useState('');
   const [endNotes, setEndNotes] = useState('');
   const [ending, setEnding] = useState(false);
@@ -323,7 +330,7 @@ export function EmployeesPage() {
     }
   }
 
-  function handleOpenEndModal(assignment: AssignmentHistoryEntry) {
+  function handleOpenEndModal(assignment: EndableAssignment) {
     setEndingAssignment(assignment);
     setEndReason('');
     setEndNotes('');
