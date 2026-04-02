@@ -46,7 +46,7 @@ export function Sidebar() {
     : applicantNav;
 
   return (
-    <aside className="fixed left-0 top-20 z-20 flex h-[calc(100vh-5rem)] w-60 flex-col border-r border-border bg-navy">
+    <aside className="fixed left-0 top-16 z-20 flex h-[calc(100vh-4rem)] w-60 flex-col border-r border-border bg-navy">
       <nav className="flex-1 space-y-1 px-3 py-4">
         {navItems.map((item) => (
           <NavLink
@@ -57,7 +57,7 @@ export function Sidebar() {
               cn(
                 'flex items-center gap-3 rounded-lg px-3 py-2.5 text-sm font-medium transition-colors',
                 isActive
-                  ? 'bg-maroon text-white'
+                  ? 'bg-teal text-white'
                   : 'text-gray-300 hover:bg-navy-light hover:text-white'
               )
             }

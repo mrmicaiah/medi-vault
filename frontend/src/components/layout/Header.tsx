@@ -40,22 +40,22 @@ export function Header() {
     : (profile?.email?.[0] || user?.email?.[0] || '?').toUpperCase();
 
   return (
-    <header className="sticky top-0 z-30 flex h-20 items-center justify-between border-b border-teal-dark bg-teal px-6">
+    <header className="sticky top-0 z-30 flex h-16 items-center justify-between border-b border-border bg-white px-6">
       <div className="flex items-center gap-3">
         <div className="flex items-center gap-2">
           {agency?.logo_url ? (
             <img 
               src={agency.logo_url} 
               alt={agency.name} 
-              className="h-14 w-auto max-w-[200px] object-contain"
+              className="h-12 w-auto max-w-[200px] object-contain"
             />
           ) : (
             <>
-              <div className="flex h-8 w-8 items-center justify-center rounded-lg bg-white/20">
+              <div className="flex h-8 w-8 items-center justify-center rounded-lg bg-teal">
                 <span className="text-sm font-bold text-white">M</span>
               </div>
-              <span className="font-display text-xl font-bold text-white">
-                Medi<span className="text-white/80">Vault</span>
+              <span className="font-display text-xl font-bold text-navy">
+                Medi<span className="text-teal">Vault</span>
               </span>
             </>
           )}
@@ -65,7 +65,7 @@ export function Header() {
       <div className="flex items-center gap-4">
         {/* Role Badge */}
         {isStaff && (
-          <span className="px-2 py-0.5 text-xs font-medium rounded-full bg-white/20 text-white capitalize">
+          <span className="px-2 py-0.5 text-xs font-medium rounded-full bg-teal/10 text-teal capitalize">
             {role}
           </span>
         )}
@@ -73,15 +73,15 @@ export function Header() {
         <div className="relative" ref={menuRef}>
           <button
             onClick={() => setMenuOpen(!menuOpen)}
-            className="flex items-center gap-2 rounded-lg p-1.5 hover:bg-white/10"
+            className="flex items-center gap-2 rounded-lg p-1.5 hover:bg-gray-50"
           >
-            <div className="flex h-8 w-8 items-center justify-center rounded-full bg-white/20 text-sm font-medium text-white">
+            <div className="flex h-8 w-8 items-center justify-center rounded-full bg-teal/10 text-sm font-medium text-teal">
               {initials}
             </div>
-            <span className="hidden text-sm font-medium text-white sm:block">
+            <span className="hidden text-sm font-medium text-slate sm:block">
               {displayName}
             </span>
-            <svg className="h-4 w-4 text-white/80" fill="none" viewBox="0 0 24 24" stroke="currentColor">
+            <svg className="h-4 w-4 text-gray" fill="none" viewBox="0 0 24 24" stroke="currentColor">
               <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M19 9l-7 7-7-7" />
             </svg>
           </button>
