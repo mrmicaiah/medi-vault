@@ -123,7 +123,8 @@ COL_FIRST = "First"
 COL_LAST = "Last"
 COL_EMAIL = "Email"
 COL_PHONE = "Phone"
-COL_ADDRESS = "Address"
+COL_ADDRESS = "Address (Search): Street 1"  # Use the clean street address, not concatenated
+COL_ADDRESS2 = "Address (Search): Street 2"
 COL_CITY = "Address (Search): City"
 COL_STATE = "Address (Search): State/Region"
 COL_ZIP = "Address (Search): Postal Code"
@@ -245,6 +246,7 @@ def parse_date(date_str: str) -> Optional[str]:
         "%Y-%m-%d",
         "%m-%d-%Y",
         "%B %d, %Y",
+        "%m-%d-%Y %I:%M %p",  # 12-09-2025 10:08 AM
     ]
     
     for fmt in formats:
@@ -389,7 +391,7 @@ def build_step2_data(row: Dict) -> Dict:
         "last_name": row.get(COL_LAST, "").strip(),
         "date_of_birth": parse_date(row.get(COL_BIRTHDATE, "")) or "",
         "address_line1": row.get(COL_ADDRESS, "").strip(),
-        "address_line2": "",
+        "address_line2": row.get(COL_ADDRESS2, "").strip(),
         "city": row.get(COL_CITY, "").strip(),
         "state": row.get(COL_STATE, "Virginia").strip(),
         "zip": row.get(COL_ZIP, "").strip(),
