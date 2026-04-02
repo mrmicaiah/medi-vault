@@ -110,6 +110,7 @@ def get_agency_branding(supabase: Client, location_id: Optional[str]) -> Dict[st
 
 
 @router.get("/dashboard")
+@router.get("/dashboard/")
 async def get_dashboard_stats(
     supabase: Client = Depends(get_supabase),
     user: dict = Depends(get_staff_user)
@@ -159,6 +160,7 @@ async def get_dashboard_stats(
 
 
 @router.get("/pipeline")
+@router.get("/pipeline/")
 async def get_pipeline(
     supabase: Client = Depends(get_supabase),
     user: dict = Depends(get_staff_user)
@@ -426,6 +428,7 @@ async def update_applicant_ssn(
 
 
 @router.get("/employees")
+@router.get("/employees/")
 async def get_employees(
     supabase: Client = Depends(get_supabase),
     user: dict = Depends(get_staff_user)
@@ -602,6 +605,7 @@ async def get_agreement_pdf_url(
 
 
 @router.post("/applicant/{application_id}/status")
+@router.post("/applicant/{application_id}/status/")
 async def update_application_status(
     application_id: str,
     status_update: dict,
@@ -625,6 +629,100 @@ async def update_application_status(
         raise
     except Exception as e:
         logger.error(f"Status update error: {e}")
+        raise HTTPException(status_code=500, detail=str(e))
+
+
+# =============================================================================
+# Training Leads Endpoint
+# =============================================================================
+
+@router.get("/training-leads")
+@router.get("/training-leads/")
+async def get_training_leads(
+    supabase: Client = Depends(get_supabase),
+    user: dict = Depends(get_staff_user)
+):
+    """
+    Get applicants who expressed interest in HHA or CPR certification training.
+    
+    Returns lists of leads separated by certification type, including their
+    interest level and current application status.
+    """
+    try:
+        # Get all applications with their profile info and step 1 data (where certification interests are stored)
+        apps_res = supabase.table("applications").select(
+            "id, user_id, status, submitted_at, updated_at, location_id, "
+            "profiles!applications_user_id_fkey(first_name, last_name, email, phone), "
+            "locations(name)"
+        ).order("updated_at", desc=True).execute()
+        
+        if not apps_res.data:
+            return {
+                "hha_leads": [],
+                "cpr_leads": [],
+                "total_hha": 0,
+                "total_cpr": 0
+            }
+        
+        # Get step 1 data for all applications (contains certification interests)
+        app_ids = [app["id"] for app in apps_res.data]
+        steps_res = supabase.table("application_steps").select(
+            "application_id, data"
+        ).eq("step_number", 1).in_("application_id", app_ids).execute()
+        
+        # Map step data by application_id
+        step_data_map = {}
+        for step in (steps_res.data or []):
+            step_data_map[step["application_id"]] = step.get("data") or {}
+        
+        hha_leads = []
+        cpr_leads = []
+        
+        for app in apps_res.data:
+            app_id = app["id"]
+            profile = app.get("profiles") or {}
+            location = app.get("locations") or {}
+            step_data = step_data_map.get(app_id, {})
+            
+            # Check certification interests from step 1
+            interested_in_hha = step_data.get("interested_in_hha")
+            interested_in_cpr = step_data.get("interested_in_cpr")
+            has_cpr = step_data.get("has_cpr")
+            certifications = step_data.get("certifications") or []
+            
+            lead_data = {
+                "application_id": app_id,
+                "user_id": app.get("user_id"),
+                "first_name": profile.get("first_name", ""),
+                "last_name": profile.get("last_name", ""),
+                "email": profile.get("email", ""),
+                "phone": profile.get("phone"),
+                "location_name": location.get("name"),
+                "interested_in_hha": interested_in_hha,
+                "interested_in_cpr": interested_in_cpr,
+                "has_cpr": has_cpr,
+                "certifications": certifications if isinstance(certifications, list) else [],
+                "application_status": app.get("status"),
+                "submitted_at": app.get("submitted_at"),
+                "updated_at": app.get("updated_at"),
+            }
+            
+            # Add to HHA leads if interested
+            if interested_in_hha in ("yes", "maybe"):
+                hha_leads.append(lead_data)
+            
+            # Add to CPR leads if interested or doesn't have CPR
+            if interested_in_cpr in ("yes", "maybe") or has_cpr == "no":
+                cpr_leads.append(lead_data)
+        
+        return {
+            "hha_leads": hha_leads,
+            "cpr_leads": cpr_leads,
+            "total_hha": len(hha_leads),
+            "total_cpr": len(cpr_leads)
+        }
+    except Exception as e:
+        logger.error(f"Training leads fetch error: {e}")
         raise HTTPException(status_code=500, detail=str(e))
 
 
@@ -1058,6 +1156,7 @@ async def get_employee_documents(
 
 
 @router.get("/applicants/{application_id}/documents-summary")
+@router.get("/applicants/{application_id}/documents-summary/")
 async def get_applicant_documents_summary(
     application_id: str,
     supabase: Client = Depends(get_supabase),
