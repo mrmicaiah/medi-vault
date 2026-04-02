@@ -55,16 +55,54 @@ interface ComplianceSummary {
   alerts: string[];
 }
 
-interface DocFile {
-  id: string;
+interface UploadedDoc {
+  type: string;
   name: string;
-  category: string;
-  status: 'approved' | 'pending' | 'expired';
-  uploaded_at: string;
-  expires_at?: string;
+  step_number: number;
+  filename?: string;
+  uploaded_at?: string;
+  endpoint: string;
+}
+
+interface AgreementDoc {
+  type: string;
+  name: string;
+  signed: boolean;
+  signed_date?: string;
+  endpoint: string;
+  preview_endpoint?: string;
+}
+
+interface GeneratedDoc {
+  type: string;
+  name: string;
+  endpoint: string;
+  preview_endpoint?: string;
+}
+
+interface DocumentsSummary {
+  application_id: string;
+  applicant_name: string;
+  status: string;
+  documents: {
+    uploaded: UploadedDoc[];
+    onboarding_agreements: AgreementDoc[];
+    generated: GeneratedDoc[];
+  };
 }
 
 const categories = ['Identification', 'Certification', 'Health', 'Compliance', 'Agreements'];
+
+// Map document types to categories
+const DOC_CATEGORY_MAP: Record<string, string> = {
+  work_authorization: 'Identification',
+  id_front: 'Identification',
+  id_back: 'Identification',
+  ssn_card: 'Identification',
+  credentials: 'Certification',
+  cpr: 'Certification',
+  tb: 'Health',
+};
 
 const COMPLIANCE_DOC_TYPES = [
   { value: 'background_check', label: 'Background Check' },
@@ -90,6 +128,10 @@ export function EmployeeDetailPage() {
   // Employee data
   const [employee, setEmployee] = useState<Employee | null>(null);
   
+  // Documents from application
+  const [documentsSummary, setDocumentsSummary] = useState<DocumentsSummary | null>(null);
+  const [loadingDocs, setLoadingDocs] = useState(false);
+  
   // Compliance data
   const [complianceSummary, setComplianceSummary] = useState<ComplianceSummary | null>(null);
   const [loadingCompliance, setLoadingCompliance] = useState(false);
@@ -107,25 +149,18 @@ export function EmployeeDetailPage() {
   });
   const [uploadFile, setUploadFile] = useState<File | null>(null);
 
-  // Mock documents for non-compliance tabs (keeping existing behavior)
-  const documents: DocFile[] = [
-    { id: '1', name: 'Driver\'s License (Front)', category: 'Identification', status: 'approved', uploaded_at: '2025-06-10', expires_at: '2028-06-15' },
-    { id: '2', name: 'Driver\'s License (Back)', category: 'Identification', status: 'approved', uploaded_at: '2025-06-10' },
-    { id: '3', name: 'Social Security Card', category: 'Identification', status: 'approved', uploaded_at: '2025-06-10' },
-    { id: '4', name: 'Work Authorization', category: 'Identification', status: 'approved', uploaded_at: '2025-06-10', expires_at: '2027-06-15' },
-    { id: '5', name: 'RN License', category: 'Certification', status: 'approved', uploaded_at: '2025-06-10', expires_at: '2026-12-31' },
-    { id: '6', name: 'CPR Certification', category: 'Certification', status: 'approved', uploaded_at: '2025-06-10', expires_at: '2026-06-10' },
-    { id: '7', name: 'TB Test Results', category: 'Health', status: 'approved', uploaded_at: '2025-06-10', expires_at: '2026-06-10' },
-    { id: '9', name: 'Confidentiality Agreement', category: 'Agreements', status: 'approved', uploaded_at: '2025-06-15' },
-    { id: '10', name: 'Job Description Acknowledgment', category: 'Agreements', status: 'approved', uploaded_at: '2025-06-15' },
-  ];
-
   useEffect(() => {
     if (id) {
       loadEmployee();
       loadComplianceSummary();
     }
   }, [id]);
+
+  useEffect(() => {
+    if (employee?.application_id) {
+      loadDocumentsSummary(employee.application_id);
+    }
+  }, [employee?.application_id]);
 
   useEffect(() => {
     if (id && activeTab === 'Compliance') {
@@ -142,6 +177,18 @@ export function EmployeeDetailPage() {
       setError(err instanceof Error ? err.message : 'Failed to load employee');
     } finally {
       setLoading(false);
+    }
+  }
+
+  async function loadDocumentsSummary(applicationId: string) {
+    try {
+      setLoadingDocs(true);
+      const data = await api.get<DocumentsSummary>(`/admin/applicants/${applicationId}/documents-summary`);
+      setDocumentsSummary(data);
+    } catch (err) {
+      console.error('Failed to load documents summary:', err);
+    } finally {
+      setLoadingDocs(false);
     }
   }
 
@@ -215,10 +262,84 @@ export function EmployeeDetailPage() {
     }
   }
 
-  const filteredDocs = documents.filter((d) => d.category === activeTab);
-  const docBadge: Record<string, 'success' | 'warning' | 'error'> = {
-    approved: 'success', pending: 'warning', expired: 'error',
+  async function handleViewUploadedDoc(doc: UploadedDoc) {
+    try {
+      const data = await api.get<{ signed_url: string }>(doc.endpoint);
+      if (data.signed_url) {
+        window.open(data.signed_url, '_blank');
+      }
+    } catch (err) {
+      setError(err instanceof Error ? err.message : 'Failed to get document URL');
+    }
+  }
+
+  async function handleViewAgreement(doc: AgreementDoc) {
+    // Use preview endpoint for viewing in browser
+    if (doc.preview_endpoint) {
+      try {
+        const response = await api.getHtml(doc.preview_endpoint);
+        const blob = new Blob([response], { type: 'text/html' });
+        const url = URL.createObjectURL(blob);
+        window.open(url, '_blank');
+      } catch (err) {
+        setError(err instanceof Error ? err.message : 'Failed to load agreement');
+      }
+    }
+  }
+
+  async function handleDownloadAgreement(doc: AgreementDoc) {
+    // Download PDF
+    try {
+      const response = await api.getBlob(doc.endpoint);
+      const url = URL.createObjectURL(response);
+      const a = document.createElement('a');
+      a.href = url;
+      a.download = `${doc.name.replace(/\s+/g, '_')}.pdf`;
+      a.click();
+      URL.revokeObjectURL(url);
+    } catch (err) {
+      setError(err instanceof Error ? err.message : 'Failed to download agreement');
+    }
+  }
+
+  async function handleViewGenerated(doc: GeneratedDoc) {
+    if (doc.preview_endpoint) {
+      try {
+        const response = await api.getHtml(doc.preview_endpoint);
+        const blob = new Blob([response], { type: 'text/html' });
+        const url = URL.createObjectURL(blob);
+        window.open(url, '_blank');
+      } catch (err) {
+        setError(err instanceof Error ? err.message : 'Failed to load document');
+      }
+    } else {
+      // For I-9, just download
+      handleDownloadGenerated(doc);
+    }
+  }
+
+  async function handleDownloadGenerated(doc: GeneratedDoc) {
+    try {
+      const response = await api.getBlob(doc.endpoint);
+      const url = URL.createObjectURL(response);
+      const a = document.createElement('a');
+      a.href = url;
+      a.download = `${doc.name.replace(/\s+/g, '_')}.pdf`;
+      a.click();
+      URL.revokeObjectURL(url);
+    } catch (err) {
+      setError(err instanceof Error ? err.message : 'Failed to download document');
+    }
+  }
+
+  // Get uploaded documents filtered by category
+  const getUploadedDocsForCategory = (category: string): UploadedDoc[] => {
+    if (!documentsSummary) return [];
+    return documentsSummary.documents.uploaded.filter(
+      (doc) => DOC_CATEGORY_MAP[doc.type] === category
+    );
   };
+
   const complianceBadge: Record<string, 'success' | 'warning' | 'error' | 'neutral'> = {
     valid: 'success', pending: 'warning', expired: 'error', rejected: 'error',
   };
@@ -246,6 +367,18 @@ export function EmployeeDetailPage() {
   }
 
   const employeeName = `${employee.first_name || ''} ${employee.last_name || ''}`.trim() || 'Unknown';
+
+  // Count documents per category
+  const getCategoryCount = (category: string): number => {
+    if (category === 'Compliance') {
+      return complianceSummary?.total_documents || 0;
+    }
+    if (category === 'Agreements') {
+      return (documentsSummary?.documents.onboarding_agreements.length || 0) + 
+             (documentsSummary?.documents.generated.length || 0);
+    }
+    return getUploadedDocsForCategory(category).length;
+  };
 
   return (
     <div className="space-y-6">
@@ -355,18 +488,13 @@ export function EmployeeDetailPage() {
                   }`}
                 >
                   {cat}
-                  {cat === 'Compliance' && complianceSummary && (
-                    <span className={`ml-1.5 rounded-full px-1.5 py-0.5 text-xs ${
-                      complianceSummary.is_compliant ? 'bg-green-100 text-green-700' : 'bg-red-100 text-red-700'
-                    }`}>
-                      {complianceSummary.total_documents}
-                    </span>
-                  )}
-                  {cat !== 'Compliance' && (
-                    <span className="ml-1.5 rounded-full bg-gray-100 px-1.5 py-0.5 text-xs">
-                      {documents.filter((d) => d.category === cat).length}
-                    </span>
-                  )}
+                  <span className={`ml-1.5 rounded-full px-1.5 py-0.5 text-xs ${
+                    cat === 'Compliance' && complianceSummary
+                      ? complianceSummary.is_compliant ? 'bg-green-100 text-green-700' : 'bg-red-100 text-red-700'
+                      : 'bg-gray-100'
+                  }`}>
+                    {getCategoryCount(cat)}
+                  </span>
                 </button>
               ))}
             </div>
@@ -457,14 +585,105 @@ export function EmployeeDetailPage() {
                 </div>
               )}
             </div>
+          ) : activeTab === 'Agreements' ? (
+            /* Agreements Tab - Real data from API */
+            <div className="p-4 space-y-4">
+              {loadingDocs ? (
+                <div className="flex justify-center py-8">
+                  <svg className="h-6 w-6 animate-spin text-maroon" fill="none" viewBox="0 0 24 24">
+                    <circle className="opacity-25" cx="12" cy="12" r="10" stroke="currentColor" strokeWidth="4" />
+                    <path className="opacity-75" fill="currentColor" d="M4 12a8 8 0 018-8V0C5.373 0 0 5.373 0 12h4zm2 5.291A7.962 7.962 0 014 12H0c0 3.042 1.135 5.824 3 7.938l3-2.647z" />
+                  </svg>
+                </div>
+              ) : (
+                <>
+                  {/* Generated Documents (Application, I-9) */}
+                  {documentsSummary?.documents.generated && documentsSummary.documents.generated.length > 0 && (
+                    <div>
+                      <h3 className="text-sm font-medium text-slate mb-2">Generated Documents</h3>
+                      <div className="space-y-2">
+                        {documentsSummary.documents.generated.map((doc) => (
+                          <div key={doc.type} className="flex items-center justify-between rounded-lg border border-border p-3">
+                            <div className="flex items-center gap-3">
+                              <svg className="h-5 w-5 text-gray" fill="none" viewBox="0 0 24 24" stroke="currentColor">
+                                <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M7 21h10a2 2 0 002-2V9.414a1 1 0 00-.293-.707l-5.414-5.414A1 1 0 0012.586 3H7a2 2 0 00-2 2v14a2 2 0 002 2z" />
+                              </svg>
+                              <div>
+                                <p className="text-sm font-medium text-slate">{doc.name}</p>
+                                <p className="text-xs text-gray">Auto-generated from application</p>
+                              </div>
+                            </div>
+                            <div className="flex items-center gap-2">
+                              <Badge variant="success">Complete</Badge>
+                              {doc.preview_endpoint && (
+                                <Button variant="ghost" size="sm" onClick={() => handleViewGenerated(doc)}>
+                                  View
+                                </Button>
+                              )}
+                              <Button variant="ghost" size="sm" onClick={() => handleDownloadGenerated(doc)}>
+                                Download
+                              </Button>
+                            </div>
+                          </div>
+                        ))}
+                      </div>
+                    </div>
+                  )}
+
+                  {/* Signed Agreements */}
+                  {documentsSummary?.documents.onboarding_agreements && documentsSummary.documents.onboarding_agreements.length > 0 && (
+                    <div>
+                      <h3 className="text-sm font-medium text-slate mb-2">Signed Agreements</h3>
+                      <div className="space-y-2">
+                        {documentsSummary.documents.onboarding_agreements.map((doc) => (
+                          <div key={doc.type} className="flex items-center justify-between rounded-lg border border-border p-3">
+                            <div className="flex items-center gap-3">
+                              <svg className="h-5 w-5 text-green-600" fill="none" viewBox="0 0 24 24" stroke="currentColor">
+                                <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M9 12l2 2 4-4m6 2a9 9 0 11-18 0 9 9 0 0118 0z" />
+                              </svg>
+                              <div>
+                                <p className="text-sm font-medium text-slate">{doc.name}</p>
+                                <p className="text-xs text-gray">
+                                  Signed {doc.signed_date ? formatDate(doc.signed_date) : 'on file'}
+                                </p>
+                              </div>
+                            </div>
+                            <div className="flex items-center gap-2">
+                              <Badge variant="success">Signed</Badge>
+                              <Button variant="ghost" size="sm" onClick={() => handleViewAgreement(doc)}>
+                                View
+                              </Button>
+                              <Button variant="ghost" size="sm" onClick={() => handleDownloadAgreement(doc)}>
+                                Download
+                              </Button>
+                            </div>
+                          </div>
+                        ))}
+                      </div>
+                    </div>
+                  )}
+
+                  {(!documentsSummary?.documents.generated?.length && !documentsSummary?.documents.onboarding_agreements?.length) && (
+                    <p className="py-8 text-center text-sm text-gray">No agreements on file.</p>
+                  )}
+                </>
+              )}
+            </div>
           ) : (
-            /* Other tabs - existing behavior */
+            /* Identification, Certification, Health tabs - Real uploaded documents */
             <div className="p-4 space-y-2">
-              {filteredDocs.length === 0 ? (
+              {loadingDocs ? (
+                <div className="flex justify-center py-8">
+                  <svg className="h-6 w-6 animate-spin text-maroon" fill="none" viewBox="0 0 24 24">
+                    <circle className="opacity-25" cx="12" cy="12" r="10" stroke="currentColor" strokeWidth="4" />
+                    <path className="opacity-75" fill="currentColor" d="M4 12a8 8 0 018-8V0C5.373 0 0 5.373 0 12h4zm2 5.291A7.962 7.962 0 014 12H0c0 3.042 1.135 5.824 3 7.938l3-2.647z" />
+                  </svg>
+                </div>
+              ) : getUploadedDocsForCategory(activeTab).length === 0 ? (
                 <p className="py-8 text-center text-sm text-gray">No documents in this category.</p>
               ) : (
-                filteredDocs.map((doc) => (
-                  <div key={doc.id} className="flex items-center justify-between rounded-lg border border-border p-3">
+                getUploadedDocsForCategory(activeTab).map((doc) => (
+                  <div key={doc.step_number} className="flex items-center justify-between rounded-lg border border-border p-3">
                     <div className="flex items-center gap-3">
                       <svg className="h-5 w-5 text-gray" fill="none" viewBox="0 0 24 24" stroke="currentColor">
                         <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M7 21h10a2 2 0 002-2V9.414a1 1 0 00-.293-.707l-5.414-5.414A1 1 0 0012.586 3H7a2 2 0 00-2 2v14a2 2 0 002 2z" />
@@ -472,18 +691,16 @@ export function EmployeeDetailPage() {
                       <div>
                         <p className="text-sm font-medium text-slate">{doc.name}</p>
                         <p className="text-xs text-gray">
-                          Uploaded {formatDate(doc.uploaded_at)}
-                          {doc.expires_at && (
-                            <span className={daysUntil(doc.expires_at) <= 30 ? ' text-warning font-medium' : ''}>
-                              {' '} - Expires {formatDate(doc.expires_at)}
-                            </span>
-                          )}
+                          {doc.filename || 'Uploaded'} 
+                          {doc.uploaded_at && ` - ${formatDate(doc.uploaded_at)}`}
                         </p>
                       </div>
                     </div>
                     <div className="flex items-center gap-2">
-                      <Badge variant={docBadge[doc.status]}>{doc.status}</Badge>
-                      <Button variant="ghost" size="sm">View</Button>
+                      <Badge variant="success">Uploaded</Badge>
+                      <Button variant="ghost" size="sm" onClick={() => handleViewUploadedDoc(doc)}>
+                        View
+                      </Button>
                     </div>
                   </div>
                 ))
