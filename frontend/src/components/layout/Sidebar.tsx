@@ -70,6 +70,21 @@ export function Sidebar() {
         ))}
       </nav>
 
+      {/* Superadmin Control Panel Link */}
+      {isSuperadmin && (
+        <div className="border-t border-navy-light px-3 py-3">
+          <NavLink
+            to="/superadmin"
+            className="flex items-center gap-3 rounded-lg px-3 py-2.5 text-sm font-medium text-cyan-400 hover:bg-gray-800 hover:text-cyan-300 transition-colors"
+          >
+            <svg className="h-5 w-5 flex-shrink-0" fill="none" viewBox="0 0 24 24" stroke="currentColor">
+              <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={1.5} d="M9.75 17L9 20l-1 1h8l-1-1-.75-3M3 13h18M5 17h14a2 2 0 002-2V5a2 2 0 00-2-2H5a2 2 0 00-2 2v10a2 2 0 002 2z" />
+            </svg>
+            System Control
+          </NavLink>
+        </div>
+      )}
+
       <div className="border-t border-navy-light p-4">
         <p className="text-xs text-gray-400">MediVault v1.0</p>
       </div>
