@@ -19,6 +19,7 @@ from app.services.client_service import ClientService
 router = APIRouter(prefix="/clients", tags=["Clients"])
 
 
+@router.post("", response_model=ClientResponse, status_code=201)
 @router.post("/", response_model=ClientResponse, status_code=201)
 async def create_client(
     request: ClientCreate,
@@ -30,6 +31,7 @@ async def create_client(
     return service.create_client(request, admin.agency_id, admin.id)
 
 
+@router.get("", response_model=ClientListResponse)
 @router.get("/", response_model=ClientListResponse)
 async def list_clients(
     page: int = Query(1, ge=1),
