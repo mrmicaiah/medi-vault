@@ -7,6 +7,7 @@ const config: Config = {
       colors: {
         navy: { DEFAULT: '#0f172a', light: '#1e293b' },
         maroon: { DEFAULT: '#6b1c35', light: '#8a2846', subtle: '#fdf2f4' },
+        teal: { DEFAULT: '#4FBFB8', dark: '#3a9a94', light: '#7ed4cf' },
         slate: { DEFAULT: '#334155' },
         gray: { DEFAULT: '#64748b', light: '#94a3b8' },
         border: '#e2e8f0',
