@@ -1185,18 +1185,11 @@ async def get_training_leads(
     user: dict = Depends(get_staff_user)
 ):
     try:
-        location_filter = get_staff_location_filter(user)
-        
-        query = supabase.table("applications").select(
+        apps_res = supabase.table("applications").select(
             "id, user_id, status, submitted_at, updated_at, location_id, "
             "profiles!applications_user_id_fkey(first_name, last_name, email, phone), "
             "locations(name)"
-        ).order("updated_at", desc=True)
-        
-        if location_filter:
-            query = query.eq("location_id", location_filter)
-        
-        apps_res = query.execute()
+        ).order("updated_at", desc=True).execute()
         
         if not apps_res.data:
             return {
@@ -1260,4 +1253,65 @@ async def get_training_leads(
         }
     except Exception as e:
         logger.error(f"Training leads fetch error: {e}")
+        raise HTTPException(status_code=500, detail=str(e))
+
+
+@router.get("/unassigned-employees")
+@router.get("/unassigned-employees/")
+async def get_unassigned_employees(
+    supabase: Client = Depends(get_supabase),
+    user: dict = Depends(get_staff_user)
+):
+    """
+    Get active employees who don't have any active client assignments.
+    These are employees ready to be assigned to clients.
+    """
+    try:
+        location_filter = get_staff_location_filter(user)
+        
+        emp_query = supabase.table("employees").select(
+            "id, user_id, status, position, hire_date, location_id, "
+            "profiles(first_name, last_name, email, phone), "
+            "locations(name)"
+        ).eq("status", "active")
+        
+        if location_filter:
+            emp_query = emp_query.eq("location_id", location_filter)
+        
+        emp_res = emp_query.execute()
+        
+        if not emp_res.data:
+            return {"unassigned_employees": [], "total": 0}
+        
+        emp_ids = [emp["id"] for emp in emp_res.data]
+        assignments_res = supabase.table("employee_client_assignments").select(
+            "employee_id"
+        ).eq("is_active", True).in_("employee_id", emp_ids).execute()
+        
+        assigned_emp_ids = set(a["employee_id"] for a in (assignments_res.data or []))
+        
+        unassigned = []
+        for emp in emp_res.data:
+            if emp["id"] not in assigned_emp_ids:
+                profile = emp.get("profiles") or {}
+                location = emp.get("locations") or {}
+                unassigned.append({
+                    "id": emp["id"],
+                    "user_id": emp.get("user_id"),
+                    "first_name": profile.get("first_name", ""),
+                    "last_name": profile.get("last_name", ""),
+                    "email": profile.get("email", ""),
+                    "phone": profile.get("phone", ""),
+                    "position": emp.get("position", ""),
+                    "hire_date": emp.get("hire_date"),
+                    "location_id": emp.get("location_id"),
+                    "location_name": location.get("name", ""),
+                })
+        
+        return {
+            "unassigned_employees": unassigned,
+            "total": len(unassigned)
+        }
+    except Exception as e:
+        logger.error(f"Unassigned employees fetch error: {e}")
         raise HTTPException(status_code=500, detail=str(e))
