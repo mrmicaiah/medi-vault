@@ -17,11 +17,14 @@ Options:
     --limit N         Only process first N files
 """
 
+from __future__ import annotations
+
 import csv
 import mimetypes
 import os
 import sys
 from pathlib import Path
+from typing import Optional, Dict, Tuple
 
 from dotenv import load_dotenv
 from supabase import create_client, Client
@@ -66,7 +69,7 @@ def get_content_type(filename: str) -> str:
     return mime_type or "application/octet-stream"
 
 
-def find_file(folder: Path, filename: str) -> Path | None:
+def find_file(folder: Path, filename: str) -> Optional[Path]:
     """Find a file in folder (case-insensitive)."""
     # Exact match
     exact = folder / filename
@@ -76,13 +79,13 @@ def find_file(folder: Path, filename: str) -> Path | None:
     # Case-insensitive search
     filename_lower = filename.lower()
     for f in folder.iterdir():
-        if f.name.lower() == filename_lower:
+        if f.is_file() and f.name.lower() == filename_lower:
             return f
     
     return None
 
 
-def get_user_and_application(supabase: Client, email: str) -> tuple[str, str] | None:
+def get_user_and_application(supabase: Client, email: str) -> Optional[Tuple[str, str]]:
     """Look up user_id and application_id by email."""
     # Get profile
     profile_res = supabase.table("profiles").select("id").eq("email", email.lower()).execute()
@@ -91,8 +94,8 @@ def get_user_and_application(supabase: Client, email: str) -> tuple[str, str] | 
     
     user_id = profile_res.data[0]["id"]
     
-    # Get application
-    app_res = supabase.table("applications").select("id").eq("user_id", user_id).execute()
+    # Get application (most recent one)
+    app_res = supabase.table("applications").select("id").eq("user_id", user_id).order("created_at", desc=True).limit(1).execute()
     if not app_res.data:
         return None
     
@@ -101,9 +104,9 @@ def get_user_and_application(supabase: Client, email: str) -> tuple[str, str] | 
     return user_id, application_id
 
 
-def upload_file(supabase: Client, user_id: str, file_path: Path, doc_type: str) -> str | None:
+def upload_file(supabase: Client, user_id: str, file_path: Path, doc_type: str) -> Optional[str]:
     """Upload file to Supabase Storage and return storage path."""
-    storage_path = f"{user_id}/{doc_type}/{file_path.name}"
+    storage_path = "{}/{}/{}".format(user_id, doc_type, file_path.name)
     
     try:
         with open(file_path, "rb") as f:
@@ -156,13 +159,12 @@ def update_application_step(supabase: Client, application_id: str, step_number: 
         supabase.table("application_steps").update({
             "data": current_data,
             "is_completed": True,
-            "status": "completed",
         }).eq("id", step_id).execute()
         
         return True
         
     except Exception as e:
-        print(f"  ⚠️  Step update error: {e}")
+        print("  ⚠️  Step update error: {}".format(e))
         return False
 
 
@@ -192,37 +194,41 @@ def main():
         print("   Example: python scripts/upload_documents.py --folder ./quickbase_files")
         return
     
-    folder = Path(FOLDER_PATH)
+    folder = Path(FOLDER_PATH).expanduser()
     if not folder.exists():
-        print(f"❌ Error: Folder not found: {FOLDER_PATH}")
+        print("❌ Error: Folder not found: {}".format(FOLDER_PATH))
         return
     
     # Check CSV
     csv_path = Path(FILE_MATCHING_CSV)
     if not csv_path.exists():
-        print(f"❌ Error: File matching CSV not found: {FILE_MATCHING_CSV}")
+        print("❌ Error: File matching CSV not found: {}".format(FILE_MATCHING_CSV))
+        print("   Download it from the outputs or regenerate it.")
         return
     
     # Connect
-    print(f"📡 Connecting to Supabase...")
+    print("📡 Connecting to Supabase...")
     supabase = create_client(SUPABASE_URL, SUPABASE_SERVICE_KEY)
     
     # Read CSV
-    print(f"📂 Reading {FILE_MATCHING_CSV}...")
+    print("📂 Reading {}...".format(FILE_MATCHING_CSV))
     with open(csv_path, 'r', encoding='utf-8-sig') as f:
         reader = csv.DictReader(f)
         rows = list(reader)
     
     if LIMIT:
         rows = rows[:LIMIT]
-        print(f"   Limited to first {LIMIT} files")
+        print("   Limited to first {} files".format(LIMIT))
     
-    print(f"   {len(rows)} files to process\n")
+    print("   {} files to process\n".format(len(rows)))
     
     # Scan folder
-    print(f"📁 Scanning folder: {folder}")
-    available_files = {f.name.lower(): f for f in folder.iterdir() if f.is_file()}
-    print(f"   {len(available_files)} files found\n")
+    print("📁 Scanning folder: {}".format(folder))
+    available_files = {}
+    for f in folder.iterdir():
+        if f.is_file():
+            available_files[f.name.lower()] = f
+    print("   {} files found\n".format(len(available_files)))
     
     # Process
     results = {"uploaded": 0, "not_found": 0, "failed": 0, "skipped": 0}
@@ -234,12 +240,12 @@ def main():
         step_number = int(row.get("step_number", 0))
         doc_type = STEP_DOC_TYPES.get(step_number, "unknown")
         
-        print(f"[{i}/{len(rows)}] {filename}")
+        print("[{}/{}] {}".format(i, len(rows), filename))
         
         # Find file
         file_path = find_file(folder, filename)
         if not file_path:
-            print(f"  ⚠️  File not found in folder")
+            print("  ⚠️  File not found in folder")
             results["not_found"] += 1
             continue
         
@@ -250,40 +256,40 @@ def main():
         
         user_app = user_cache.get(email)
         if not user_app:
-            print(f"  ⚠️  User not found: {email}")
+            print("  ⚠️  User not found: {}".format(email))
             results["skipped"] += 1
             continue
         
         user_id, application_id = user_app
         
         if DRY_RUN:
-            print(f"  🔍 Would upload to {user_id[:8]}.../{doc_type}/")
+            print("  🔍 Would upload to {}.../{}/".format(user_id[:8], doc_type))
             results["uploaded"] += 1
             continue
         
         # Upload file
         try:
             storage_path = upload_file(supabase, user_id, file_path, doc_type)
-            print(f"  ✅ Uploaded: {storage_path}")
+            print("  ✅ Uploaded: {}".format(storage_path))
             
             # Update step
             if update_application_step(supabase, application_id, step_number, storage_path, filename):
-                print(f"  ✅ Step {step_number} updated")
+                print("  ✅ Step {} updated".format(step_number))
             
             results["uploaded"] += 1
             
         except Exception as e:
-            print(f"  ❌ Upload failed: {e}")
+            print("  ❌ Upload failed: {}".format(e))
             results["failed"] += 1
     
     # Summary
     print("\n" + "=" * 60)
     print("UPLOAD COMPLETE")
     print("=" * 60)
-    print(f"✅ Uploaded: {results['uploaded']}")
-    print(f"⚠️  Not found in folder: {results['not_found']}")
-    print(f"⏭️  User not found: {results['skipped']}")
-    print(f"❌ Failed: {results['failed']}")
+    print("✅ Uploaded: {}".format(results['uploaded']))
+    print("⚠️  Not found in folder: {}".format(results['not_found']))
+    print("⏭️  User not found: {}".format(results['skipped']))
+    print("❌ Failed: {}".format(results['failed']))
     print()
 
 
