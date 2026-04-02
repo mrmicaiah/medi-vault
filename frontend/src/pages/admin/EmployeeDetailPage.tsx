@@ -888,7 +888,7 @@ export function EmployeeDetailPage() {
           )}
           <div>
             <label className="mb-1.5 block text-sm font-medium text-slate">Document File</label>
-            <FileUpload onFileSelect={(file) => setUploadFile(file)} accept=".pdf,.jpg,.jpeg,.png" maxSizeMB={10} />
+            <FileUpload onFileSelect={(file) => setUploadFile(file)} accept=".pdf,.jpg,.jpeg,.png" maxSize={10 * 1024 * 1024} />
             {uploadFile && <p className="mt-1 text-xs text-gray">Selected: {uploadFile.name}</p>}
           </div>
           <div>
