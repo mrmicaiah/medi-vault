@@ -7,17 +7,17 @@
 {% block content %}
 <p>I, <strong>{{ applicant_name }}</strong>, acknowledge that I have received and reviewed the job description for the <strong>{{ position_title }}</strong> position with <strong>{{ company_name }}</strong>.</p>
 
-<div class="warning-box" style="background-color: #fff3cd; border-left: 4px solid #ffc107; padding: 10px 15px; margin: 15px 0;">
+<div class="warning-banner">
     <strong>RISK OF EXPOSURE TO BLOODBORNE PATHOGENS - HIGH</strong>
 </div>
 
-{% if position_type in ['cna', 'hha', 'pca'] %}
+{% if position_type in ['pca', 'cna', 'hha', ''] %}
 {# CNA / HHA / PCA Job Description #}
 
 <h2>Position Overview</h2>
-<p><strong>Title:</strong> Certified Nursing Assistant / Home Health Aide<br>
-<strong>Reports To:</strong> Registered Nurse / Director of Nursing<br>
-<strong>Role:</strong> Provides personal care and related services in the home under the direction, instruction, and supervision of the staff nurse and Director of Nursing. Tasks must be assigned by and performed under supervision of an RN who is responsible for client care.</p>
+<p><strong>Title:</strong> Certified Nursing Assistant / Home Health Aide</p>
+<p><strong>Reports To:</strong> Registered Nurse / Director of Nursing</p>
+<p><strong>Role:</strong> Provides personal care and related services in the home under the direction, instruction, and supervision of the staff nurse and Director of Nursing. Tasks must be assigned by and performed under supervision of an RN who is responsible for client care.</p>
 
 <h2>Position Responsibilities</h2>
 <ul>
@@ -77,9 +77,9 @@
 {# LPN Job Description #}
 
 <h2>Position Overview</h2>
-<p><strong>Title:</strong> Licensed Practical Nurse (LPN)<br>
-<strong>Reports To:</strong> Director of Nursing<br>
-<strong>Role:</strong> Provide skilled nursing care under the direct supervision of the Registered Nurse. Perform selected skilled actions in the provision of curative, rehabilitative, palliative, or preventative nursing care. Responsible and accountable for making decisions based on individual nursing experience and educational preparation.</p>
+<p><strong>Title:</strong> Licensed Practical Nurse (LPN)</p>
+<p><strong>Reports To:</strong> Director of Nursing</p>
+<p><strong>Role:</strong> Provide skilled nursing care under the direct supervision of the Registered Nurse. Perform selected skilled actions in the provision of curative, rehabilitative, palliative, or preventative nursing care. Responsible and accountable for making decisions based on individual nursing experience and educational preparation.</p>
 
 <h2>Clinical Responsibilities</h2>
 <ul>
@@ -154,9 +154,9 @@
 {# RN Job Description #}
 
 <h2>Position Overview</h2>
-<p><strong>Title:</strong> Registered Nurse (RN)<br>
-<strong>Reports To:</strong> Director of Nursing<br>
-<strong>Role:</strong> Provides nursing care in accordance with the client plan of care including comprehensive health and psychosocial evaluation, monitoring of client condition, health promotion and prevention, coordination of services, teaching and training activities, and direct nursing care.</p>
+<p><strong>Title:</strong> Registered Nurse (RN)</p>
+<p><strong>Reports To:</strong> Director of Nursing</p>
+<p><strong>Role:</strong> Provides nursing care in accordance with the client plan of care including comprehensive health and psychosocial evaluation, monitoring of client condition, health promotion and prevention, coordination of services, teaching and training activities, and direct nursing care.</p>
 
 <h2>Care Coordination Responsibilities</h2>
 <ul>
@@ -230,44 +230,8 @@
     <li>Refer clients for social services when necessary</li>
 </ul>
 
-{% else %}
-{# Default/Generic Job Description (fallback) #}
-
-<h2>General Responsibilities</h2>
-<p>As a home care worker with the Agency, my responsibilities may include but are not limited to:</p>
-<ol>
-    <li><strong>Personal Care:</strong> Assisting clients with activities of daily living (ADLs) including bathing, dressing, grooming, toileting, and mobility</li>
-    <li><strong>Companionship:</strong> Providing emotional support, conversation, and engagement in social activities</li>
-    <li><strong>Meal Preparation:</strong> Planning, preparing, and serving meals according to dietary requirements and preferences</li>
-    <li><strong>Light Housekeeping:</strong> Maintaining a clean, safe, and comfortable living environment for clients</li>
-    <li><strong>Medication Reminders:</strong> Reminding clients to take prescribed medications at scheduled times (not administering medications unless certified)</li>
-    <li><strong>Transportation:</strong> Providing or arranging transportation to appointments, errands, and social activities</li>
-    <li><strong>Documentation:</strong> Maintaining accurate records of care provided, observations, and client status changes</li>
-    <li><strong>Communication:</strong> Reporting changes in client condition to supervisors and care coordinators promptly</li>
-</ol>
-
-<h2>Physical Requirements</h2>
-<p>I understand that the position may require:</p>
-<ul>
-    <li>Standing, walking, bending, and lifting for extended periods</li>
-    <li>Lifting or moving up to 50 pounds (with or without assistance)</li>
-    <li>Assisting with client transfers and mobility</li>
-    <li>Working in various home environments</li>
-</ul>
-
-<h2>Professional Standards</h2>
-<p>I understand that I am expected to:</p>
-<ul>
-    <li>Maintain professional boundaries with clients and their families</li>
-    <li>Adhere to the Agency's code of ethics and conduct policies</li>
-    <li>Maintain required certifications and training throughout employment</li>
-    <li>Report to assigned shifts on time and communicate scheduling changes in advance</li>
-</ul>
-
 {% endif %}
 
 <h2>Acknowledgment</h2>
-<p>I understand that this acknowledgment does not constitute an employment contract and that the specific duties of my position may be modified at any time based on client needs and Agency requirements.</p>
-
-<p><strong>By signing below, I confirm that I have read, understand, and accept the responsibilities and requirements described in this Job Description Acknowledgment for the {{ position_title }} position.</strong></p>
+<p><strong>By signing below, I confirm that I have read, understand, and accept the responsibilities and requirements described in this Job Description for the {{ position_title }} position.</strong></p>
 {% endblock %}
