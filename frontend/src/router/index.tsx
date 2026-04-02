@@ -9,6 +9,8 @@ import { AppLayout } from '../components/layout/AppLayout';
 import { LoginPage } from '../pages/auth/LoginPage';
 import { SignupPage } from '../pages/auth/SignupPage';
 import { ResetPasswordPage } from '../pages/auth/ResetPasswordPage';
+import { ResetCallbackPage } from '../pages/auth/ResetCallbackPage';
+import { SetPasswordPage } from '../pages/auth/SetPasswordPage';
 import { InvitePage } from '../pages/auth/InvitePage';
 
 import { ApplyPage } from '../pages/public/ApplyPage';
@@ -158,6 +160,8 @@ export function RouterConfig() {
         <Route path="/auth/login" element={<LoginPage />} />
         <Route path="/auth/signup" element={<SignupPage />} />
         <Route path="/auth/reset-password" element={<ResetPasswordPage />} />
+        <Route path="/auth/reset-callback" element={<ResetCallbackPage />} />
+        <Route path="/auth/set-password" element={<SetPasswordPage />} />
       </Route>
 
       {/* Protected applicant routes */}
