@@ -109,6 +109,23 @@ def get_agency_branding(supabase: Client, location_id: Optional[str]) -> Dict[st
     return result
 
 
+def get_location_names(supabase: Client, location_ids: List[str]) -> Dict[str, str]:
+    """Fetch location names for a list of location IDs."""
+    if not location_ids:
+        return {}
+    
+    unique_ids = list(set(id for id in location_ids if id))
+    if not unique_ids:
+        return {}
+    
+    try:
+        res = supabase.table("locations").select("id, name").in_("id", unique_ids).execute()
+        return {loc["id"]: loc["name"] for loc in (res.data or [])}
+    except Exception as e:
+        logger.warning(f"Could not fetch location names: {e}")
+        return {}
+
+
 def get_staff_location_filter(user: dict) -> Optional[str]:
     """
     Get the location_id to filter queries by.
@@ -480,8 +497,9 @@ async def get_employees(
     try:
         location_filter = get_staff_location_filter(user)
         
+        # Query employees WITHOUT the locations join (no FK constraint)
         query = supabase.table("employees").select(
-            "id, user_id, status, position, hire_date, termination_date, created_at, location_id, profiles(first_name, last_name, email, phone), locations(name)"
+            "id, user_id, status, position, hire_date, termination_date, created_at, location_id, profiles(first_name, last_name, email, phone)"
         ).order("created_at", desc=True)
         
         if location_filter:
@@ -489,10 +507,14 @@ async def get_employees(
         
         res = query.execute()
         
+        # Fetch location names separately
+        location_ids = [emp.get("location_id") for emp in (res.data or []) if emp.get("location_id")]
+        location_map = get_location_names(supabase, location_ids)
+        
         employees = []
         for emp in (res.data or []):
             profile = emp.get("profiles") or {}
-            location = emp.get("locations") or {}
+            location_id = emp.get("location_id")
             employees.append({
                 "id": emp.get("id"),
                 "user_id": emp.get("user_id"),
@@ -504,8 +526,8 @@ async def get_employees(
                 "last_name": profile.get("last_name", ""),
                 "email": profile.get("email", ""),
                 "phone": profile.get("phone", ""),
-                "location_id": emp.get("location_id"),
-                "location_name": location.get("name", "")
+                "location_id": location_id,
+                "location_name": location_map.get(location_id, "")
             })
         
         return {"employees": employees}
@@ -1269,10 +1291,10 @@ async def get_unassigned_employees(
     try:
         location_filter = get_staff_location_filter(user)
         
+        # Query WITHOUT locations join (no FK constraint in DB)
         emp_query = supabase.table("employees").select(
             "id, user_id, status, position, hire_date, location_id, "
-            "profiles(first_name, last_name, email, phone), "
-            "locations(name)"
+            "profiles(first_name, last_name, email, phone)"
         ).eq("status", "active")
         
         if location_filter:
@@ -1282,6 +1304,10 @@ async def get_unassigned_employees(
         
         if not emp_res.data:
             return {"unassigned_employees": [], "total": 0}
+        
+        # Fetch location names separately
+        location_ids = [emp.get("location_id") for emp in emp_res.data if emp.get("location_id")]
+        location_map = get_location_names(supabase, location_ids)
         
         emp_ids = [emp["id"] for emp in emp_res.data]
         assignments_res = supabase.table("employee_client_assignments").select(
@@ -1294,7 +1320,7 @@ async def get_unassigned_employees(
         for emp in emp_res.data:
             if emp["id"] not in assigned_emp_ids:
                 profile = emp.get("profiles") or {}
-                location = emp.get("locations") or {}
+                location_id = emp.get("location_id")
                 unassigned.append({
                     "id": emp["id"],
                     "user_id": emp.get("user_id"),
@@ -1304,8 +1330,8 @@ async def get_unassigned_employees(
                     "phone": profile.get("phone", ""),
                     "position": emp.get("position", ""),
                     "hire_date": emp.get("hire_date"),
-                    "location_id": emp.get("location_id"),
-                    "location_name": location.get("name", ""),
+                    "location_id": location_id,
+                    "location_name": location_map.get(location_id, ""),
                 })
         
         return {
