@@ -1,4 +1,4 @@
-import { useState, useEffect } from 'react';
+import { useState, useEffect, useMemo } from 'react';
 import { useParams, Link } from 'react-router-dom';
 import { api } from '../../lib/api';
 import { Card } from '../../components/ui/Card';
@@ -91,7 +91,32 @@ interface DocumentsSummary {
   };
 }
 
-const categories = ['Identification', 'Certification', 'Health', 'Compliance', 'Agreements'];
+interface ClientAssignment {
+  id: string;
+  employee_id: string;
+  client_id: string;
+  client_name?: string;
+  start_date?: string;
+  end_date?: string;
+  is_active: boolean;
+  notes?: string;
+  created_at?: string;
+}
+
+interface Client {
+  id: string;
+  nickname: string;
+  first_name?: string;
+  last_name?: string;
+  status: string;
+}
+
+interface ClientListResponse {
+  items: Client[];
+  total: number;
+}
+
+const categories = ['Assignments', 'Identification', 'Certification', 'Health', 'Compliance', 'Agreements'];
 
 // Map document types to categories
 const DOC_CATEGORY_MAP: Record<string, string> = {
@@ -121,7 +146,7 @@ const COMPLIANCE_DOC_TYPES = [
 
 export function EmployeeDetailPage() {
   const { id } = useParams();
-  const [activeTab, setActiveTab] = useState('Identification');
+  const [activeTab, setActiveTab] = useState('Assignments');
   const [loading, setLoading] = useState(true);
   const [error, setError] = useState<string | null>(null);
   
@@ -135,6 +160,20 @@ export function EmployeeDetailPage() {
   // Compliance data
   const [complianceSummary, setComplianceSummary] = useState<ComplianceSummary | null>(null);
   const [loadingCompliance, setLoadingCompliance] = useState(false);
+  
+  // Client assignments
+  const [assignments, setAssignments] = useState<ClientAssignment[]>([]);
+  const [loadingAssignments, setLoadingAssignments] = useState(false);
+  
+  // Assign Client modal
+  const [showAssignModal, setShowAssignModal] = useState(false);
+  const [clients, setClients] = useState<Client[]>([]);
+  const [loadingClients, setLoadingClients] = useState(false);
+  const [selectedClientId, setSelectedClientId] = useState('');
+  const [assignmentStartDate, setAssignmentStartDate] = useState(new Date().toISOString().split('T')[0]);
+  const [assignmentNotes, setAssignmentNotes] = useState('');
+  const [assigning, setAssigning] = useState(false);
+  const [clientSearch, setClientSearch] = useState('');
   
   // Upload modal
   const [showUploadModal, setShowUploadModal] = useState(false);
@@ -153,6 +192,7 @@ export function EmployeeDetailPage() {
     if (id) {
       loadEmployee();
       loadComplianceSummary();
+      loadAssignments();
     }
   }, [id]);
 
@@ -202,6 +242,59 @@ export function EmployeeDetailPage() {
       console.error('Failed to load compliance summary:', err);
     } finally {
       setLoadingCompliance(false);
+    }
+  }
+
+  async function loadAssignments() {
+    if (!id) return;
+    try {
+      setLoadingAssignments(true);
+      const data = await api.get<ClientAssignment[]>(`/employees/${id}/assignments`);
+      setAssignments(data);
+    } catch (err) {
+      console.error('Failed to load assignments:', err);
+    } finally {
+      setLoadingAssignments(false);
+    }
+  }
+
+  async function loadClients() {
+    try {
+      setLoadingClients(true);
+      const data = await api.get<ClientListResponse>('/clients?status=active&page_size=100');
+      setClients(data.items);
+    } catch (err) {
+      setError(err instanceof Error ? err.message : 'Failed to load clients');
+    } finally {
+      setLoadingClients(false);
+    }
+  }
+
+  function handleOpenAssignModal() {
+    setShowAssignModal(true);
+    setSelectedClientId('');
+    setAssignmentStartDate(new Date().toISOString().split('T')[0]);
+    setAssignmentNotes('');
+    setClientSearch('');
+    loadClients();
+  }
+
+  async function handleAssignClient() {
+    if (!id || !selectedClientId) return;
+
+    try {
+      setAssigning(true);
+      await api.post(`/employees/${id}/assignments`, {
+        client_id: selectedClientId,
+        start_date: assignmentStartDate,
+        notes: assignmentNotes || null,
+      });
+      setShowAssignModal(false);
+      loadAssignments();
+    } catch (err) {
+      setError(err instanceof Error ? err.message : 'Failed to assign client');
+    } finally {
+      setAssigning(false);
     }
   }
 
@@ -274,7 +367,6 @@ export function EmployeeDetailPage() {
   }
 
   async function handleViewAgreement(doc: AgreementDoc) {
-    // Use preview endpoint for viewing in browser
     if (doc.preview_endpoint) {
       try {
         const response = await api.getHtml(doc.preview_endpoint);
@@ -288,7 +380,6 @@ export function EmployeeDetailPage() {
   }
 
   async function handleDownloadAgreement(doc: AgreementDoc) {
-    // Download PDF
     try {
       const response = await api.getBlob(doc.endpoint);
       const url = URL.createObjectURL(response);
@@ -313,7 +404,6 @@ export function EmployeeDetailPage() {
         setError(err instanceof Error ? err.message : 'Failed to load document');
       }
     } else {
-      // For I-9, just download
       handleDownloadGenerated(doc);
     }
   }
@@ -332,13 +422,25 @@ export function EmployeeDetailPage() {
     }
   }
 
-  // Get uploaded documents filtered by category
   const getUploadedDocsForCategory = (category: string): UploadedDoc[] => {
     if (!documentsSummary) return [];
     return documentsSummary.documents.uploaded.filter(
       (doc) => DOC_CATEGORY_MAP[doc.type] === category
     );
   };
+
+  const filteredClients = useMemo(() => {
+    if (!clientSearch.trim()) return clients;
+    const q = clientSearch.toLowerCase();
+    return clients.filter((c) => {
+      const name = `${c.first_name || ''} ${c.last_name || ''} ${c.nickname}`.toLowerCase();
+      return name.includes(q);
+    });
+  }, [clients, clientSearch]);
+
+  const assignedClientIds = useMemo(() => {
+    return new Set(assignments.filter(a => a.is_active).map(a => a.client_id));
+  }, [assignments]);
 
   const complianceBadge: Record<string, 'success' | 'warning' | 'error' | 'neutral'> = {
     valid: 'success', pending: 'warning', expired: 'error', rejected: 'error',
@@ -368,8 +470,10 @@ export function EmployeeDetailPage() {
 
   const employeeName = `${employee.first_name || ''} ${employee.last_name || ''}`.trim() || 'Unknown';
 
-  // Count documents per category
   const getCategoryCount = (category: string): number => {
+    if (category === 'Assignments') {
+      return assignments.filter(a => a.is_active).length;
+    }
     if (category === 'Compliance') {
       return complianceSummary?.total_documents || 0;
     }
@@ -431,7 +535,6 @@ export function EmployeeDetailPage() {
             ))}
           </div>
 
-          {/* Compliance Quick View */}
           {complianceSummary && (
             <div className="mt-6 pt-6 border-t border-border">
               <h3 className="text-sm font-medium text-slate mb-3">Compliance Status</h3>
@@ -500,8 +603,63 @@ export function EmployeeDetailPage() {
             </div>
           </div>
 
-          {/* Compliance Tab Content */}
-          {activeTab === 'Compliance' ? (
+          {/* Assignments Tab */}
+          {activeTab === 'Assignments' ? (
+            <div className="p-4">
+              <div className="flex items-center justify-between mb-4">
+                <p className="text-sm text-gray">
+                  {assignments.filter(a => a.is_active).length} active client assignments
+                </p>
+                <Button size="sm" onClick={handleOpenAssignModal}>
+                  <svg className="mr-1 h-4 w-4" fill="none" viewBox="0 0 24 24" stroke="currentColor">
+                    <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M12 4v16m8-8H4" />
+                  </svg>
+                  Assign Client
+                </Button>
+              </div>
+
+              {loadingAssignments ? (
+                <div className="flex justify-center py-8">
+                  <svg className="h-6 w-6 animate-spin text-maroon" fill="none" viewBox="0 0 24 24">
+                    <circle className="opacity-25" cx="12" cy="12" r="10" stroke="currentColor" strokeWidth="4" />
+                    <path className="opacity-75" fill="currentColor" d="M4 12a8 8 0 018-8V0C5.373 0 0 5.373 0 12h4zm2 5.291A7.962 7.962 0 014 12H0c0 3.042 1.135 5.824 3 7.938l3-2.647z" />
+                  </svg>
+                </div>
+              ) : assignments.filter(a => a.is_active).length === 0 ? (
+                <div className="text-center py-8">
+                  <svg className="mx-auto h-12 w-12 text-gray-300" fill="none" viewBox="0 0 24 24" stroke="currentColor">
+                    <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={1.5} d="M17 20h5v-2a3 3 0 00-5.356-1.857M17 20H7m10 0v-2c0-.656-.126-1.283-.356-1.857M7 20H2v-2a3 3 0 015.356-1.857M7 20v-2c0-.656.126-1.283.356-1.857m0 0a5.002 5.002 0 019.288 0M15 7a3 3 0 11-6 0 3 3 0 016 0z" />
+                  </svg>
+                  <p className="mt-3 text-sm text-gray">No clients assigned yet</p>
+                  <Button size="sm" variant="secondary" className="mt-3" onClick={handleOpenAssignModal}>
+                    Assign First Client
+                  </Button>
+                </div>
+              ) : (
+                <div className="space-y-2">
+                  {assignments.filter(a => a.is_active).map((assignment) => (
+                    <div key={assignment.id} className="flex items-center justify-between rounded-lg border border-border p-3">
+                      <div className="flex items-center gap-3">
+                        <div className="rounded-lg bg-maroon-subtle p-2">
+                          <svg className="h-5 w-5 text-maroon" fill="none" viewBox="0 0 24 24" stroke="currentColor">
+                            <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M4.318 6.318a4.5 4.5 0 000 6.364L12 20.364l7.682-7.682a4.5 4.5 0 00-6.364-6.364L12 7.636l-1.318-1.318a4.5 4.5 0 00-6.364 0z" />
+                          </svg>
+                        </div>
+                        <div>
+                          <p className="text-sm font-medium text-slate">{assignment.client_name || 'Unknown Client'}</p>
+                          <p className="text-xs text-gray">
+                            Since {assignment.start_date ? formatDate(assignment.start_date) : 'N/A'}
+                            {assignment.notes && ` • ${assignment.notes}`}
+                          </p>
+                        </div>
+                      </div>
+                      <Badge variant="success">Active</Badge>
+                    </div>
+                  ))}
+                </div>
+              )}
+            </div>
+          ) : activeTab === 'Compliance' ? (
             <div className="p-4">
               <div className="flex items-center justify-between mb-4">
                 <div>
@@ -586,7 +744,6 @@ export function EmployeeDetailPage() {
               )}
             </div>
           ) : activeTab === 'Agreements' ? (
-            /* Agreements Tab - Real data from API */
             <div className="p-4 space-y-4">
               {loadingDocs ? (
                 <div className="flex justify-center py-8">
@@ -597,7 +754,6 @@ export function EmployeeDetailPage() {
                 </div>
               ) : (
                 <>
-                  {/* Generated Documents (Application, I-9) */}
                   {documentsSummary?.documents.generated && documentsSummary.documents.generated.length > 0 && (
                     <div>
                       <h3 className="text-sm font-medium text-slate mb-2">Generated Documents</h3>
@@ -616,13 +772,9 @@ export function EmployeeDetailPage() {
                             <div className="flex items-center gap-2">
                               <Badge variant="success">Complete</Badge>
                               {doc.preview_endpoint && (
-                                <Button variant="ghost" size="sm" onClick={() => handleViewGenerated(doc)}>
-                                  View
-                                </Button>
+                                <Button variant="ghost" size="sm" onClick={() => handleViewGenerated(doc)}>View</Button>
                               )}
-                              <Button variant="ghost" size="sm" onClick={() => handleDownloadGenerated(doc)}>
-                                Download
-                              </Button>
+                              <Button variant="ghost" size="sm" onClick={() => handleDownloadGenerated(doc)}>Download</Button>
                             </div>
                           </div>
                         ))}
@@ -630,7 +782,6 @@ export function EmployeeDetailPage() {
                     </div>
                   )}
 
-                  {/* Signed Agreements */}
                   {documentsSummary?.documents.onboarding_agreements && documentsSummary.documents.onboarding_agreements.length > 0 && (
                     <div>
                       <h3 className="text-sm font-medium text-slate mb-2">Signed Agreements</h3>
@@ -643,19 +794,13 @@ export function EmployeeDetailPage() {
                               </svg>
                               <div>
                                 <p className="text-sm font-medium text-slate">{doc.name}</p>
-                                <p className="text-xs text-gray">
-                                  Signed {doc.signed_date ? formatDate(doc.signed_date) : 'on file'}
-                                </p>
+                                <p className="text-xs text-gray">Signed {doc.signed_date ? formatDate(doc.signed_date) : 'on file'}</p>
                               </div>
                             </div>
                             <div className="flex items-center gap-2">
                               <Badge variant="success">Signed</Badge>
-                              <Button variant="ghost" size="sm" onClick={() => handleViewAgreement(doc)}>
-                                View
-                              </Button>
-                              <Button variant="ghost" size="sm" onClick={() => handleDownloadAgreement(doc)}>
-                                Download
-                              </Button>
+                              <Button variant="ghost" size="sm" onClick={() => handleViewAgreement(doc)}>View</Button>
+                              <Button variant="ghost" size="sm" onClick={() => handleDownloadAgreement(doc)}>Download</Button>
                             </div>
                           </div>
                         ))}
@@ -670,7 +815,6 @@ export function EmployeeDetailPage() {
               )}
             </div>
           ) : (
-            /* Identification, Certification, Health tabs - Real uploaded documents */
             <div className="p-4 space-y-2">
               {loadingDocs ? (
                 <div className="flex justify-center py-8">
@@ -691,16 +835,13 @@ export function EmployeeDetailPage() {
                       <div>
                         <p className="text-sm font-medium text-slate">{doc.name}</p>
                         <p className="text-xs text-gray">
-                          {doc.filename || 'Uploaded'} 
-                          {doc.uploaded_at && ` - ${formatDate(doc.uploaded_at)}`}
+                          {doc.filename || 'Uploaded'} {doc.uploaded_at && ` - ${formatDate(doc.uploaded_at)}`}
                         </p>
                       </div>
                     </div>
                     <div className="flex items-center gap-2">
                       <Badge variant="success">Uploaded</Badge>
-                      <Button variant="ghost" size="sm" onClick={() => handleViewUploadedDoc(doc)}>
-                        View
-                      </Button>
+                      <Button variant="ghost" size="sm" onClick={() => handleViewUploadedDoc(doc)}>View</Button>
                     </div>
                   </div>
                 ))
@@ -711,64 +852,33 @@ export function EmployeeDetailPage() {
       </div>
 
       {/* Upload Compliance Document Modal */}
-      <Modal
-        isOpen={showUploadModal}
-        onClose={() => setShowUploadModal(false)}
-        title="Upload Compliance Document"
-      >
+      <Modal isOpen={showUploadModal} onClose={() => setShowUploadModal(false)} title="Upload Compliance Document">
         <div className="space-y-4">
           <div>
             <label className="mb-1.5 block text-sm font-medium text-slate">Document Type</label>
-            <select
-              value={uploadForm.document_type}
-              onChange={(e) => setUploadForm({ ...uploadForm, document_type: e.target.value })}
-              className="w-full rounded-lg border border-border bg-white px-3 py-2 text-sm focus:border-maroon focus:outline-none focus:ring-1 focus:ring-maroon"
-            >
-              {COMPLIANCE_DOC_TYPES.map((type) => (
-                <option key={type.value} value={type.value}>{type.label}</option>
-              ))}
+            <select value={uploadForm.document_type} onChange={(e) => setUploadForm({ ...uploadForm, document_type: e.target.value })} className="w-full rounded-lg border border-border bg-white px-3 py-2 text-sm focus:border-maroon focus:outline-none focus:ring-1 focus:ring-maroon">
+              {COMPLIANCE_DOC_TYPES.map((type) => (<option key={type.value} value={type.value}>{type.label}</option>))}
             </select>
           </div>
-
           <div>
             <label className="mb-1.5 block text-sm font-medium text-slate">Document Name</label>
-            <Input
-              placeholder="e.g., Background Check - April 2026"
-              value={uploadForm.document_name}
-              onChange={(e) => setUploadForm({ ...uploadForm, document_name: e.target.value })}
-            />
+            <Input placeholder="e.g., Background Check - April 2026" value={uploadForm.document_name} onChange={(e) => setUploadForm({ ...uploadForm, document_name: e.target.value })} />
           </div>
-
           <div className="grid grid-cols-2 gap-4">
             <div>
               <label className="mb-1.5 block text-sm font-medium text-slate">Effective Date</label>
-              <Input
-                type="date"
-                value={uploadForm.effective_date}
-                onChange={(e) => setUploadForm({ ...uploadForm, effective_date: e.target.value })}
-              />
+              <Input type="date" value={uploadForm.effective_date} onChange={(e) => setUploadForm({ ...uploadForm, effective_date: e.target.value })} />
             </div>
             <div>
               <label className="mb-1.5 block text-sm font-medium text-slate">Expiration Date</label>
-              <Input
-                type="date"
-                value={uploadForm.expiration_date}
-                onChange={(e) => setUploadForm({ ...uploadForm, expiration_date: e.target.value })}
-              />
+              <Input type="date" value={uploadForm.expiration_date} onChange={(e) => setUploadForm({ ...uploadForm, expiration_date: e.target.value })} />
               <p className="mt-1 text-xs text-gray">Leave blank if no expiration</p>
             </div>
           </div>
-
-          {(uploadForm.document_type === 'background_check' || 
-            uploadForm.document_type === 'oig_exclusion_check' ||
-            uploadForm.document_type === 'state_exclusion_check') && (
+          {(uploadForm.document_type === 'background_check' || uploadForm.document_type === 'oig_exclusion_check' || uploadForm.document_type === 'state_exclusion_check') && (
             <div>
               <label className="mb-1.5 block text-sm font-medium text-slate">Check Result</label>
-              <select
-                value={uploadForm.check_result}
-                onChange={(e) => setUploadForm({ ...uploadForm, check_result: e.target.value })}
-                className="w-full rounded-lg border border-border bg-white px-3 py-2 text-sm focus:border-maroon focus:outline-none focus:ring-1 focus:ring-maroon"
-              >
+              <select value={uploadForm.check_result} onChange={(e) => setUploadForm({ ...uploadForm, check_result: e.target.value })} className="w-full rounded-lg border border-border bg-white px-3 py-2 text-sm focus:border-maroon focus:outline-none focus:ring-1 focus:ring-maroon">
                 <option value="">Select result...</option>
                 <option value="clear">Clear</option>
                 <option value="match_found">Match Found</option>
@@ -776,41 +886,86 @@ export function EmployeeDetailPage() {
               </select>
             </div>
           )}
-
           <div>
             <label className="mb-1.5 block text-sm font-medium text-slate">Document File</label>
-            <FileUpload
-              onFileSelect={(file) => setUploadFile(file)}
-              accept=".pdf,.jpg,.jpeg,.png"
-              maxSizeMB={10}
-            />
-            {uploadFile && (
-              <p className="mt-1 text-xs text-gray">Selected: {uploadFile.name}</p>
-            )}
+            <FileUpload onFileSelect={(file) => setUploadFile(file)} accept=".pdf,.jpg,.jpeg,.png" maxSizeMB={10} />
+            {uploadFile && <p className="mt-1 text-xs text-gray">Selected: {uploadFile.name}</p>}
           </div>
-
           <div>
             <label className="mb-1.5 block text-sm font-medium text-slate">Notes</label>
-            <textarea
-              value={uploadForm.notes}
-              onChange={(e) => setUploadForm({ ...uploadForm, notes: e.target.value })}
-              rows={2}
-              className="w-full rounded-lg border border-border bg-white px-3 py-2 text-sm focus:border-maroon focus:outline-none focus:ring-1 focus:ring-maroon"
-              placeholder="Any additional notes..."
-            />
+            <textarea value={uploadForm.notes} onChange={(e) => setUploadForm({ ...uploadForm, notes: e.target.value })} rows={2} className="w-full rounded-lg border border-border bg-white px-3 py-2 text-sm focus:border-maroon focus:outline-none focus:ring-1 focus:ring-maroon" placeholder="Any additional notes..." />
           </div>
-
           <div className="flex justify-end gap-3 pt-4">
-            <Button variant="secondary" onClick={() => setShowUploadModal(false)}>
-              Cancel
-            </Button>
-            <Button
-              onClick={handleUploadCompliance}
-              loading={uploading}
-              disabled={!uploadForm.document_name || !uploadForm.effective_date}
-            >
-              Upload Document
-            </Button>
+            <Button variant="secondary" onClick={() => setShowUploadModal(false)}>Cancel</Button>
+            <Button onClick={handleUploadCompliance} loading={uploading} disabled={!uploadForm.document_name || !uploadForm.effective_date}>Upload Document</Button>
+          </div>
+        </div>
+      </Modal>
+
+      {/* Assign Client Modal */}
+      <Modal isOpen={showAssignModal} onClose={() => setShowAssignModal(false)} title={`Assign Client to ${employeeName}`}>
+        <div className="space-y-4">
+          <div>
+            <label className="mb-1.5 block text-sm font-medium text-slate">Search Clients</label>
+            <Input placeholder="Search by name..." value={clientSearch} onChange={(e) => setClientSearch(e.target.value)} />
+          </div>
+          <div>
+            <label className="mb-1.5 block text-sm font-medium text-slate">Select Client</label>
+            {loadingClients ? (
+              <div className="flex justify-center py-4">
+                <svg className="h-5 w-5 animate-spin text-maroon" fill="none" viewBox="0 0 24 24">
+                  <circle className="opacity-25" cx="12" cy="12" r="10" stroke="currentColor" strokeWidth="4" />
+                  <path className="opacity-75" fill="currentColor" d="M4 12a8 8 0 018-8V0C5.373 0 0 5.373 0 12h4z" />
+                </svg>
+              </div>
+            ) : (
+              <div className="max-h-48 overflow-y-auto border border-border rounded-lg">
+                {filteredClients.length === 0 ? (
+                  <p className="p-3 text-sm text-gray text-center">No clients found</p>
+                ) : (
+                  filteredClients.map((client) => {
+                    const isAssigned = assignedClientIds.has(client.id);
+                    return (
+                      <button
+                        key={client.id}
+                        type="button"
+                        disabled={isAssigned}
+                        onClick={() => setSelectedClientId(client.id)}
+                        className={`w-full flex items-center justify-between p-3 text-left border-b border-border last:border-0 transition-colors ${
+                          selectedClientId === client.id ? 'bg-maroon/10' : isAssigned ? 'bg-gray-50 opacity-50 cursor-not-allowed' : 'hover:bg-gray-50'
+                        }`}
+                      >
+                        <div>
+                          <p className="text-sm font-medium text-slate">{client.nickname}</p>
+                          {(client.first_name || client.last_name) && (
+                            <p className="text-xs text-gray">{client.first_name} {client.last_name}</p>
+                          )}
+                        </div>
+                        {isAssigned ? (
+                          <Badge variant="neutral" className="text-xs">Already assigned</Badge>
+                        ) : selectedClientId === client.id ? (
+                          <svg className="h-5 w-5 text-maroon" fill="none" viewBox="0 0 24 24" stroke="currentColor">
+                            <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M5 13l4 4L19 7" />
+                          </svg>
+                        ) : null}
+                      </button>
+                    );
+                  })
+                )}
+              </div>
+            )}
+          </div>
+          <div>
+            <label className="mb-1.5 block text-sm font-medium text-slate">Start Date</label>
+            <Input type="date" value={assignmentStartDate} onChange={(e) => setAssignmentStartDate(e.target.value)} />
+          </div>
+          <div>
+            <label className="mb-1.5 block text-sm font-medium text-slate">Notes (optional)</label>
+            <textarea value={assignmentNotes} onChange={(e) => setAssignmentNotes(e.target.value)} rows={2} className="w-full rounded-lg border border-border bg-white px-3 py-2 text-sm focus:border-maroon focus:outline-none focus:ring-1 focus:ring-maroon" placeholder="Any notes about this assignment..." />
+          </div>
+          <div className="flex justify-end gap-3 pt-4">
+            <Button variant="secondary" onClick={() => setShowAssignModal(false)}>Cancel</Button>
+            <Button onClick={handleAssignClient} loading={assigning} disabled={!selectedClientId}>Assign Client</Button>
           </div>
         </div>
       </Modal>
