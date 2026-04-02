@@ -10,6 +10,7 @@ from .routers import (
     documents,
     agreements,
     admin,
+    admin_delete,  # Soft delete endpoints
     employees,
     clients,
     compliance,
@@ -57,6 +58,7 @@ app.include_router(applications.router)
 app.include_router(documents.router)
 app.include_router(agreements.router)
 app.include_router(admin.router)
+# admin_delete adds to admin.router, no separate include needed
 app.include_router(employees.router)
 app.include_router(clients.router)
 app.include_router(compliance.router)
