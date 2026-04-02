@@ -3,7 +3,9 @@ import { supabase } from './supabase';
 // For local dev: http://localhost:8000
 // For production: https://medi-vault-api.onrender.com
 // The /api prefix is added here, not in the env var
-const BASE_URL = import.meta.env.VITE_API_URL || 'http://localhost:8000';
+// Strip trailing /api if someone accidentally includes it in the env var
+const RAW_BASE_URL = import.meta.env.VITE_API_URL || 'http://localhost:8000';
+const BASE_URL = RAW_BASE_URL.replace(/\/api\/?$/, '');
 export const API_URL = `${BASE_URL}/api`;
 
 async function getAuthHeaders(): Promise<Record<string, string>> {
