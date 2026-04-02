@@ -33,6 +33,8 @@ async def hire_applicant(
     return service.hire_applicant(request, admin.id)
 
 
+# Handle both /employees and /employees/ explicitly
+@router.get("", response_model=EmployeeListResponse)
 @router.get("/", response_model=EmployeeListResponse)
 async def list_employees(
     page: int = Query(1, ge=1),
