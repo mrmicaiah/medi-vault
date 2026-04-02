@@ -34,6 +34,20 @@ interface ClientDetail extends Client {
   assignments: ClientAssignment[];
 }
 
+interface Employee {
+  id: string;
+  employee_number?: string;
+  first_name?: string;
+  last_name?: string;
+  job_title?: string;
+  status: string;
+}
+
+interface EmployeeListResponse {
+  items: Employee[];
+  total: number;
+}
+
 interface ComplianceSummary {
   employee_id: string;
   is_compliant: boolean;
@@ -76,6 +90,16 @@ export default function ClientsPage() {
   
   // Compliance data for assigned employees
   const [employeeCompliance, setEmployeeCompliance] = useState<Record<string, ComplianceSummary>>({});
+
+  // Assign Caregiver modal
+  const [showAssignModal, setShowAssignModal] = useState(false);
+  const [employees, setEmployees] = useState<Employee[]>([]);
+  const [loadingEmployees, setLoadingEmployees] = useState(false);
+  const [selectedEmployeeId, setSelectedEmployeeId] = useState('');
+  const [assignmentStartDate, setAssignmentStartDate] = useState(new Date().toISOString().split('T')[0]);
+  const [assignmentNotes, setAssignmentNotes] = useState('');
+  const [assigning, setAssigning] = useState(false);
+  const [employeeSearch, setEmployeeSearch] = useState('');
 
   useEffect(() => {
     loadClients();
@@ -134,6 +158,18 @@ export default function ClientsPage() {
     }
   }
 
+  async function loadEmployees() {
+    try {
+      setLoadingEmployees(true);
+      const data = await api.get<EmployeeListResponse>('/employees?status=active&page_size=100');
+      setEmployees(data.items);
+    } catch (err) {
+      setError(err instanceof Error ? err.message : 'Failed to load employees');
+    } finally {
+      setLoadingEmployees(false);
+    }
+  }
+
   async function handleSearch(e: React.FormEvent) {
     e.preventDefault();
     setPage(1);
@@ -160,6 +196,36 @@ export default function ClientsPage() {
     loadClientDetail(client.id);
   }
 
+  function handleOpenAssignModal() {
+    setShowAssignModal(true);
+    setSelectedEmployeeId('');
+    setAssignmentStartDate(new Date().toISOString().split('T')[0]);
+    setAssignmentNotes('');
+    setEmployeeSearch('');
+    loadEmployees();
+  }
+
+  async function handleAssignCaregiver() {
+    if (!selectedClient || !selectedEmployeeId) return;
+
+    try {
+      setAssigning(true);
+      await api.post(`/employees/${selectedEmployeeId}/assignments`, {
+        client_id: selectedClient.id,
+        start_date: assignmentStartDate,
+        notes: assignmentNotes || null,
+      });
+      setShowAssignModal(false);
+      // Reload client detail to show new assignment
+      loadClientDetail(selectedClient.id);
+      loadClients(); // Refresh list to update assignment count
+    } catch (err) {
+      setError(err instanceof Error ? err.message : 'Failed to assign caregiver');
+    } finally {
+      setAssigning(false);
+    }
+  }
+
   const filteredClients = useMemo(() => {
     if (!search.trim()) return clients;
     const q = search.toLowerCase();
@@ -170,6 +236,21 @@ export default function ClientsPage() {
         c.last_name?.toLowerCase().includes(q)
     );
   }, [clients, search]);
+
+  const filteredEmployees = useMemo(() => {
+    if (!employeeSearch.trim()) return employees;
+    const q = employeeSearch.toLowerCase();
+    return employees.filter((e) => {
+      const name = `${e.first_name || ''} ${e.last_name || ''}`.toLowerCase();
+      return name.includes(q) || e.employee_number?.toLowerCase().includes(q);
+    });
+  }, [employees, employeeSearch]);
+
+  // Get IDs of already assigned employees
+  const assignedEmployeeIds = useMemo(() => {
+    if (!selectedClient) return new Set<string>();
+    return new Set(selectedClient.assignments.filter(a => a.is_active).map(a => a.employee_id));
+  }, [selectedClient]);
 
   const totalPages = Math.ceil(total / pageSize);
 
@@ -535,7 +616,7 @@ export default function ClientsPage() {
               </div>
 
               <div className="mt-6 space-y-2">
-                <Button variant="secondary" className="w-full">
+                <Button variant="secondary" className="w-full" onClick={handleOpenAssignModal}>
                   <svg
                     className="mr-2 h-4 w-4"
                     fill="none"
@@ -588,6 +669,117 @@ export default function ClientsPage() {
             </Button>
             <Button onClick={handleAddClient} loading={adding} disabled={!newClientName.trim()}>
               Add Client
+            </Button>
+          </div>
+        </div>
+      </Modal>
+
+      {/* Assign Caregiver Modal */}
+      <Modal
+        isOpen={showAssignModal}
+        onClose={() => setShowAssignModal(false)}
+        title={`Assign Caregiver to ${selectedClient?.nickname || 'Client'}`}
+      >
+        <div className="space-y-4">
+          <div>
+            <label className="mb-1.5 block text-sm font-medium text-slate">
+              Search Employees
+            </label>
+            <Input
+              placeholder="Search by name or employee number..."
+              value={employeeSearch}
+              onChange={(e) => setEmployeeSearch(e.target.value)}
+            />
+          </div>
+
+          <div>
+            <label className="mb-1.5 block text-sm font-medium text-slate">
+              Select Employee
+            </label>
+            {loadingEmployees ? (
+              <div className="flex justify-center py-4">
+                <svg className="h-5 w-5 animate-spin text-maroon" fill="none" viewBox="0 0 24 24">
+                  <circle className="opacity-25" cx="12" cy="12" r="10" stroke="currentColor" strokeWidth="4" />
+                  <path className="opacity-75" fill="currentColor" d="M4 12a8 8 0 018-8V0C5.373 0 0 5.373 0 12h4z" />
+                </svg>
+              </div>
+            ) : (
+              <div className="max-h-48 overflow-y-auto border border-border rounded-lg">
+                {filteredEmployees.length === 0 ? (
+                  <p className="p-3 text-sm text-gray text-center">No employees found</p>
+                ) : (
+                  filteredEmployees.map((emp) => {
+                    const name = `${emp.first_name || ''} ${emp.last_name || ''}`.trim() || 'Unknown';
+                    const isAssigned = assignedEmployeeIds.has(emp.id);
+                    return (
+                      <button
+                        key={emp.id}
+                        type="button"
+                        disabled={isAssigned}
+                        onClick={() => setSelectedEmployeeId(emp.id)}
+                        className={`w-full flex items-center justify-between p-3 text-left border-b border-border last:border-0 transition-colors ${
+                          selectedEmployeeId === emp.id
+                            ? 'bg-maroon/10'
+                            : isAssigned
+                            ? 'bg-gray-50 opacity-50 cursor-not-allowed'
+                            : 'hover:bg-gray-50'
+                        }`}
+                      >
+                        <div>
+                          <p className="text-sm font-medium text-slate">{name}</p>
+                          <p className="text-xs text-gray">
+                            {emp.employee_number || 'No ID'} • {emp.job_title || 'Employee'}
+                          </p>
+                        </div>
+                        {isAssigned ? (
+                          <Badge variant="neutral" className="text-xs">Already assigned</Badge>
+                        ) : selectedEmployeeId === emp.id ? (
+                          <svg className="h-5 w-5 text-maroon" fill="none" viewBox="0 0 24 24" stroke="currentColor">
+                            <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M5 13l4 4L19 7" />
+                          </svg>
+                        ) : null}
+                      </button>
+                    );
+                  })
+                )}
+              </div>
+            )}
+          </div>
+
+          <div>
+            <label className="mb-1.5 block text-sm font-medium text-slate">
+              Start Date
+            </label>
+            <Input
+              type="date"
+              value={assignmentStartDate}
+              onChange={(e) => setAssignmentStartDate(e.target.value)}
+            />
+          </div>
+
+          <div>
+            <label className="mb-1.5 block text-sm font-medium text-slate">
+              Notes (optional)
+            </label>
+            <textarea
+              value={assignmentNotes}
+              onChange={(e) => setAssignmentNotes(e.target.value)}
+              rows={2}
+              className="w-full rounded-lg border border-border bg-white px-3 py-2 text-sm focus:border-maroon focus:outline-none focus:ring-1 focus:ring-maroon"
+              placeholder="Any notes about this assignment..."
+            />
+          </div>
+
+          <div className="flex justify-end gap-3 pt-4">
+            <Button variant="secondary" onClick={() => setShowAssignModal(false)}>
+              Cancel
+            </Button>
+            <Button
+              onClick={handleAssignCaregiver}
+              loading={assigning}
+              disabled={!selectedEmployeeId}
+            >
+              Assign Caregiver
             </Button>
           </div>
         </div>

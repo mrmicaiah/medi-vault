@@ -310,6 +310,7 @@ class EmployeeService:
         client = client_result.data
         now = datetime.now(timezone.utc).isoformat()
 
+        # Use the correct column names: assignment_start, assignment_end
         assignment_result = (
             self.supabase.table("employee_client_assignments")
             .insert(
@@ -317,8 +318,8 @@ class EmployeeService:
                     "employee_id": emp_id,
                     "client_id": request.client_id,
                     "assigned_by": admin_id,
-                    "start_date": request.start_date,
-                    "end_date": request.end_date,
+                    "assignment_start": request.start_date,
+                    "assignment_end": request.end_date,
                     "schedule": request.schedule,
                     "notes": request.notes,
                     "is_active": True,
@@ -343,8 +344,8 @@ class EmployeeService:
             client_id=a["client_id"],
             client_name=client_name,
             assigned_by=a.get("assigned_by"),
-            start_date=a["start_date"],
-            end_date=a.get("end_date"),
+            start_date=a.get("assignment_start"),
+            end_date=a.get("assignment_end"),
             schedule=a.get("schedule"),
             notes=a.get("notes"),
             is_active=a.get("is_active", True),
@@ -373,8 +374,8 @@ class EmployeeService:
                     client_id=a["client_id"],
                     client_name=client_name,
                     assigned_by=a.get("assigned_by"),
-                    start_date=a["start_date"],
-                    end_date=a.get("end_date"),
+                    start_date=a.get("assignment_start"),
+                    end_date=a.get("assignment_end"),
                     schedule=a.get("schedule"),
                     notes=a.get("notes"),
                     is_active=a.get("is_active", True),
