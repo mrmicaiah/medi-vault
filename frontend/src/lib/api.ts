@@ -75,6 +75,36 @@ export const api = {
     return response.blob();
   },
 
+  // Alias for fetchBlob
+  getBlob: async (endpoint: string): Promise<Blob> => {
+    const { data } = await supabase.auth.getSession();
+    const token = data.session?.access_token;
+    const response = await fetch(`${API_URL}${endpoint}`, {
+      headers: {
+        ...(token ? { Authorization: `Bearer ${token}` } : {}),
+      },
+    });
+    if (!response.ok) {
+      throw new Error(`Failed to fetch: ${response.status}`);
+    }
+    return response.blob();
+  },
+
+  // Fetch HTML content
+  getHtml: async (endpoint: string): Promise<string> => {
+    const { data } = await supabase.auth.getSession();
+    const token = data.session?.access_token;
+    const response = await fetch(`${API_URL}${endpoint}`, {
+      headers: {
+        ...(token ? { Authorization: `Bearer ${token}` } : {}),
+      },
+    });
+    if (!response.ok) {
+      throw new Error(`Failed to fetch: ${response.status}`);
+    }
+    return response.text();
+  },
+
   upload: async <T>(endpoint: string, file: File, fields?: Record<string, string>): Promise<T> => {
     const { data } = await supabase.auth.getSession();
     const token = data.session?.access_token;
