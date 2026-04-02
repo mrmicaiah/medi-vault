@@ -2,6 +2,7 @@ import React, { useState } from 'react';
 import { FileUpload } from '../../ui/FileUpload';
 import { Input, Select } from '../../ui/Input';
 import { Alert } from '../../ui/Alert';
+import { PhotoTips } from '../../ui/PhotoTips';
 
 interface StepProps {
   data: Record<string, unknown>;
@@ -134,13 +135,18 @@ export function IDFront({ data, onSave, onFileSelect, pendingFile, onChange }: S
         onChange={(e) => handleChange('expiration_date', e.target.value)}
       />
 
+      {/* Photo Tips */}
+      <PhotoTips documentType="id" />
+
       <FileUpload
         label="Front of ID"
         onFileSelect={handleFileSelect}
-        accept=".pdf,.jpg,.jpeg,.png"
+        accept=".pdf,.jpg,.jpeg,.png,.heic,.heif"
         maxSize={10 * 1024 * 1024}
         currentFile={displayFileName ? { name: displayFileName } : null}
-        helperText="Upload a clear photo or scan of the front of your ID"
+        helperText="Upload or take a photo of the front of your ID"
+        optimizeImages={true}
+        allowCamera={true}
       />
 
       {pendingFile && (
