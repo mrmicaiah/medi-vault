@@ -1,32 +1,30 @@
-import { useState, useEffect, useMemo } from 'react';
-import { Link } from 'react-router-dom';
-import { api } from '../../lib/api';
-import { Card } from '../../components/ui/Card';
-import { Badge } from '../../components/ui/Badge';
+import React, { useState, useEffect, useMemo, useCallback } from 'react';
+import { Link, useSearchParams } from 'react-router-dom';
 import { Button } from '../../components/ui/Button';
 import { Input } from '../../components/ui/Input';
-import { Alert } from '../../components/ui/Alert';
 import { Modal } from '../../components/ui/Modal';
-import { formatDate } from '../../lib/utils';
+import { Alert } from '../../components/ui/Alert';
+import { api } from '../../lib/api';
 
 interface Employee {
   id: string;
   user_id: string;
   employee_number?: string;
-  status: string;
-  hire_date: string;
-  job_title?: string;
-  department?: string;
-  first_name?: string;
-  last_name?: string;
-  email?: string;
+  status: 'active' | 'inactive' | 'terminated';
+  position?: string;
+  hire_date?: string;
+  termination_date?: string;
+  first_name: string;
+  last_name: string;
+  email: string;
+  phone?: string;
+  location_id?: string;
+  location_name?: string;
 }
 
-interface EmployeeListResponse {
-  items: Employee[];
-  total: number;
-  page: number;
-  page_size: number;
+interface EmployeeDetail extends Employee {
+  assignments?: ClientAssignment[];
+  compliance?: ComplianceStatus;
 }
 
 interface ClientAssignment {
@@ -36,41 +34,6 @@ interface ClientAssignment {
   start_date?: string;
   end_date?: string;
   is_active: boolean;
-  assigned_by?: string;
-  notes?: string;
-}
-
-interface Client {
-  id: string;
-  nickname: string;
-  first_name?: string;
-  last_name?: string;
-  status: string;
-}
-
-interface ClientListResponse {
-  items: Client[];
-  total: number;
-}
-
-interface ComplianceSummary {
-  employee_id: string;
-  is_compliant: boolean;
-  alerts: string[];
-  background_check?: { status: string; effective_date: string };
-  oig_exclusion_check?: { status: string; check_result?: string; effective_date: string };
-}
-
-// Assignment history types
-interface AuditLogEntry {
-  id: string;
-  action: string;
-  performed_by_name?: string;
-  performed_at: string;
-  employee_compliant?: boolean;
-  background_check_status?: string;
-  oig_check_status?: string;
-  end_reason?: string;
   notes?: string;
 }
 
@@ -85,18 +48,51 @@ interface AssignmentHistoryEntry {
   end_date?: string;
   is_active: boolean;
   notes?: string;
+  assigned_by?: string;
   assigned_by_name?: string;
   created_at?: string;
   was_compliant_at_assignment?: boolean;
   background_check_at_assignment?: string;
   oig_check_at_assignment?: string;
+  ended_by?: string;
   ended_by_name?: string;
   ended_at?: string;
   end_reason?: string;
-  audit_log: AuditLogEntry[];
 }
 
-interface EmployeeAssignmentHistory {
+interface ComplianceStatus {
+  background_check?: {
+    status: string;
+    checked_at?: string;
+    expires_at?: string;
+  };
+  oig_check?: {
+    status: string;
+    checked_at?: string;
+  };
+  documents?: Array<{
+    type: string;
+    status: string;
+    expires_at?: string;
+  }>;
+}
+
+interface Client {
+  id: string;
+  first_name: string;
+  last_name: string;
+  nickname?: string;
+  status: string;
+}
+
+interface ClientListResponse {
+  clients: Client[];
+  total: number;
+  page: number;
+  page_size: number;
+}
+
+interface AssignmentHistoryResponse {
   employee_id: string;
   employee_name: string;
   employee_number?: string;
@@ -105,11 +101,9 @@ interface EmployeeAssignmentHistory {
   assignments: AssignmentHistoryEntry[];
 }
 
-const statusBadgeVariant: Record<string, 'success' | 'warning' | 'error' | 'neutral'> = {
-  active: 'success',
-  inactive: 'neutral',
-  suspended: 'warning',
-  terminated: 'error',
+const formatDate = (dateString: string) => {
+  const date = new Date(dateString);
+  return date.toLocaleDateString('en-US', { month: 'short', day: 'numeric', year: 'numeric' });
 };
 
 const END_REASONS = [
@@ -133,22 +127,16 @@ export function EmployeesPage() {
   const [statusFilter, setStatusFilter] = useState<string>('all');
   const [sortField, setSortField] = useState<SortField>('name');
   const [sortDir, setSortDir] = useState<'asc' | 'desc'>('asc');
-  const [page, setPage] = useState(1);
-  const [total, setTotal] = useState(0);
-  const pageSize = 25;
 
-  // Slide-out panel state
-  const [selectedEmployee, setSelectedEmployee] = useState<Employee | null>(null);
+  const [selectedEmployee, setSelectedEmployee] = useState<EmployeeDetail | null>(null);
   const [panelOpen, setPanelOpen] = useState(false);
   const [loadingDetail, setLoadingDetail] = useState(false);
-  const [assignments, setAssignments] = useState<ClientAssignment[]>([]);
-  const [compliance, setCompliance] = useState<ComplianceSummary | null>(null);
 
-  // Assignment history (for audits)
-  const [assignmentHistory, setAssignmentHistory] = useState<EmployeeAssignmentHistory | null>(null);
-  const [loadingHistory, setLoadingHistory] = useState(false);
-  const [showHistoryTab, setShowHistoryTab] = useState(false);
-  const [expandedAssignment, setExpandedAssignment] = useState<string | null>(null);
+  // Assignment state
+  const [assignments, setAssignments] = useState<ClientAssignment[]>([]);
+  const [assignmentHistory, setAssignmentHistory] = useState<AssignmentHistoryEntry[]>([]);
+  const [loadingAssignments, setLoadingAssignments] = useState(false);
+  const [showHistorySection, setShowHistorySection] = useState(false);
 
   // Assign/Reassign Client modal
   const [showAssignModal, setShowAssignModal] = useState(false);
@@ -157,7 +145,7 @@ export function EmployeesPage() {
   const [clients, setClients] = useState<Client[]>([]);
   const [loadingClients, setLoadingClients] = useState(false);
   const [selectedClientId, setSelectedClientId] = useState('');
-  const [assignmentStartDate, setAssignmentStartDate] = useState(new Date().toISOString().split('T')[0]);
+  const [assignmentStartDate, setAssignmentStartDate] = useState('');
   const [assignmentNotes, setAssignmentNotes] = useState('');
   const [reassignReason, setReassignReason] = useState('reassignment');
   const [assigning, setAssigning] = useState(false);
@@ -174,9 +162,7 @@ export function EmployeesPage() {
   const [endNotes, setEndNotes] = useState('');
   const [ending, setEnding] = useState(false);
 
-  useEffect(() => {
-    loadEmployees();
-  }, [page, statusFilter]);
+  const [searchParams] = useSearchParams();
 
   // Debounce client search
   useEffect(() => {
@@ -194,122 +180,92 @@ export function EmployeesPage() {
     }
   }, [showAssignModal, clientSearchDebounced, clientPage]);
 
-  async function loadEmployees() {
+  useEffect(() => {
+    loadEmployees();
+  }, []);
+
+  // Handle URL params for pre-selecting employee
+  useEffect(() => {
+    const selectedId = searchParams.get('selected');
+    if (selectedId && employees.length > 0) {
+      const emp = employees.find(e => e.id === selectedId);
+      if (emp) {
+        selectEmployee(emp);
+      }
+    }
+  }, [searchParams, employees]);
+
+  const loadEmployees = async () => {
     try {
       setLoading(true);
       setError(null);
-
-      const params = new URLSearchParams({
-        page: page.toString(),
-        page_size: pageSize.toString(),
-      });
-
-      if (statusFilter !== 'all') {
-        params.set('status', statusFilter);
-      }
-      if (search.trim()) {
-        params.set('search', search.trim());
-      }
-
-      const data = await api.get<EmployeeListResponse>(`/employees?${params}`);
-      setEmployees(data.items);
-      setTotal(data.total);
+      const res = await api.get<{ employees: Employee[] }>('/admin/employees');
+      setEmployees(res.employees || []);
     } catch (err) {
       setError(err instanceof Error ? err.message : 'Failed to load employees');
     } finally {
       setLoading(false);
     }
-  }
+  };
 
-  async function selectEmployee(employee: Employee) {
+  const selectEmployee = useCallback(async (employee: Employee) => {
+    setSelectedEmployee(employee as EmployeeDetail);
     setPanelOpen(true);
+    setShowHistorySection(false);
     setLoadingDetail(true);
-    setSelectedEmployee(employee);
-    setAssignments([]);
-    setCompliance(null);
-    setShowHistoryTab(false);
-    setAssignmentHistory(null);
-    setExpandedAssignment(null);
 
     try {
       // Load assignments
-      const assignmentsData = await api.get<ClientAssignment[]>(`/employees/${employee.id}/assignments`);
-      setAssignments(assignmentsData);
-
-      // Load compliance
-      try {
-        const complianceData = await api.get<ComplianceSummary>(`/employees/${employee.id}/compliance-summary`);
-        setCompliance(complianceData);
-      } catch {
-        // Compliance might not exist yet
-      }
+      const assignRes = await api.get<ClientAssignment[]>(`/employees/${employee.id}/assignments`);
+      setAssignments(assignRes || []);
+      setSelectedEmployee(prev => prev ? { ...prev, assignments: assignRes || [] } : null);
     } catch (err) {
-      setError(err instanceof Error ? err.message : 'Failed to load employee details');
+      console.error('Failed to load assignments:', err);
     } finally {
       setLoadingDetail(false);
     }
-  }
+  }, []);
 
-  async function loadAssignmentHistory(employeeId: string) {
+  const loadAssignmentHistory = async (employeeId: string) => {
+    setLoadingAssignments(true);
     try {
-      setLoadingHistory(true);
-      const data = await api.get<EmployeeAssignmentHistory>(`/assignments/employee/${employeeId}/history`);
-      setAssignmentHistory(data);
+      const res = await api.get<AssignmentHistoryResponse>(`/assignments/employee/${employeeId}`);
+      setAssignmentHistory(res.assignments || []);
     } catch (err) {
       console.error('Failed to load assignment history:', err);
-      setError(err instanceof Error ? err.message : 'Failed to load assignment history');
     } finally {
-      setLoadingHistory(false);
+      setLoadingAssignments(false);
     }
-  }
+  };
 
-  function handleShowHistory() {
-    if (!selectedEmployee) return;
-    setShowHistoryTab(true);
-    if (!assignmentHistory) {
-      loadAssignmentHistory(selectedEmployee.id);
-    }
-  }
-
-  function closePanel() {
-    setPanelOpen(false);
-    setShowHistoryTab(false);
-    setAssignmentHistory(null);
-    setTimeout(() => {
-      setSelectedEmployee(null);
-      setAssignments([]);
-      setCompliance(null);
-    }, 250);
-  }
-
-  async function loadClients() {
+  const loadClients = async () => {
+    setLoadingClients(true);
     try {
-      setLoadingClients(true);
-      const params = new URLSearchParams({
-        status: 'active',
-        page: clientPage.toString(),
-        page_size: clientPageSize.toString(),
-      });
+      const params = new URLSearchParams();
+      params.set('page', clientPage.toString());
+      params.set('page_size', clientPageSize.toString());
       if (clientSearchDebounced.trim()) {
         params.set('search', clientSearchDebounced.trim());
       }
       const data = await api.get<ClientListResponse>(`/clients?${params}`);
-      setClients(data.items);
-      setClientTotal(data.total);
+      setClients(data.clients || []);
+      setClientTotal(data.total || 0);
     } catch (err) {
       setError(err instanceof Error ? err.message : 'Failed to load clients');
     } finally {
       setLoadingClients(false);
     }
-  }
+  };
 
-  function handleSearch(e: React.FormEvent) {
-    e.preventDefault();
-    setPage(1);
-    loadEmployees();
-  }
+  const closePanel = () => {
+    setPanelOpen(false);
+    setTimeout(() => {
+      setSelectedEmployee(null);
+      setAssignments([]);
+      setAssignmentHistory([]);
+    }, 250);
+  };
 
-  // Open modal for new assignment
   function handleOpenAssignModal() {
     setShowAssignModal(true);
     setIsReassignment(false);
@@ -319,24 +275,19 @@ export function EmployeesPage() {
     setAssignmentNotes('');
     setReassignReason('reassignment');
     setClientSearch('');
-    setClientSearchDebounced('');
     setClientPage(1);
-    setClients([]);
   }
 
-  // Open modal for reassignment (changing which client)
   function handleOpenReassignModal(currentAssignment: ClientAssignment) {
     setShowAssignModal(true);
     setIsReassignment(true);
     setReassigningFrom(currentAssignment);
     setSelectedClientId('');
     setAssignmentStartDate(new Date().toISOString().split('T')[0]);
-    setAssignmentNotes('');
     setReassignReason('reassignment');
+    setAssignmentNotes('');
     setClientSearch('');
-    setClientSearchDebounced('');
     setClientPage(1);
-    setClients([]);
   }
 
   async function handleAssignClient() {
@@ -344,8 +295,7 @@ export function EmployeesPage() {
 
     try {
       setAssigning(true);
-
-      // If this is a reassignment, first end the current assignment
+      // If reassigning, first end the current assignment
       if (isReassignment && reassigningFrom) {
         await api.post(`/assignments/${reassigningFrom.id}/end`, {
           end_reason: reassignReason,
@@ -353,19 +303,18 @@ export function EmployeesPage() {
         });
       }
 
-      // Create the new assignment
+      // Create new assignment
       await api.post(`/employees/${selectedEmployee.id}/assignments`, {
         client_id: selectedClientId,
-        start_date: assignmentStartDate,
+        start_date: assignmentStartDate || null,
         notes: isReassignment
           ? `Reassigned from ${reassigningFrom?.client_name}. ${assignmentNotes}`.trim()
           : assignmentNotes || null,
       });
 
       setShowAssignModal(false);
-      // Reload employee detail and history
+      // Reload assignments
       selectEmployee(selectedEmployee);
-      setAssignmentHistory(null);
       loadEmployees();
     } catch (err) {
       setError(err instanceof Error ? err.message : 'Failed to assign client');
@@ -414,226 +363,196 @@ export function EmployeesPage() {
     );
   }, [assignments, isReassignment, reassigningFrom]);
 
-  const activeAssignments = useMemo(() => {
-    return assignments.filter(a => a.is_active);
-  }, [assignments]);
+  // Filter and sort employees
+  const filteredEmployees = useMemo(() => {
+    let result = [...employees];
 
-  const filtered = employees
-    .filter((e) => {
-      if (!search) return true;
-      const name = `${e.first_name || ''} ${e.last_name || ''}`.toLowerCase();
-      const email = (e.email || '').toLowerCase();
+    if (search.trim()) {
       const q = search.toLowerCase();
-      return name.includes(q) || email.includes(q);
-    })
-    .sort((a, b) => {
+      result = result.filter(e =>
+        `${e.first_name} ${e.last_name}`.toLowerCase().includes(q) ||
+        e.email.toLowerCase().includes(q) ||
+        (e.employee_number && e.employee_number.toLowerCase().includes(q))
+      );
+    }
+
+    if (statusFilter !== 'all') {
+      result = result.filter(e => e.status === statusFilter);
+    }
+
+    result.sort((a, b) => {
       let cmp = 0;
-      if (sortField === 'name') {
-        const nameA = `${a.first_name || ''} ${a.last_name || ''}`;
-        const nameB = `${b.first_name || ''} ${b.last_name || ''}`;
-        cmp = nameA.localeCompare(nameB);
-      } else if (sortField === 'job_title') {
-        cmp = (a.job_title || '').localeCompare(b.job_title || '');
-      } else if (sortField === 'hire_date') {
-        cmp = (a.hire_date || '').localeCompare(b.hire_date || '');
+      switch (sortField) {
+        case 'name':
+          cmp = `${a.first_name} ${a.last_name}`.localeCompare(`${b.first_name} ${b.last_name}`);
+          break;
+        case 'job_title':
+          cmp = (a.position || '').localeCompare(b.position || '');
+          break;
+        case 'status':
+          cmp = a.status.localeCompare(b.status);
+          break;
+        case 'hire_date':
+          cmp = (a.hire_date || '').localeCompare(b.hire_date || '');
+          break;
       }
       return sortDir === 'asc' ? cmp : -cmp;
     });
 
-  const toggleSort = (field: SortField) => {
-    if (sortField === field) setSortDir((d) => (d === 'asc' ? 'desc' : 'asc'));
-    else {
-      setSortField(field);
-      setSortDir('asc');
-    }
+    return result;
+  }, [employees, search, statusFilter, sortField, sortDir]);
+
+  const activeAssignments = useMemo(() => {
+    return assignments.filter(a => a.is_active);
+  }, [assignments]);
+
+  const getStatusBadge = (status: string) => {
+    const styles: Record<string, string> = {
+      active: 'bg-success/10 text-success',
+      inactive: 'bg-warning/10 text-warning',
+      terminated: 'bg-error/10 text-error',
+    };
+    return (
+      <span className={`inline-flex items-center px-2.5 py-0.5 rounded-full text-xs font-medium ${styles[status] || 'bg-gray-100 text-gray'}`}>
+        {status.charAt(0).toUpperCase() + status.slice(1)}
+      </span>
+    );
   };
 
-  const SortIcon = ({ field }: { field: SortField }) => (
-    <svg
-      className={`ml-1 inline h-3 w-3 ${sortField === field ? 'text-maroon' : 'text-gray-light'}`}
-      fill="none"
-      viewBox="0 0 24 24"
-      stroke="currentColor"
-    >
-      <path
-        strokeLinecap="round"
-        strokeLinejoin="round"
-        strokeWidth={2}
-        d={sortDir === 'asc' && sortField === field ? 'M5 15l7-7 7 7' : 'M19 9l-7 7-7-7'}
-      />
-    </svg>
-  );
-
-  const totalPages = Math.ceil(total / pageSize);
-  const clientTotalPages = Math.ceil(clientTotal / clientPageSize);
+  if (loading) {
+    return (
+      <div className="flex items-center justify-center py-12">
+        <svg className="h-8 w-8 animate-spin text-maroon" fill="none" viewBox="0 0 24 24">
+          <circle className="opacity-25" cx="12" cy="12" r="10" stroke="currentColor" strokeWidth="4" />
+          <path className="opacity-75" fill="currentColor" d="M4 12a8 8 0 018-8V0C5.373 0 0 5.373 0 12h4z" />
+        </svg>
+      </div>
+    );
+  }
 
   return (
     <div className="space-y-6">
+      {/* Header */}
       <div className="flex items-center justify-between">
         <div>
           <h1 className="font-display text-2xl font-bold text-navy">Employees</h1>
-          <p className="mt-1 text-sm text-gray">Manage your active employees and their records.</p>
+          <p className="text-sm text-gray mt-1">Manage your team members</p>
         </div>
-        <span className="text-sm text-gray">{total} employees</span>
       </div>
 
-      {error && (
-        <Alert variant="error" dismissible onDismiss={() => setError(null)}>
-          {error}
-        </Alert>
-      )}
+      {error && <Alert variant="error" dismissible onDismiss={() => setError(null)}>{error}</Alert>}
 
-      <Card padding="none">
-        <div className="border-b border-border p-4">
-          <div className="flex flex-col gap-4 sm:flex-row sm:items-center sm:justify-between">
-            <form onSubmit={handleSearch} className="w-full sm:max-w-xs">
-              <Input
-                placeholder="Search employees..."
-                value={search}
-                onChange={(e) => setSearch(e.target.value)}
-              />
-            </form>
-            <div className="flex gap-2">
-              {['all', 'active', 'suspended', 'inactive', 'terminated'].map((s) => (
-                <button
-                  key={s}
-                  onClick={() => {
-                    setStatusFilter(s);
-                    setPage(1);
-                  }}
-                  className={`rounded-lg border px-3 py-1.5 text-xs font-medium transition-colors ${
-                    statusFilter === s
-                      ? 'border-maroon bg-maroon-subtle text-maroon'
-                      : 'border-border text-gray hover:bg-gray-50'
-                  }`}
-                >
-                  {s === 'all' ? 'All' : s.charAt(0).toUpperCase() + s.slice(1)}
-                </button>
-              ))}
-            </div>
-          </div>
+      {/* Filters */}
+      <div className="flex flex-wrap items-center gap-3">
+        <div className="flex-1 min-w-[200px] max-w-md">
+          <Input
+            placeholder="Search by name, email, or ID..."
+            value={search}
+            onChange={(e) => setSearch(e.target.value)}
+          />
         </div>
 
-        {loading ? (
-          <div className="flex h-64 items-center justify-center">
-            <svg className="h-8 w-8 animate-spin text-maroon" fill="none" viewBox="0 0 24 24">
-              <circle className="opacity-25" cx="12" cy="12" r="10" stroke="currentColor" strokeWidth="4" />
-              <path className="opacity-75" fill="currentColor" d="M4 12a8 8 0 018-8V0C5.373 0 0 5.373 0 12h4zm2 5.291A7.962 7.962 0 014 12H0c0 3.042 1.135 5.824 3 7.938l3-2.647z" />
-            </svg>
-          </div>
-        ) : filtered.length === 0 ? (
-          <div className="flex h-64 flex-col items-center justify-center text-center">
-            <svg className="h-12 w-12 text-gray-300" fill="none" viewBox="0 0 24 24" stroke="currentColor">
-              <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={1.5} d="M12 4.354a4 4 0 110 5.292M15 21H3v-1a6 6 0 0112 0v1zm0 0h6v-1a6 6 0 00-9-5.197M13 7a4 4 0 11-8 0 4 4 0 018 0z" />
-            </svg>
-            <p className="mt-3 text-sm text-gray">No employees found</p>
-            <p className="mt-1 text-xs text-gray">Hire applicants to add them as employees</p>
-          </div>
-        ) : (
-          <div className="overflow-x-auto">
-            <table className="w-full">
-              <thead>
-                <tr className="border-b border-border bg-gray-50/50">
-                  <th className="cursor-pointer px-4 py-3 text-left text-xs font-medium uppercase text-gray" onClick={() => toggleSort('name')}>
-                    Employee <SortIcon field="name" />
-                  </th>
-                  <th className="cursor-pointer px-4 py-3 text-left text-xs font-medium uppercase text-gray" onClick={() => toggleSort('job_title')}>
-                    Position <SortIcon field="job_title" />
-                  </th>
-                  <th className="px-4 py-3 text-left text-xs font-medium uppercase text-gray">Status</th>
-                  <th className="cursor-pointer px-4 py-3 text-left text-xs font-medium uppercase text-gray" onClick={() => toggleSort('hire_date')}>
-                    Hire Date <SortIcon field="hire_date" />
-                  </th>
-                  <th className="px-4 py-3 text-left text-xs font-medium uppercase text-gray">Employee ID</th>
+        <div className="flex items-center gap-2 bg-white border border-border rounded-lg px-3 py-2">
+          <span className="text-xs text-gray font-medium">Status:</span>
+          <select
+            value={statusFilter}
+            onChange={(e) => setStatusFilter(e.target.value)}
+            className="text-sm text-navy bg-transparent border-none focus:outline-none cursor-pointer"
+          >
+            <option value="all">All</option>
+            <option value="active">Active</option>
+            <option value="inactive">Inactive</option>
+            <option value="terminated">Terminated</option>
+          </select>
+        </div>
+
+        <div className="flex items-center gap-2 bg-white border border-border rounded-lg px-3 py-2">
+          <span className="text-xs text-gray font-medium">Sort:</span>
+          <select
+            value={sortField}
+            onChange={(e) => setSortField(e.target.value as SortField)}
+            className="text-sm text-navy bg-transparent border-none focus:outline-none cursor-pointer"
+          >
+            <option value="name">Name</option>
+            <option value="job_title">Position</option>
+            <option value="status">Status</option>
+            <option value="hire_date">Hire Date</option>
+          </select>
+          <button
+            onClick={() => setSortDir(d => d === 'asc' ? 'desc' : 'asc')}
+            className="text-gray hover:text-navy"
+          >
+            {sortDir === 'asc' ? '↑' : '↓'}
+          </button>
+        </div>
+      </div>
+
+      {/* Employee Table */}
+      <div className="bg-white rounded-xl border border-border overflow-hidden">
+        <table className="w-full">
+          <thead className="bg-gray-50 border-b border-border">
+            <tr>
+              <th className="text-left text-xs font-semibold text-gray uppercase tracking-wider px-6 py-3">Employee</th>
+              <th className="text-left text-xs font-semibold text-gray uppercase tracking-wider px-6 py-3">Position</th>
+              <th className="text-left text-xs font-semibold text-gray uppercase tracking-wider px-6 py-3">Status</th>
+              <th className="text-left text-xs font-semibold text-gray uppercase tracking-wider px-6 py-3">Hire Date</th>
+            </tr>
+          </thead>
+          <tbody className="divide-y divide-border">
+            {filteredEmployees.length === 0 ? (
+              <tr>
+                <td colSpan={4} className="px-6 py-12 text-center text-gray">
+                  {employees.length === 0 ? 'No employees yet' : 'No employees match the current filters'}
+                </td>
+              </tr>
+            ) : (
+              filteredEmployees.map((employee) => (
+                <tr
+                  key={employee.id}
+                  onClick={() => selectEmployee(employee)}
+                  className="hover:bg-gray-50 cursor-pointer transition-colors"
+                >
+                  <td className="px-6 py-4">
+                    <div className="flex items-center gap-3">
+                      <div className="flex h-10 w-10 flex-shrink-0 items-center justify-center rounded-full bg-navy text-white text-sm font-medium">
+                        {employee.first_name?.[0]}{employee.last_name?.[0]}
+                      </div>
+                      <div>
+                        <p className="text-sm font-semibold text-navy">{employee.first_name} {employee.last_name}</p>
+                        <p className="text-xs text-gray">{employee.email}</p>
+                      </div>
+                    </div>
+                  </td>
+                  <td className="px-6 py-4 text-sm text-slate">{employee.position || '—'}</td>
+                  <td className="px-6 py-4">{getStatusBadge(employee.status)}</td>
+                  <td className="px-6 py-4 text-sm text-gray">
+                    {employee.hire_date ? formatDate(employee.hire_date) : '—'}
+                  </td>
                 </tr>
-              </thead>
-              <tbody>
-                {filtered.map((emp) => {
-                  const name = `${emp.first_name || ''} ${emp.last_name || ''}`.trim() || 'Unknown';
-                  return (
-                    <tr
-                      key={emp.id}
-                      onClick={() => selectEmployee(emp)}
-                      className="border-b border-border last:border-0 hover:bg-gray-50/50 cursor-pointer transition-colors"
-                    >
-                      <td className="px-4 py-3">
-                        <div>
-                          <p className="text-sm font-medium text-slate">{name}</p>
-                          <p className="text-xs text-gray">{emp.email || '—'}</p>
-                        </div>
-                      </td>
-                      <td className="px-4 py-3 text-sm text-slate">{emp.job_title || '—'}</td>
-                      <td className="px-4 py-3">
-                        <Badge variant={statusBadgeVariant[emp.status] || 'neutral'}>{emp.status}</Badge>
-                      </td>
-                      <td className="px-4 py-3 text-sm text-gray">{emp.hire_date ? formatDate(emp.hire_date) : '—'}</td>
-                      <td className="px-4 py-3 text-sm text-gray">{emp.employee_number || '—'}</td>
-                    </tr>
-                  );
-                })}
-              </tbody>
-            </table>
-          </div>
-        )}
+              ))
+            )}
+          </tbody>
+        </table>
+      </div>
 
-        {/* Pagination */}
-        {totalPages > 1 && (
-          <div className="flex items-center justify-between border-t border-border px-4 py-3">
-            <p className="text-sm text-gray">
-              Showing {(page - 1) * pageSize + 1}–{Math.min(page * pageSize, total)} of {total}
-            </p>
-            <div className="flex gap-2">
-              <Button variant="secondary" size="sm" disabled={page === 1} onClick={() => setPage((p) => p - 1)}>
-                Previous
-              </Button>
-              <Button variant="secondary" size="sm" disabled={page === totalPages} onClick={() => setPage((p) => p + 1)}>
-                Next
-              </Button>
-            </div>
-          </div>
-        )}
-      </Card>
-
-      {/* Slide-out Panel */}
+      {/* Side Panel */}
       {selectedEmployee && (
         <>
           <div
             className={`fixed inset-0 bg-black/20 z-40 transition-opacity duration-250 ${panelOpen ? 'opacity-100' : 'opacity-0 pointer-events-none'}`}
             onClick={closePanel}
           />
-          <div className={`fixed top-0 right-0 h-full w-[480px] bg-white shadow-2xl z-50 flex flex-col transition-transform duration-250 ease-out ${panelOpen ? 'translate-x-0' : 'translate-x-full'}`}>
-            {/* Header */}
+          <div className={`fixed top-0 right-0 h-full w-[420px] bg-white shadow-2xl z-50 flex flex-col transition-transform duration-250 ease-out ${panelOpen ? 'translate-x-0' : 'translate-x-full'}`}>
             <div className="px-6 py-5 bg-navy flex items-center justify-between flex-shrink-0">
               <div>
                 <h2 className="text-lg font-semibold text-white">
                   {selectedEmployee.first_name} {selectedEmployee.last_name}
                 </h2>
-                <p className="text-sm text-white/70">{selectedEmployee.job_title || 'Employee'}</p>
+                <p className="text-sm text-white/70">{selectedEmployee.position || 'No position'}</p>
               </div>
               <button onClick={closePanel} className="text-white/60 hover:text-white text-2xl leading-none p-1">×</button>
             </div>
 
-            {/* Tab Navigation */}
-            <div className="flex border-b border-border bg-white flex-shrink-0">
-              <button
-                onClick={() => setShowHistoryTab(false)}
-                className={`flex-1 py-3 text-sm font-medium transition-colors ${
-                  !showHistoryTab ? 'text-maroon border-b-2 border-maroon' : 'text-gray hover:text-slate'
-                }`}
-              >
-                Overview
-              </button>
-              <button
-                onClick={handleShowHistory}
-                className={`flex-1 py-3 text-sm font-medium transition-colors ${
-                  showHistoryTab ? 'text-maroon border-b-2 border-maroon' : 'text-gray hover:text-slate'
-                }`}
-              >
-                Assignment History
-              </button>
-            </div>
-
-            {/* Content */}
             <div className="flex-1 overflow-y-auto p-5 bg-gray-50">
               {loadingDetail ? (
                 <div className="flex items-center justify-center py-12">
@@ -642,189 +561,16 @@ export function EmployeesPage() {
                     <path className="opacity-75" fill="currentColor" d="M4 12a8 8 0 018-8V0C5.373 0 0 5.373 0 12h4z" />
                   </svg>
                 </div>
-              ) : showHistoryTab ? (
-                /* Assignment History Tab */
-                <div className="space-y-4">
-                  <div className="flex items-center justify-between">
-                    <p className="text-xs text-gray uppercase font-semibold tracking-wide">
-                      Full Assignment History (for audits)
-                    </p>
-                    {assignmentHistory && (
-                      <span className="text-xs text-gray">
-                        {assignmentHistory.total_assignments} total, {assignmentHistory.active_assignments} active
-                      </span>
-                    )}
-                  </div>
-
-                  {loadingHistory ? (
-                    <div className="flex items-center justify-center py-8">
-                      <svg className="h-6 w-6 animate-spin text-maroon" fill="none" viewBox="0 0 24 24">
-                        <circle className="opacity-25" cx="12" cy="12" r="10" stroke="currentColor" strokeWidth="4" />
-                        <path className="opacity-75" fill="currentColor" d="M4 12a8 8 0 018-8V0C5.373 0 0 5.373 0 12h4z" />
-                      </svg>
-                    </div>
-                  ) : !assignmentHistory || assignmentHistory.assignments.length === 0 ? (
-                    <div className="bg-white rounded-lg shadow-sm p-6 text-center">
-                      <p className="text-sm text-gray">No assignment history</p>
-                    </div>
-                  ) : (
-                    <div className="space-y-3">
-                      {assignmentHistory.assignments.map((assignment) => (
-                        <div key={assignment.id} className="bg-white rounded-lg shadow-sm overflow-hidden">
-                          {/* Assignment Header */}
-                          <div
-                            className="p-4 cursor-pointer hover:bg-gray-50"
-                            onClick={() => setExpandedAssignment(expandedAssignment === assignment.id ? null : assignment.id)}
-                          >
-                            <div className="flex items-start justify-between">
-                              <div>
-                                <div className="flex items-center gap-2">
-                                  <span className="text-sm font-semibold text-navy">{assignment.client_name}</span>
-                                  <Badge variant={assignment.is_active ? 'success' : 'neutral'} className="text-xs">
-                                    {assignment.is_active ? 'Active' : 'Ended'}
-                                  </Badge>
-                                </div>
-                                <p className="text-xs text-gray mt-1">
-                                  {assignment.start_date ? formatDate(assignment.start_date) : 'N/A'}
-                                  {assignment.end_date ? ` — ${formatDate(assignment.end_date)}` : ' — Present'}
-                                </p>
-                              </div>
-                              <div className="flex items-center gap-2">
-                                {assignment.was_compliant_at_assignment !== undefined && (
-                                  <Badge variant={assignment.was_compliant_at_assignment ? 'success' : 'error'} className="text-xs">
-                                    {assignment.was_compliant_at_assignment ? 'Compliant' : 'Non-Compliant'}
-                                  </Badge>
-                                )}
-                                <svg
-                                  className={`h-4 w-4 text-gray transition-transform ${expandedAssignment === assignment.id ? 'rotate-180' : ''}`}
-                                  fill="none"
-                                  viewBox="0 0 24 24"
-                                  stroke="currentColor"
-                                >
-                                  <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M19 9l-7 7-7-7" />
-                                </svg>
-                              </div>
-                            </div>
-                          </div>
-
-                          {/* Expanded Details */}
-                          {expandedAssignment === assignment.id && (
-                            <div className="border-t border-gray-100 p-4 bg-gray-50 space-y-3">
-                              {/* Assignment Details */}
-                              <div className="grid grid-cols-2 gap-3 text-xs">
-                                <div>
-                                  <span className="text-gray">Assigned by:</span>
-                                  <p className="font-medium text-slate">{assignment.assigned_by_name || 'Unknown'}</p>
-                                </div>
-                                <div>
-                                  <span className="text-gray">Created:</span>
-                                  <p className="font-medium text-slate">
-                                    {assignment.created_at ? new Date(assignment.created_at).toLocaleString() : 'N/A'}
-                                  </p>
-                                </div>
-                              </div>
-
-                              {/* Compliance at Assignment */}
-                              <div className="bg-white rounded border border-gray-200 p-3">
-                                <p className="text-xs font-semibold text-gray uppercase mb-2">Compliance at Assignment Time</p>
-                                <div className="grid grid-cols-2 gap-2 text-xs">
-                                  <div className="flex items-center justify-between">
-                                    <span className="text-gray">Background Check:</span>
-                                    <span className={assignment.background_check_at_assignment === 'valid' || assignment.background_check_at_assignment === 'clear' ? 'text-green-600' : 'text-red-600'}>
-                                      {assignment.background_check_at_assignment || 'Missing'}
-                                    </span>
-                                  </div>
-                                  <div className="flex items-center justify-between">
-                                    <span className="text-gray">OIG Check:</span>
-                                    <span className={assignment.oig_check_at_assignment === 'clear' ? 'text-green-600' : 'text-red-600'}>
-                                      {assignment.oig_check_at_assignment || 'Missing'}
-                                    </span>
-                                  </div>
-                                </div>
-                              </div>
-
-                              {/* End Details (if ended) */}
-                              {!assignment.is_active && (
-                                <div className="bg-red-50 rounded border border-red-100 p-3">
-                                  <p className="text-xs font-semibold text-red-800 uppercase mb-2">Assignment Ended</p>
-                                  <div className="text-xs space-y-1">
-                                    <div className="flex justify-between">
-                                      <span className="text-red-600">Reason:</span>
-                                      <span className="font-medium text-red-800">
-                                        {END_REASONS.find(r => r.value === assignment.end_reason)?.label || assignment.end_reason || 'Not specified'}
-                                      </span>
-                                    </div>
-                                    {assignment.ended_by_name && (
-                                      <div className="flex justify-between">
-                                        <span className="text-red-600">Ended by:</span>
-                                        <span className="font-medium text-red-800">{assignment.ended_by_name}</span>
-                                      </div>
-                                    )}
-                                    {assignment.ended_at && (
-                                      <div className="flex justify-between">
-                                        <span className="text-red-600">Ended on:</span>
-                                        <span className="font-medium text-red-800">{new Date(assignment.ended_at).toLocaleString()}</span>
-                                      </div>
-                                    )}
-                                  </div>
-                                </div>
-                              )}
-
-                              {/* Audit Log */}
-                              {assignment.audit_log.length > 0 && (
-                                <div>
-                                  <p className="text-xs font-semibold text-gray uppercase mb-2">Audit Trail</p>
-                                  <div className="space-y-2">
-                                    {assignment.audit_log.map((entry) => (
-                                      <div key={entry.id} className="flex items-start gap-2 text-xs">
-                                        <div className={`w-2 h-2 rounded-full mt-1 flex-shrink-0 ${
-                                          entry.action === 'created' ? 'bg-green-500' :
-                                          entry.action === 'ended' ? 'bg-red-500' : 'bg-yellow-500'
-                                        }`} />
-                                        <div className="flex-1">
-                                          <p className="text-slate">
-                                            <span className="font-medium capitalize">{entry.action}</span>
-                                            {entry.performed_by_name && ` by ${entry.performed_by_name}`}
-                                          </p>
-                                          <p className="text-gray">{new Date(entry.performed_at).toLocaleString()}</p>
-                                          {entry.notes && <p className="text-gray mt-0.5">Note: {entry.notes}</p>}
-                                        </div>
-                                      </div>
-                                    ))}
-                                  </div>
-                                </div>
-                              )}
-
-                              {/* End Assignment Button (if active) */}
-                              {assignment.is_active && (
-                                <button
-                                  onClick={(e) => {
-                                    e.stopPropagation();
-                                    handleOpenEndModal(assignment);
-                                  }}
-                                  className="w-full py-2 text-sm text-red-600 border border-red-200 rounded-lg hover:bg-red-50 transition-colors"
-                                >
-                                  End Assignment
-                                </button>
-                              )}
-                            </div>
-                          )}
-                        </div>
-                      ))}
-                    </div>
-                  )}
-                </div>
               ) : (
-                /* Overview Tab */
                 <>
-                  {/* Employee Info */}
+                  {/* Basic Info */}
                   <div className="bg-white rounded-lg shadow-sm overflow-hidden">
                     {[
-                      { label: 'Status', value: <Badge variant={statusBadgeVariant[selectedEmployee.status] || 'neutral'}>{selectedEmployee.status}</Badge> },
-                      { label: 'Employee ID', value: selectedEmployee.employee_number || 'Not assigned' },
-                      { label: 'Email', value: selectedEmployee.email || '—' },
-                      { label: 'Department', value: selectedEmployee.department || '—' },
+                      { label: 'Email', value: selectedEmployee.email },
+                      { label: 'Phone', value: selectedEmployee.phone || '—' },
+                      { label: 'Status', value: selectedEmployee.status.charAt(0).toUpperCase() + selectedEmployee.status.slice(1) },
                       { label: 'Hire Date', value: selectedEmployee.hire_date ? formatDate(selectedEmployee.hire_date) : '—' },
+                      { label: 'Location', value: selectedEmployee.location_name || '—' },
                     ].map((row, i, arr) => (
                       <div key={i} className={`grid grid-cols-[110px_1fr] px-4 py-3 items-center ${i < arr.length - 1 ? 'border-b border-gray-100' : ''}`}>
                         <span className="text-xs font-semibold text-navy">{row.label}</span>
@@ -833,58 +579,21 @@ export function EmployeesPage() {
                     ))}
                   </div>
 
-                  {/* Compliance Summary */}
-                  <div className="bg-white rounded-lg shadow-sm p-4 mt-5">
+                  {/* Current Assignments */}
+                  <div className="mt-5">
                     <div className="flex items-center justify-between mb-3">
-                      <span className="text-xs font-semibold text-gray uppercase tracking-wide">Compliance Status</span>
-                      {compliance && (
-                        <Badge variant={compliance.is_compliant ? 'success' : 'error'}>
-                          {compliance.is_compliant ? 'Compliant' : 'Non-Compliant'}
-                        </Badge>
-                      )}
+                      <h3 className="text-sm font-semibold text-navy">Current Clients</h3>
+                      <span className="text-xs text-gray">{activeAssignments.length} assigned</span>
                     </div>
-                    {compliance ? (
-                      <div className="space-y-2">
-                        <div className="flex items-center justify-between">
-                          <span className="text-xs text-gray">Background Check</span>
-                          {compliance.background_check ? (
-                            <span className={`text-xs ${compliance.background_check.status === 'valid' ? 'text-green-600' : 'text-red-600'}`}>
-                              {compliance.background_check.status}
-                            </span>
-                          ) : (
-                            <span className="text-xs text-red-600">Missing</span>
-                          )}
-                        </div>
-                        <div className="flex items-center justify-between">
-                          <span className="text-xs text-gray">OIG Check</span>
-                          {compliance.oig_exclusion_check ? (
-                            <span className={`text-xs ${compliance.oig_exclusion_check.check_result === 'clear' ? 'text-green-600' : 'text-red-600'}`}>
-                              {compliance.oig_exclusion_check.check_result || compliance.oig_exclusion_check.status}
-                            </span>
-                          ) : (
-                            <span className="text-xs text-red-600">Missing</span>
-                          )}
-                        </div>
+                    {activeAssignments.length === 0 ? (
+                      <div className="bg-white rounded-lg shadow-sm p-4 text-center">
+                        <p className="text-sm text-gray">No clients assigned</p>
+                        <p className="text-xs text-gray mt-1">Assign a client to start scheduling</p>
                       </div>
                     ) : (
-                      <p className="text-xs text-gray">No compliance data available</p>
-                    )}
-                  </div>
-
-                  {/* Active Client Assignments */}
-                  <div className="bg-white rounded-lg shadow-sm p-4 mt-5">
-                    <div className="flex items-center justify-between mb-3">
-                      <span className="text-xs font-semibold text-gray uppercase tracking-wide">
-                        Active Clients ({activeAssignments.length})
-                      </span>
-                    </div>
-
-                    {activeAssignments.length === 0 ? (
-                      <p className="text-xs text-gray">No clients assigned</p>
-                    ) : (
-                      <div className="space-y-3">
+                      <div className="space-y-2">
                         {activeAssignments.map((assignment) => (
-                          <div key={assignment.id} className="rounded-lg border border-gray-100 p-3">
+                          <div key={assignment.id} className="bg-white rounded-lg shadow-sm p-3">
                             <div className="flex items-start justify-between">
                               <div>
                                 <p className="text-sm font-medium text-navy">{assignment.client_name}</p>
@@ -892,13 +601,22 @@ export function EmployeesPage() {
                                   Since {assignment.start_date ? formatDate(assignment.start_date) : 'N/A'}
                                 </p>
                               </div>
-                              <button
-                                onClick={() => handleOpenReassignModal(assignment)}
-                                className="text-xs text-maroon hover:underline"
-                                title="Change client"
-                              >
-                                Change
-                              </button>
+                              <div className="flex gap-2">
+                                <button
+                                  onClick={() => handleOpenReassignModal(assignment)}
+                                  className="text-xs text-maroon hover:underline"
+                                  title="Change to different client"
+                                >
+                                  Change
+                                </button>
+                                <button
+                                  onClick={() => handleOpenEndModal(assignment)}
+                                  className="text-xs text-gray hover:text-error hover:underline"
+                                  title="Remove from this client"
+                                >
+                                  Unassign
+                                </button>
+                              </div>
                             </div>
                           </div>
                         ))}
@@ -919,18 +637,72 @@ export function EmployeesPage() {
                     </button>
                     <Link
                       to={`/admin/employee/${selectedEmployee.id}`}
-                      className="py-3 bg-white border border-border text-navy text-sm font-semibold rounded-lg hover:bg-gray-50 transition-colors text-center"
+                      className="py-3 bg-white border border-border text-navy text-sm font-semibold rounded-lg hover:bg-gray-50 transition-colors flex items-center justify-center"
                     >
-                      View Full Profile
+                      Full Profile
                     </Link>
+                  </div>
+
+                  {/* Assignment History Toggle */}
+                  <div className="mt-5">
+                    <button
+                      onClick={() => {
+                        if (!showHistorySection) {
+                          loadAssignmentHistory(selectedEmployee.id);
+                        }
+                        setShowHistorySection(!showHistorySection);
+                      }}
+                      className="w-full py-2 text-sm text-maroon hover:underline flex items-center justify-center gap-1"
+                    >
+                      {showHistorySection ? 'Hide' : 'Show'} Assignment History
+                      <svg className={`h-4 w-4 transition-transform ${showHistorySection ? 'rotate-180' : ''}`} fill="none" viewBox="0 0 24 24" stroke="currentColor">
+                        <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M19 9l-7 7-7-7" />
+                      </svg>
+                    </button>
+
+                    {showHistorySection && (
+                      <div className="mt-3 space-y-2">
+                        {loadingAssignments ? (
+                          <div className="flex justify-center py-4">
+                            <svg className="h-5 w-5 animate-spin text-maroon" fill="none" viewBox="0 0 24 24">
+                              <circle className="opacity-25" cx="12" cy="12" r="10" stroke="currentColor" strokeWidth="4" />
+                              <path className="opacity-75" fill="currentColor" d="M4 12a8 8 0 018-8V0C5.373 0 0 5.373 0 12h4z" />
+                            </svg>
+                          </div>
+                        ) : assignmentHistory.length === 0 ? (
+                          <p className="text-sm text-gray text-center py-4">No assignment history</p>
+                        ) : (
+                          assignmentHistory.map((assignment) => (
+                            <div key={assignment.id} className={`bg-white rounded-lg shadow-sm p-3 ${!assignment.is_active ? 'opacity-60' : ''}`}>
+                              <div className="flex items-start justify-between">
+                                <div>
+                                  <p className="text-sm font-medium text-navy">{assignment.client_name}</p>
+                                  <p className="text-xs text-gray mt-0.5">
+                                    {assignment.start_date ? formatDate(assignment.start_date) : 'N/A'}
+                                    {assignment.end_date && ` — ${formatDate(assignment.end_date)}`}
+                                  </p>
+                                </div>
+                                <span className={`text-xs px-2 py-0.5 rounded-full ${assignment.is_active ? 'bg-success/10 text-success' : 'bg-gray-100 text-gray'}`}>
+                                  {assignment.is_active ? 'Active' : 'Ended'}
+                                </span>
+                              </div>
+                              {!assignment.is_active && assignment.end_reason && (
+                                <p className="text-xs text-gray mt-2 pt-2 border-t border-gray-100">
+                                  Reason: {END_REASONS.find(r => r.value === assignment.end_reason)?.label || assignment.end_reason || 'Not specified'}
+                                </p>
+                              )}
+                            </div>
+                          ))
+                        )}
+                      </div>
+                    )}
                   </div>
                 </>
               )}
             </div>
 
-            {/* Footer */}
             <div className="px-6 py-3 border-t border-gray-100 bg-white flex-shrink-0">
-              <p className="text-[10px] text-gray-400 text-center">Powered by MediVault</p>
+              <p className="text-[10px] text-gray-400 text-center">Powered by MediSVault</p>
             </div>
           </div>
         </>
@@ -1008,55 +780,51 @@ export function EmployeesPage() {
                       const name = client.nickname || `${client.first_name || ''} ${client.last_name || ''}`.trim() || 'Unknown';
                       const isAssigned = assignedClientIds.has(client.id);
                       const isCurrentClient = reassigningFrom?.client_id === client.id;
+
                       return (
                         <button
                           key={client.id}
-                          type="button"
+                          onClick={() => !isAssigned && !isCurrentClient && setSelectedClientId(client.id)}
                           disabled={isAssigned || isCurrentClient}
-                          onClick={() => setSelectedClientId(client.id)}
-                          className={`w-full flex items-center justify-between p-3 text-left border-b border-border last:border-0 transition-colors ${
+                          className={`w-full text-left px-3 py-2.5 border-b border-border last:border-b-0 flex items-center justify-between transition-colors ${
                             selectedClientId === client.id
-                              ? 'bg-maroon/10'
+                              ? 'bg-maroon/5 border-l-2 border-l-maroon'
                               : isAssigned || isCurrentClient
-                              ? 'bg-gray-50 opacity-50 cursor-not-allowed'
-                              : 'hover:bg-gray-50'
+                                ? 'bg-gray-50 cursor-not-allowed opacity-60'
+                                : 'hover:bg-gray-50 cursor-pointer'
                           }`}
                         >
                           <div>
-                            <p className="text-sm font-medium text-slate">{name}</p>
+                            <p className="text-sm font-medium text-navy">{name}</p>
                             <p className="text-xs text-gray capitalize">{client.status}</p>
                           </div>
-                          {isCurrentClient ? (
-                            <Badge variant="warning" className="text-xs">Current</Badge>
-                          ) : isAssigned ? (
-                            <Badge variant="neutral" className="text-xs">Already assigned</Badge>
-                          ) : selectedClientId === client.id ? (
-                            <svg className="h-5 w-5 text-maroon" fill="none" viewBox="0 0 24 24" stroke="currentColor">
-                              <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M5 13l4 4L19 7" />
-                            </svg>
-                          ) : null}
+                          {isCurrentClient && (
+                            <span className="text-xs text-warning">Current</span>
+                          )}
+                          {isAssigned && !isCurrentClient && (
+                            <span className="text-xs text-gray">Already assigned</span>
+                          )}
                         </button>
                       );
                     })
                   )}
                 </div>
-
-                {clientTotalPages > 1 && (
-                  <div className="flex items-center justify-between border-t border-border px-3 py-2 bg-gray-50">
-                    <p className="text-xs text-gray">Page {clientPage} of {clientTotalPages}</p>
+                {clientTotal > clientPageSize && (
+                  <div className="flex items-center justify-between px-3 py-2 border-t border-border bg-gray-50">
+                    <span className="text-xs text-gray">
+                      Page {clientPage} of {Math.ceil(clientTotal / clientPageSize)}
+                    </span>
                     <div className="flex gap-1">
                       <button
-                        type="button"
+                        onClick={() => setClientPage(p => Math.max(1, p - 1))}
                         disabled={clientPage === 1}
-                        onClick={() => setClientPage((p) => p - 1)}
                         className="px-2 py-1 text-xs rounded border border-border bg-white disabled:opacity-50 disabled:cursor-not-allowed hover:bg-gray-50"
                       >
                         Prev
                       </button>
                       <button
-                        type="button"
-                        disabled={clientPage === clientTotalPages}
-                        onClick={() => setClientPage((p) => p + 1)}
+                        onClick={() => setClientPage(p => p + 1)}
+                        disabled={clientPage >= Math.ceil(clientTotal / clientPageSize)}
                         className="px-2 py-1 text-xs rounded border border-border bg-white disabled:opacity-50 disabled:cursor-not-allowed hover:bg-gray-50"
                       >
                         Next
@@ -1094,7 +862,7 @@ export function EmployeesPage() {
       </Modal>
 
       {/* End Assignment Modal */}
-      <Modal isOpen={showEndModal} onClose={() => setShowEndModal(false)} title="End Assignment">
+      <Modal isOpen={showEndModal} onClose={() => setShowEndModal(false)} title="Unassign from Client">
         <div className="space-y-4">
           {endingAssignment && (
             <div className="bg-gray-50 rounded-lg p-3">
@@ -1104,6 +872,10 @@ export function EmployeesPage() {
               </p>
             </div>
           )}
+
+          <p className="text-sm text-gray">
+            This will remove the employee from this client. They will appear in the "Employees Needing Clients" queue on the dashboard.
+          </p>
 
           <div>
             <label className="mb-1.5 block text-sm font-medium text-slate">Reason for Ending *</label>
