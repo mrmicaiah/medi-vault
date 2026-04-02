@@ -57,7 +57,7 @@ export function Sidebar() {
               cn(
                 'flex items-center gap-3 rounded-lg px-3 py-2.5 text-sm font-medium transition-colors',
                 isActive
-                  ? 'bg-teal text-white'
+                  ? 'bg-maroon text-white'
                   : 'text-gray-300 hover:bg-navy-light hover:text-white'
               )
             }
