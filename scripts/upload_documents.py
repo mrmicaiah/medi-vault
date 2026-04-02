@@ -2,11 +2,13 @@
 Document Upload Script
 ======================
 Uploads documents from a local folder to Supabase Storage and updates application steps.
+Optimizes images to reduce file size while maintaining readability.
 
 Prerequisites:
     1. Run migrate_quickbase_users.py first (creates users + applications)
     2. Download attachments from Quickbase into a folder
     3. Have file_matching.csv (maps files to applicants)
+    4. Install Pillow: pip install Pillow
 
 Usage:
     python scripts/upload_documents.py --folder ./quickbase_files
@@ -20,14 +22,24 @@ Options:
 from __future__ import annotations
 
 import csv
+import io
 import mimetypes
 import os
 import sys
 from pathlib import Path
-from typing import Optional, Dict, Tuple
+from typing import Optional, Tuple
 
 from dotenv import load_dotenv
 from supabase import create_client, Client
+
+# Try to import Pillow for image optimization
+try:
+    from PIL import Image
+    PILLOW_AVAILABLE = True
+except ImportError:
+    PILLOW_AVAILABLE = False
+    print("⚠️  Pillow not installed. Images will not be optimized.")
+    print("   Install with: pip install Pillow\n")
 
 load_dotenv()
 
@@ -38,6 +50,11 @@ load_dotenv()
 FILE_MATCHING_CSV = "scripts/file_matching.csv"
 DRY_RUN = "--dry-run" in sys.argv
 LIMIT = None
+
+# Image optimization settings
+MAX_IMAGE_WIDTH = 1500
+MAX_IMAGE_HEIGHT = 1500
+JPEG_QUALITY = 85
 
 # Parse arguments
 FOLDER_PATH = None
@@ -57,6 +74,9 @@ STEP_DOC_TYPES = {
     16: "cpr_certification",
     17: "tb_test",
 }
+
+# Image extensions that should be optimized
+IMAGE_EXTENSIONS = {'.jpg', '.jpeg', '.png', '.webp', '.heic', '.heif', '.bmp', '.tiff', '.tif'}
 
 
 # ============================================================================
@@ -85,6 +105,96 @@ def find_file(folder: Path, filename: str) -> Optional[Path]:
     return None
 
 
+def optimize_image(file_path: Path) -> Tuple[bytes, str, str]:
+    """
+    Optimize an image file: resize if needed, convert to JPEG, compress.
+    
+    Returns:
+        Tuple of (file_bytes, new_filename, content_type)
+    """
+    if not PILLOW_AVAILABLE:
+        # No optimization, just return original
+        with open(file_path, 'rb') as f:
+            return f.read(), file_path.name, get_content_type(file_path.name)
+    
+    try:
+        # Open image
+        img = Image.open(file_path)
+        
+        # Convert to RGB if necessary (for JPEG output)
+        if img.mode in ('RGBA', 'P', 'LA'):
+            # Create white background for transparent images
+            background = Image.new('RGB', img.size, (255, 255, 255))
+            if img.mode == 'P':
+                img = img.convert('RGBA')
+            background.paste(img, mask=img.split()[-1] if img.mode == 'RGBA' else None)
+            img = background
+        elif img.mode != 'RGB':
+            img = img.convert('RGB')
+        
+        # Auto-rotate based on EXIF orientation
+        try:
+            from PIL import ExifTags
+            for orientation in ExifTags.TAGS.keys():
+                if ExifTags.TAGS[orientation] == 'Orientation':
+                    break
+            exif = img._getexif()
+            if exif is not None:
+                orientation_value = exif.get(orientation)
+                if orientation_value == 3:
+                    img = img.rotate(180, expand=True)
+                elif orientation_value == 6:
+                    img = img.rotate(270, expand=True)
+                elif orientation_value == 8:
+                    img = img.rotate(90, expand=True)
+        except (AttributeError, KeyError, IndexError):
+            pass  # No EXIF data
+        
+        # Resize if larger than max dimensions
+        original_size = img.size
+        if img.width > MAX_IMAGE_WIDTH or img.height > MAX_IMAGE_HEIGHT:
+            img.thumbnail((MAX_IMAGE_WIDTH, MAX_IMAGE_HEIGHT), Image.LANCZOS)
+        
+        # Save to JPEG bytes
+        buffer = io.BytesIO()
+        img.save(buffer, format='JPEG', quality=JPEG_QUALITY, optimize=True)
+        file_bytes = buffer.getvalue()
+        
+        # New filename with .jpg extension
+        new_filename = file_path.stem + '.jpg'
+        
+        return file_bytes, new_filename, 'image/jpeg'
+        
+    except Exception as e:
+        print("    ⚠️  Optimization failed: {}".format(e))
+        # Fall back to original file
+        with open(file_path, 'rb') as f:
+            return f.read(), file_path.name, get_content_type(file_path.name)
+
+
+def process_file(file_path: Path) -> Tuple[bytes, str, str]:
+    """
+    Process a file for upload. Optimizes images, passes through PDFs.
+    
+    Returns:
+        Tuple of (file_bytes, filename, content_type)
+    """
+    extension = file_path.suffix.lower()
+    
+    # PDFs - no processing needed
+    if extension == '.pdf':
+        with open(file_path, 'rb') as f:
+            return f.read(), file_path.name, 'application/pdf'
+    
+    # Images - optimize
+    if extension in IMAGE_EXTENSIONS:
+        return optimize_image(file_path)
+    
+    # Other files - pass through
+    with open(file_path, 'rb') as f:
+        return f.read(), file_path.name, get_content_type(file_path.name)
+
+
 def get_user_and_application(supabase: Client, email: str) -> Optional[Tuple[str, str]]:
     """Look up user_id and application_id by email."""
     # Get profile
@@ -104,16 +214,12 @@ def get_user_and_application(supabase: Client, email: str) -> Optional[Tuple[str
     return user_id, application_id
 
 
-def upload_file(supabase: Client, user_id: str, file_path: Path, doc_type: str) -> Optional[str]:
+def upload_file(supabase: Client, user_id: str, file_bytes: bytes, filename: str, 
+                content_type: str, doc_type: str) -> Optional[str]:
     """Upload file to Supabase Storage and return storage path."""
-    storage_path = "{}/{}/{}".format(user_id, doc_type, file_path.name)
+    storage_path = "{}/{}/{}".format(user_id, doc_type, filename)
     
     try:
-        with open(file_path, "rb") as f:
-            file_bytes = f.read()
-        
-        content_type = get_content_type(file_path.name)
-        
         # Upload to storage
         supabase.storage.from_("documents").upload(
             storage_path,
@@ -168,6 +274,16 @@ def update_application_step(supabase: Client, application_id: str, step_number: 
         return False
 
 
+def format_size(size_bytes: int) -> str:
+    """Format bytes as human-readable string."""
+    if size_bytes < 1024:
+        return "{}B".format(size_bytes)
+    elif size_bytes < 1024 * 1024:
+        return "{:.1f}KB".format(size_bytes / 1024)
+    else:
+        return "{:.1f}MB".format(size_bytes / (1024 * 1024))
+
+
 # ============================================================================
 # MAIN
 # ============================================================================
@@ -179,6 +295,10 @@ def main():
     
     if DRY_RUN:
         print("🔍 DRY RUN MODE - No changes will be made\n")
+    
+    if PILLOW_AVAILABLE:
+        print("🖼️  Image optimization: ENABLED")
+        print("   Max size: {}x{}, Quality: {}%\n".format(MAX_IMAGE_WIDTH, MAX_IMAGE_HEIGHT, JPEG_QUALITY))
     
     # Validate environment
     SUPABASE_URL = os.getenv("SUPABASE_URL")
@@ -232,6 +352,8 @@ def main():
     
     # Process
     results = {"uploaded": 0, "not_found": 0, "failed": 0, "skipped": 0}
+    total_original_size = 0
+    total_optimized_size = 0
     user_cache = {}  # Cache email -> (user_id, app_id)
     
     for i, row in enumerate(rows, 1):
@@ -262,18 +384,31 @@ def main():
         
         user_id, application_id = user_app
         
+        # Process file (optimize if image)
+        original_size = file_path.stat().st_size
+        total_original_size += original_size
+        
+        file_bytes, new_filename, content_type = process_file(file_path)
+        optimized_size = len(file_bytes)
+        total_optimized_size += optimized_size
+        
+        size_info = "{} → {}".format(format_size(original_size), format_size(optimized_size))
+        if optimized_size < original_size:
+            savings = (1 - optimized_size / original_size) * 100
+            size_info += " (-{:.0f}%)".format(savings)
+        
         if DRY_RUN:
-            print("  🔍 Would upload to {}.../{}/".format(user_id[:8], doc_type))
+            print("  🔍 Would upload {} to {}.../{}/".format(size_info, user_id[:8], doc_type))
             results["uploaded"] += 1
             continue
         
         # Upload file
         try:
-            storage_path = upload_file(supabase, user_id, file_path, doc_type)
-            print("  ✅ Uploaded: {}".format(storage_path))
+            storage_path = upload_file(supabase, user_id, file_bytes, new_filename, content_type, doc_type)
+            print("  ✅ Uploaded: {} ({})".format(new_filename, size_info))
             
             # Update step
-            if update_application_step(supabase, application_id, step_number, storage_path, filename):
+            if update_application_step(supabase, application_id, step_number, storage_path, new_filename):
                 print("  ✅ Step {} updated".format(step_number))
             
             results["uploaded"] += 1
@@ -290,6 +425,14 @@ def main():
     print("⚠️  Not found in folder: {}".format(results['not_found']))
     print("⏭️  User not found: {}".format(results['skipped']))
     print("❌ Failed: {}".format(results['failed']))
+    
+    if total_original_size > 0:
+        print("\n📊 Storage savings:")
+        print("   Original: {}".format(format_size(total_original_size)))
+        print("   Optimized: {}".format(format_size(total_optimized_size)))
+        savings = (1 - total_optimized_size / total_original_size) * 100
+        print("   Saved: {:.0f}%".format(savings))
+    
     print()
 
 
