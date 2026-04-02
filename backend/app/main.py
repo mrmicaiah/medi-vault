@@ -20,6 +20,7 @@ from .routers import (
     agencies,
     assignments,
     transfers,
+    superadmin,
 )
 
 # Configure logging
@@ -29,7 +30,7 @@ logger = logging.getLogger(__name__)
 app = FastAPI(
     title="MediVault API",
     description="Healthcare applicant tracking and compliance management",
-    version="1.0.7",
+    version="1.0.8",
 )
 
 # CORS configuration
@@ -66,17 +67,18 @@ app.include_router(invitations.router)
 app.include_router(agencies.router)
 app.include_router(assignments.router)
 app.include_router(transfers.router)
+app.include_router(superadmin.router)
 
 
 @app.get("/")
 async def root():
     return {
         "name": "MediVault API",
-        "version": "1.0.7",
+        "version": "1.0.8",
         "status": "running"
     }
 
 
 @app.get("/health")
 async def health_check():
-    return {"status": "healthy", "version": "1.0.7"}
+    return {"status": "healthy", "version": "1.0.8"}
