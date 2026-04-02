@@ -1,7 +1,6 @@
 import { useState, useEffect, useMemo } from 'react';
 import { Link } from 'react-router-dom';
 import { api } from '../../lib/api';
-import { Card } from '../../components/ui/Card';
 import { Badge } from '../../components/ui/Badge';
 import { Button } from '../../components/ui/Button';
 import { Input } from '../../components/ui/Input';
@@ -84,9 +83,10 @@ export default function ClientsPage() {
   const [newClientName, setNewClientName] = useState('');
   const [adding, setAdding] = useState(false);
 
-  // Selected client slide-in panel
+  // Slide-out panel state (matching ApplicantsPage pattern)
   const [selectedClient, setSelectedClient] = useState<ClientDetail | null>(null);
   const [loadingDetail, setLoadingDetail] = useState(false);
+  const [panelOpen, setPanelOpen] = useState(false);
   
   // Compliance data for assigned employees
   const [employeeCompliance, setEmployeeCompliance] = useState<Record<string, ComplianceSummary>>({});
@@ -113,7 +113,7 @@ export default function ClientsPage() {
   useEffect(() => {
     const timer = setTimeout(() => {
       setEmployeeSearchDebounced(employeeSearch);
-      setEmployeePage(1); // Reset to first page on new search
+      setEmployeePage(1);
     }, 300);
     return () => clearTimeout(timer);
   }, [employeeSearch]);
@@ -152,10 +152,13 @@ export default function ClientsPage() {
     }
   }
 
-  async function loadClientDetail(clientId: string) {
+  async function selectClient(client: Client) {
+    setPanelOpen(true);
+    setLoadingDetail(true);
+    setEmployeeCompliance({});
+    
     try {
-      setLoadingDetail(true);
-      const data = await api.get<ClientDetail>(`/clients/${clientId}`);
+      const data = await api.get<ClientDetail>(`/clients/${client.id}`);
       setSelectedClient(data);
       
       // Load compliance for each assigned employee
@@ -176,6 +179,14 @@ export default function ClientsPage() {
     } finally {
       setLoadingDetail(false);
     }
+  }
+
+  function closePanel() {
+    setPanelOpen(false);
+    setEmployeeCompliance({});
+    setTimeout(() => {
+      setSelectedClient(null);
+    }, 250);
   }
 
   async function loadEmployees() {
@@ -221,10 +232,6 @@ export default function ClientsPage() {
     }
   }
 
-  function handleSelectClient(client: Client) {
-    loadClientDetail(client.id);
-  }
-
   function handleOpenAssignModal() {
     setShowAssignModal(true);
     setSelectedEmployeeId('');
@@ -248,8 +255,8 @@ export default function ClientsPage() {
       });
       setShowAssignModal(false);
       // Reload client detail to show new assignment
-      loadClientDetail(selectedClient.id);
-      loadClients(); // Refresh list to update assignment count
+      selectClient(selectedClient);
+      loadClients();
     } catch (err) {
       setError(err instanceof Error ? err.message : 'Failed to assign caregiver');
     } finally {
@@ -300,381 +307,275 @@ export default function ClientsPage() {
         </Alert>
       )}
 
-      <div className="grid grid-cols-1 gap-6 lg:grid-cols-3">
-        {/* Main content - client list */}
-        <div className={selectedClient ? 'lg:col-span-2' : 'lg:col-span-3'}>
-          <Card padding="none">
-            {/* Filters */}
-            <div className="border-b border-border p-4">
-              <div className="flex flex-col gap-4 sm:flex-row sm:items-center sm:justify-between">
-                <form onSubmit={handleSearch} className="w-full sm:max-w-xs">
-                  <Input
-                    placeholder="Search clients..."
-                    value={search}
-                    onChange={(e) => setSearch(e.target.value)}
-                  />
-                </form>
-                <div className="flex gap-2">
-                  {['all', 'active', 'inactive', 'discharged'].map((s) => (
-                    <button
-                      key={s}
-                      onClick={() => {
-                        setStatusFilter(s);
-                        setPage(1);
-                      }}
-                      className={`rounded-lg border px-3 py-1.5 text-xs font-medium transition-colors ${
-                        statusFilter === s
-                          ? 'border-maroon bg-maroon-subtle text-maroon'
-                          : 'border-border text-gray hover:bg-gray-50'
-                      }`}
-                    >
-                      {s.charAt(0).toUpperCase() + s.slice(1)}
-                    </button>
-                  ))}
-                </div>
-              </div>
-            </div>
-
-            {/* Table */}
-            {loading ? (
-              <div className="flex h-64 items-center justify-center">
-                <svg
-                  className="h-8 w-8 animate-spin text-maroon"
-                  fill="none"
-                  viewBox="0 0 24 24"
-                >
-                  <circle
-                    className="opacity-25"
-                    cx="12"
-                    cy="12"
-                    r="10"
-                    stroke="currentColor"
-                    strokeWidth="4"
-                  />
-                  <path
-                    className="opacity-75"
-                    fill="currentColor"
-                    d="M4 12a8 8 0 018-8V0C5.373 0 0 5.373 0 12h4zm2 5.291A7.962 7.962 0 014 12H0c0 3.042 1.135 5.824 3 7.938l3-2.647z"
-                  />
-                </svg>
-              </div>
-            ) : filteredClients.length === 0 ? (
-              <div className="flex h-64 flex-col items-center justify-center text-center">
-                <svg
-                  className="h-12 w-12 text-gray-300"
-                  fill="none"
-                  viewBox="0 0 24 24"
-                  stroke="currentColor"
-                >
-                  <path
-                    strokeLinecap="round"
-                    strokeLinejoin="round"
-                    strokeWidth={1.5}
-                    d="M17 20h5v-2a3 3 0 00-5.356-1.857M17 20H7m10 0v-2c0-.656-.126-1.283-.356-1.857M7 20H2v-2a3 3 0 015.356-1.857M7 20v-2c0-.656.126-1.283.356-1.857m0 0a5.002 5.002 0 019.288 0M15 7a3 3 0 11-6 0 3 3 0 016 0zm6 3a2 2 0 11-4 0 2 2 0 014 0zM7 10a2 2 0 11-4 0 2 2 0 014 0z"
-                  />
-                </svg>
-                <p className="mt-3 text-sm text-gray">No clients found</p>
-                <Button
-                  variant="secondary"
-                  size="sm"
-                  className="mt-4"
-                  onClick={() => setShowAddModal(true)}
-                >
-                  Add your first client
-                </Button>
-              </div>
-            ) : (
-              <div className="overflow-x-auto">
-                <table className="w-full">
-                  <thead>
-                    <tr className="border-b border-border bg-gray-50/50">
-                      <th className="px-4 py-3 text-left text-xs font-medium uppercase text-gray">
-                        Client
-                      </th>
-                      <th className="px-4 py-3 text-left text-xs font-medium uppercase text-gray">
-                        Location
-                      </th>
-                      <th className="px-4 py-3 text-left text-xs font-medium uppercase text-gray">
-                        Status
-                      </th>
-                      <th className="px-4 py-3 text-left text-xs font-medium uppercase text-gray">
-                        Caregivers
-                      </th>
-                      <th className="px-4 py-3 text-right text-xs font-medium uppercase text-gray">
-                        Actions
-                      </th>
-                    </tr>
-                  </thead>
-                  <tbody>
-                    {filteredClients.map((client) => (
-                      <tr
-                        key={client.id}
-                        className={`cursor-pointer border-b border-border last:border-0 hover:bg-gray-50/50 ${
-                          selectedClient?.id === client.id ? 'bg-maroon/5' : ''
-                        }`}
-                        onClick={() => handleSelectClient(client)}
-                      >
-                        <td className="px-4 py-3">
-                          <p className="text-sm font-medium text-slate">{client.nickname}</p>
-                          {(client.first_name || client.last_name) && (
-                            <p className="text-xs text-gray">
-                              {client.first_name} {client.last_name}
-                            </p>
-                          )}
-                        </td>
-                        <td className="px-4 py-3 text-sm text-gray">
-                          {client.location_name || '—'}
-                        </td>
-                        <td className="px-4 py-3">
-                          <Badge variant={statusBadgeVariant[client.status] || 'neutral'}>
-                            {client.status}
-                          </Badge>
-                        </td>
-                        <td className="px-4 py-3">
-                          {client.active_assignments > 0 ? (
-                            <span className="text-sm text-slate">
-                              {client.active_assignments} assigned
-                            </span>
-                          ) : (
-                            <span className="text-xs text-gray">None</span>
-                          )}
-                        </td>
-                        <td className="px-4 py-3 text-right">
-                          <Button
-                            variant="ghost"
-                            size="sm"
-                            onClick={(e) => {
-                              e.stopPropagation();
-                              handleSelectClient(client);
-                            }}
-                          >
-                            View
-                          </Button>
-                        </td>
-                      </tr>
-                    ))}
-                  </tbody>
-                </table>
-              </div>
-            )}
-
-            {/* Pagination */}
-            {totalPages > 1 && (
-              <div className="flex items-center justify-between border-t border-border px-4 py-3">
-                <p className="text-sm text-gray">
-                  Showing {(page - 1) * pageSize + 1}–
-                  {Math.min(page * pageSize, total)} of {total}
-                </p>
-                <div className="flex gap-2">
-                  <Button
-                    variant="secondary"
-                    size="sm"
-                    disabled={page === 1}
-                    onClick={() => setPage((p) => p - 1)}
-                  >
-                    Previous
-                  </Button>
-                  <Button
-                    variant="secondary"
-                    size="sm"
-                    disabled={page === totalPages}
-                    onClick={() => setPage((p) => p + 1)}
-                  >
-                    Next
-                  </Button>
-                </div>
-              </div>
-            )}
-          </Card>
+      {/* Filters */}
+      <div className="flex flex-wrap items-center gap-3">
+        <form onSubmit={handleSearch} className="w-full sm:max-w-xs">
+          <Input
+            placeholder="Search clients..."
+            value={search}
+            onChange={(e) => setSearch(e.target.value)}
+          />
+        </form>
+        <div className="flex gap-2">
+          {['all', 'active', 'inactive', 'discharged'].map((s) => (
+            <button
+              key={s}
+              onClick={() => {
+                setStatusFilter(s);
+                setPage(1);
+              }}
+              className={`rounded-lg border px-3 py-1.5 text-xs font-medium transition-colors ${
+                statusFilter === s
+                  ? 'border-maroon bg-maroon-subtle text-maroon'
+                  : 'border-border text-gray hover:bg-gray-50'
+              }`}
+            >
+              {s.charAt(0).toUpperCase() + s.slice(1)}
+            </button>
+          ))}
         </div>
+      </div>
 
-        {/* Slide-in panel for selected client */}
-        {selectedClient && (
-          <div className="lg:col-span-1">
-            <Card>
-              <div className="flex items-start justify-between">
-                <div>
-                  <h2 className="font-display text-lg font-semibold text-navy">
-                    {selectedClient.nickname}
-                  </h2>
-                  {(selectedClient.first_name || selectedClient.last_name) && (
-                    <p className="text-sm text-gray">
-                      {selectedClient.first_name} {selectedClient.last_name}
-                    </p>
-                  )}
-                </div>
-                <button
-                  onClick={() => {
-                    setSelectedClient(null);
-                    setEmployeeCompliance({});
-                  }}
-                  className="rounded-lg p-1 text-gray hover:bg-gray-100"
+      {/* Clients Table */}
+      <div className="bg-white rounded-xl border border-border overflow-hidden">
+        <table className="w-full">
+          <thead className="bg-gray-50 border-b border-border">
+            <tr>
+              <th className="text-left text-xs font-semibold text-gray uppercase tracking-wider px-6 py-3">Client</th>
+              <th className="text-left text-xs font-semibold text-gray uppercase tracking-wider px-6 py-3">Location</th>
+              <th className="text-left text-xs font-semibold text-gray uppercase tracking-wider px-6 py-3">Status</th>
+              <th className="text-left text-xs font-semibold text-gray uppercase tracking-wider px-6 py-3">Caregivers</th>
+            </tr>
+          </thead>
+          <tbody className="divide-y divide-border">
+            {loading ? (
+              <tr>
+                <td colSpan={4} className="px-6 py-12 text-center">
+                  <svg className="h-8 w-8 animate-spin text-maroon mx-auto" fill="none" viewBox="0 0 24 24">
+                    <circle className="opacity-25" cx="12" cy="12" r="10" stroke="currentColor" strokeWidth="4" />
+                    <path className="opacity-75" fill="currentColor" d="M4 12a8 8 0 018-8V0C5.373 0 0 5.373 0 12h4zm2 5.291A7.962 7.962 0 014 12H0c0 3.042 1.135 5.824 3 7.938l3-2.647z" />
+                  </svg>
+                </td>
+              </tr>
+            ) : filteredClients.length === 0 ? (
+              <tr>
+                <td colSpan={4} className="px-6 py-12 text-center text-gray">
+                  {clients.length === 0 ? 'No clients yet' : 'No clients match the current filters'}
+                </td>
+              </tr>
+            ) : (
+              filteredClients.map((client) => (
+                <tr
+                  key={client.id}
+                  onClick={() => selectClient(client)}
+                  className="hover:bg-gray-50 cursor-pointer transition-colors"
                 >
-                  <svg className="h-5 w-5" fill="none" viewBox="0 0 24 24" stroke="currentColor">
-                    <path
-                      strokeLinecap="round"
-                      strokeLinejoin="round"
-                      strokeWidth={2}
-                      d="M6 18L18 6M6 6l12 12"
-                    />
-                  </svg>
-                </button>
-              </div>
+                  <td className="px-6 py-4">
+                    <p className="text-sm font-semibold text-navy">{client.nickname}</p>
+                    {(client.first_name || client.last_name) && (
+                      <p className="text-xs text-gray">
+                        {client.first_name} {client.last_name}
+                      </p>
+                    )}
+                  </td>
+                  <td className="px-6 py-4 text-sm text-slate">
+                    {client.location_name || '—'}
+                  </td>
+                  <td className="px-6 py-4">
+                    <Badge variant={statusBadgeVariant[client.status] || 'neutral'}>
+                      {client.status}
+                    </Badge>
+                  </td>
+                  <td className="px-6 py-4">
+                    {client.active_assignments > 0 ? (
+                      <span className="text-sm text-slate">
+                        {client.active_assignments} assigned
+                      </span>
+                    ) : (
+                      <span className="text-xs text-gray">None</span>
+                    )}
+                  </td>
+                </tr>
+              ))
+            )}
+          </tbody>
+        </table>
 
-              <div className="mt-4 space-y-4">
-                <div className="flex items-center justify-between">
-                  <span className="text-sm text-gray">Status</span>
-                  <Badge variant={statusBadgeVariant[selectedClient.status] || 'neutral'}>
-                    {selectedClient.status}
-                  </Badge>
-                </div>
-
-                <div className="flex items-center justify-between">
-                  <span className="text-sm text-gray">Location</span>
-                  <span className="text-sm text-slate">
-                    {selectedClient.location_name || 'Not assigned'}
-                  </span>
-                </div>
-
-                {selectedClient.created_at && (
-                  <div className="flex items-center justify-between">
-                    <span className="text-sm text-gray">Added</span>
-                    <span className="text-sm text-slate">
-                      {formatDate(selectedClient.created_at)}
-                    </span>
-                  </div>
-                )}
-              </div>
-
-              {/* Assigned Caregivers with Compliance */}
-              <div className="mt-6 pt-6 border-t border-border">
-                <h3 className="text-sm font-medium text-slate mb-3">
-                  Assigned Caregivers ({selectedClient.assignments.filter(a => a.is_active).length})
-                </h3>
-                
-                {loadingDetail ? (
-                  <div className="flex justify-center py-4">
-                    <svg className="h-5 w-5 animate-spin text-maroon" fill="none" viewBox="0 0 24 24">
-                      <circle className="opacity-25" cx="12" cy="12" r="10" stroke="currentColor" strokeWidth="4" />
-                      <path className="opacity-75" fill="currentColor" d="M4 12a8 8 0 018-8V0C5.373 0 0 5.373 0 12h4z" />
-                    </svg>
-                  </div>
-                ) : selectedClient.assignments.filter(a => a.is_active).length === 0 ? (
-                  <p className="text-xs text-gray">No caregivers assigned</p>
-                ) : (
-                  <div className="space-y-3">
-                    {selectedClient.assignments
-                      .filter(a => a.is_active)
-                      .map((assignment) => {
-                        const compliance = employeeCompliance[assignment.employee_id];
-                        return (
-                          <div key={assignment.assignment_id} className="rounded-lg border border-border p-3">
-                            <div className="flex items-start justify-between">
-                              <div>
-                                <Link 
-                                  to={`/admin/employee/${assignment.employee_id}`}
-                                  className="text-sm font-medium text-slate hover:text-maroon"
-                                >
-                                  {assignment.employee_name}
-                                </Link>
-                                {assignment.employee_number && (
-                                  <p className="text-xs text-gray">{assignment.employee_number}</p>
-                                )}
-                                <p className="text-xs text-gray mt-0.5">
-                                  Since {formatDate(assignment.start_date)}
-                                </p>
-                              </div>
-                              {compliance && (
-                                <Badge 
-                                  variant={compliance.is_compliant ? 'success' : 'error'}
-                                  className="text-xs"
-                                >
-                                  {compliance.is_compliant ? 'Compliant' : 'Non-Compliant'}
-                                </Badge>
-                              )}
-                            </div>
-                            
-                            {/* Compliance Details */}
-                            {compliance && (
-                              <div className="mt-2 pt-2 border-t border-border space-y-1">
-                                <div className="flex items-center justify-between">
-                                  <span className="text-xs text-gray">Background</span>
-                                  {compliance.background_check ? (
-                                    <span className={`text-xs ${compliance.background_check.status === 'valid' ? 'text-green-600' : 'text-red-600'}`}>
-                                      {compliance.background_check.status}
-                                    </span>
-                                  ) : (
-                                    <span className="text-xs text-red-600">Missing</span>
-                                  )}
-                                </div>
-                                <div className="flex items-center justify-between">
-                                  <span className="text-xs text-gray">OIG Check</span>
-                                  {compliance.oig_exclusion_check ? (
-                                    <span className={`text-xs ${compliance.oig_exclusion_check.check_result === 'clear' ? 'text-green-600' : 'text-red-600'}`}>
-                                      {compliance.oig_exclusion_check.check_result || compliance.oig_exclusion_check.status}
-                                    </span>
-                                  ) : (
-                                    <span className="text-xs text-red-600">Missing</span>
-                                  )}
-                                </div>
-                                {compliance.alerts.length > 0 && (
-                                  <div className="mt-1">
-                                    {compliance.alerts.slice(0, 2).map((alert, i) => (
-                                      <p key={i} className="text-xs text-warning flex items-center gap-1">
-                                        <svg className="h-3 w-3 flex-shrink-0" fill="none" viewBox="0 0 24 24" stroke="currentColor">
-                                          <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M12 9v2m0 4h.01m-6.938 4h13.856c1.54 0 2.502-1.667 1.732-3L13.732 4c-.77-1.333-2.694-1.333-3.464 0L3.34 16c-.77 1.333.192 3 1.732 3z" />
-                                        </svg>
-                                        <span className="truncate">{alert}</span>
-                                      </p>
-                                    ))}
-                                  </div>
-                                )}
-                              </div>
-                            )}
-                          </div>
-                        );
-                      })}
-                  </div>
-                )}
-              </div>
-
-              <div className="mt-6 space-y-2">
-                <Button variant="secondary" className="w-full" onClick={handleOpenAssignModal}>
-                  <svg
-                    className="mr-2 h-4 w-4"
-                    fill="none"
-                    viewBox="0 0 24 24"
-                    stroke="currentColor"
-                  >
-                    <path
-                      strokeLinecap="round"
-                      strokeLinejoin="round"
-                      strokeWidth={2}
-                      d="M18 9v3m0 0v3m0-3h3m-3 0h-3m-2-5a4 4 0 11-8 0 4 4 0 018 0zM3 20a6 6 0 0112 0v1H3v-1z"
-                    />
-                  </svg>
-                  Assign Caregiver
-                </Button>
-                <Button variant="ghost" className="w-full">
-                  Edit Details
-                </Button>
-              </div>
-            </Card>
+        {/* Pagination */}
+        {totalPages > 1 && (
+          <div className="flex items-center justify-between border-t border-border px-4 py-3">
+            <p className="text-sm text-gray">
+              Showing {(page - 1) * pageSize + 1}–{Math.min(page * pageSize, total)} of {total}
+            </p>
+            <div className="flex gap-2">
+              <Button variant="secondary" size="sm" disabled={page === 1} onClick={() => setPage((p) => p - 1)}>
+                Previous
+              </Button>
+              <Button variant="secondary" size="sm" disabled={page === totalPages} onClick={() => setPage((p) => p + 1)}>
+                Next
+              </Button>
+            </div>
           </div>
         )}
       </div>
 
+      {/* Slide-out Panel (matching ApplicantsPage pattern) */}
+      {selectedClient && (
+        <>
+          <div
+            className={`fixed inset-0 bg-black/20 z-40 transition-opacity duration-250 ${panelOpen ? 'opacity-100' : 'opacity-0 pointer-events-none'}`}
+            onClick={closePanel}
+          />
+          <div className={`fixed top-0 right-0 h-full w-[420px] bg-white shadow-2xl z-50 flex flex-col transition-transform duration-250 ease-out ${panelOpen ? 'translate-x-0' : 'translate-x-full'}`}>
+            {/* Header */}
+            <div className="px-6 py-5 bg-navy flex items-center justify-between flex-shrink-0">
+              <div>
+                <h2 className="text-lg font-semibold text-white">{selectedClient.nickname}</h2>
+                {(selectedClient.first_name || selectedClient.last_name) && (
+                  <p className="text-sm text-white/70">{selectedClient.first_name} {selectedClient.last_name}</p>
+                )}
+              </div>
+              <button onClick={closePanel} className="text-white/60 hover:text-white text-2xl leading-none p-1">×</button>
+            </div>
+
+            {/* Content */}
+            <div className="flex-1 overflow-y-auto p-5 bg-gray-50">
+              {loadingDetail ? (
+                <div className="flex items-center justify-center py-12">
+                  <svg className="h-6 w-6 animate-spin text-maroon" fill="none" viewBox="0 0 24 24">
+                    <circle className="opacity-25" cx="12" cy="12" r="10" stroke="currentColor" strokeWidth="4" />
+                    <path className="opacity-75" fill="currentColor" d="M4 12a8 8 0 018-8V0C5.373 0 0 5.373 0 12h4z" />
+                  </svg>
+                </div>
+              ) : (
+                <>
+                  {/* Client Info */}
+                  <div className="bg-white rounded-lg shadow-sm overflow-hidden">
+                    {[
+                      { label: 'Status', value: <Badge variant={statusBadgeVariant[selectedClient.status] || 'neutral'}>{selectedClient.status}</Badge> },
+                      { label: 'Location', value: selectedClient.location_name || 'Not assigned' },
+                      { label: 'Added', value: selectedClient.created_at ? formatDate(selectedClient.created_at) : '—' },
+                    ].map((row, i, arr) => (
+                      <div key={i} className={`grid grid-cols-[110px_1fr] px-4 py-3 items-center ${i < arr.length - 1 ? 'border-b border-gray-100' : ''}`}>
+                        <span className="text-xs font-semibold text-navy">{row.label}</span>
+                        <span className="text-sm text-slate">{row.value}</span>
+                      </div>
+                    ))}
+                  </div>
+
+                  {/* Assigned Caregivers */}
+                  <div className="bg-white rounded-lg shadow-sm p-4 mt-5">
+                    <div className="flex items-center justify-between mb-3">
+                      <span className="text-xs font-semibold text-gray uppercase tracking-wide">
+                        Assigned Caregivers ({selectedClient.assignments.filter(a => a.is_active).length})
+                      </span>
+                    </div>
+
+                    {selectedClient.assignments.filter(a => a.is_active).length === 0 ? (
+                      <p className="text-xs text-gray">No caregivers assigned</p>
+                    ) : (
+                      <div className="space-y-3">
+                        {selectedClient.assignments.filter(a => a.is_active).map((assignment) => {
+                          const compliance = employeeCompliance[assignment.employee_id];
+                          return (
+                            <div key={assignment.assignment_id} className="rounded-lg border border-gray-100 p-3">
+                              <div className="flex items-start justify-between">
+                                <div>
+                                  <Link
+                                    to={`/admin/employee/${assignment.employee_id}`}
+                                    className="text-sm font-medium text-navy hover:text-maroon"
+                                  >
+                                    {assignment.employee_name}
+                                  </Link>
+                                  {assignment.employee_number && (
+                                    <p className="text-xs text-gray">{assignment.employee_number}</p>
+                                  )}
+                                  <p className="text-xs text-gray mt-0.5">
+                                    Since {formatDate(assignment.start_date)}
+                                  </p>
+                                </div>
+                                {compliance && (
+                                  <Badge variant={compliance.is_compliant ? 'success' : 'error'} className="text-xs">
+                                    {compliance.is_compliant ? 'Compliant' : 'Non-Compliant'}
+                                  </Badge>
+                                )}
+                              </div>
+
+                              {compliance && (
+                                <div className="mt-2 pt-2 border-t border-gray-100 space-y-1">
+                                  <div className="flex items-center justify-between">
+                                    <span className="text-xs text-gray">Background</span>
+                                    {compliance.background_check ? (
+                                      <span className={`text-xs ${compliance.background_check.status === 'valid' ? 'text-green-600' : 'text-red-600'}`}>
+                                        {compliance.background_check.status}
+                                      </span>
+                                    ) : (
+                                      <span className="text-xs text-red-600">Missing</span>
+                                    )}
+                                  </div>
+                                  <div className="flex items-center justify-between">
+                                    <span className="text-xs text-gray">OIG Check</span>
+                                    {compliance.oig_exclusion_check ? (
+                                      <span className={`text-xs ${compliance.oig_exclusion_check.check_result === 'clear' ? 'text-green-600' : 'text-red-600'}`}>
+                                        {compliance.oig_exclusion_check.check_result || compliance.oig_exclusion_check.status}
+                                      </span>
+                                    ) : (
+                                      <span className="text-xs text-red-600">Missing</span>
+                                    )}
+                                  </div>
+                                  {compliance.alerts.length > 0 && (
+                                    <div className="mt-1">
+                                      {compliance.alerts.slice(0, 2).map((alert, i) => (
+                                        <p key={i} className="text-xs text-warning flex items-center gap-1">
+                                          <svg className="h-3 w-3 flex-shrink-0" fill="none" viewBox="0 0 24 24" stroke="currentColor">
+                                            <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M12 9v2m0 4h.01m-6.938 4h13.856c1.54 0 2.502-1.667 1.732-3L13.732 4c-.77-1.333-2.694-1.333-3.464 0L3.34 16c-.77 1.333.192 3 1.732 3z" />
+                                          </svg>
+                                          <span className="truncate">{alert}</span>
+                                        </p>
+                                      ))}
+                                    </div>
+                                  )}
+                                </div>
+                              )}
+                            </div>
+                          );
+                        })}
+                      </div>
+                    )}
+                  </div>
+
+                  {/* Actions */}
+                  <div className="grid grid-cols-2 gap-3 mt-5">
+                    <button
+                      onClick={handleOpenAssignModal}
+                      className="py-3 bg-navy text-white text-sm font-semibold rounded-lg hover:bg-navy/90 transition-colors flex items-center justify-center gap-2"
+                    >
+                      <svg className="h-4 w-4" fill="none" viewBox="0 0 24 24" stroke="currentColor">
+                        <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M18 9v3m0 0v3m0-3h3m-3 0h-3m-2-5a4 4 0 11-8 0 4 4 0 018 0zM3 20a6 6 0 0112 0v1H3v-1z" />
+                      </svg>
+                      Assign Caregiver
+                    </button>
+                    <button className="py-3 bg-white border border-border text-navy text-sm font-semibold rounded-lg hover:bg-gray-50 transition-colors">
+                      Edit Details
+                    </button>
+                  </div>
+                </>
+              )}
+            </div>
+
+            {/* Footer */}
+            <div className="px-6 py-3 border-t border-gray-100 bg-white flex-shrink-0">
+              <p className="text-[10px] text-gray-400 text-center">Powered by MediVault</p>
+            </div>
+          </div>
+        </>
+      )}
+
       {/* Add Client Modal */}
-      <Modal
-        isOpen={showAddModal}
-        onClose={() => setShowAddModal(false)}
-        title="Add New Client"
-      >
+      <Modal isOpen={showAddModal} onClose={() => setShowAddModal(false)} title="Add New Client">
         <div className="space-y-4">
           <div>
-            <label className="mb-1.5 block text-sm font-medium text-slate">
-              Client Nickname
-            </label>
+            <label className="mb-1.5 block text-sm font-medium text-slate">Client Nickname</label>
             <Input
               placeholder="e.g., Mrs. Johnson, Smith Family"
               value={newClientName}
@@ -685,29 +586,18 @@ export default function ClientsPage() {
               A short identifier for this client. You can add more details later.
             </p>
           </div>
-
           <div className="flex justify-end gap-3 pt-4">
-            <Button variant="secondary" onClick={() => setShowAddModal(false)}>
-              Cancel
-            </Button>
-            <Button onClick={handleAddClient} loading={adding} disabled={!newClientName.trim()}>
-              Add Client
-            </Button>
+            <Button variant="secondary" onClick={() => setShowAddModal(false)}>Cancel</Button>
+            <Button onClick={handleAddClient} loading={adding} disabled={!newClientName.trim()}>Add Client</Button>
           </div>
         </div>
       </Modal>
 
-      {/* Assign Caregiver Modal - with server-side search and pagination */}
-      <Modal
-        isOpen={showAssignModal}
-        onClose={() => setShowAssignModal(false)}
-        title={`Assign Caregiver to ${selectedClient?.nickname || 'Client'}`}
-      >
+      {/* Assign Caregiver Modal */}
+      <Modal isOpen={showAssignModal} onClose={() => setShowAssignModal(false)} title={`Assign Caregiver to ${selectedClient?.nickname || 'Client'}`}>
         <div className="space-y-4">
           <div>
-            <label className="mb-1.5 block text-sm font-medium text-slate">
-              Search Employees
-            </label>
+            <label className="mb-1.5 block text-sm font-medium text-slate">Search Employees</label>
             <Input
               placeholder="Type to search by name or employee number..."
               value={employeeSearch}
@@ -720,9 +610,7 @@ export default function ClientsPage() {
           </div>
 
           <div>
-            <label className="mb-1.5 block text-sm font-medium text-slate">
-              Select Employee
-            </label>
+            <label className="mb-1.5 block text-sm font-medium text-slate">Select Employee</label>
             {loadingEmployees ? (
               <div className="flex justify-center py-4 border border-border rounded-lg">
                 <svg className="h-5 w-5 animate-spin text-maroon" fill="none" viewBox="0 0 24 24">
@@ -773,13 +661,10 @@ export default function ClientsPage() {
                     })
                   )}
                 </div>
-                
-                {/* Pagination for employees */}
+
                 {employeeTotalPages > 1 && (
                   <div className="flex items-center justify-between border-t border-border px-3 py-2 bg-gray-50">
-                    <p className="text-xs text-gray">
-                      Page {employeePage} of {employeeTotalPages}
-                    </p>
+                    <p className="text-xs text-gray">Page {employeePage} of {employeeTotalPages}</p>
                     <div className="flex gap-1">
                       <button
                         type="button"
@@ -805,20 +690,12 @@ export default function ClientsPage() {
           </div>
 
           <div>
-            <label className="mb-1.5 block text-sm font-medium text-slate">
-              Start Date
-            </label>
-            <Input
-              type="date"
-              value={assignmentStartDate}
-              onChange={(e) => setAssignmentStartDate(e.target.value)}
-            />
+            <label className="mb-1.5 block text-sm font-medium text-slate">Start Date</label>
+            <Input type="date" value={assignmentStartDate} onChange={(e) => setAssignmentStartDate(e.target.value)} />
           </div>
 
           <div>
-            <label className="mb-1.5 block text-sm font-medium text-slate">
-              Notes (optional)
-            </label>
+            <label className="mb-1.5 block text-sm font-medium text-slate">Notes (optional)</label>
             <textarea
               value={assignmentNotes}
               onChange={(e) => setAssignmentNotes(e.target.value)}
@@ -829,16 +706,8 @@ export default function ClientsPage() {
           </div>
 
           <div className="flex justify-end gap-3 pt-4">
-            <Button variant="secondary" onClick={() => setShowAssignModal(false)}>
-              Cancel
-            </Button>
-            <Button
-              onClick={handleAssignCaregiver}
-              loading={assigning}
-              disabled={!selectedEmployeeId}
-            >
-              Assign Caregiver
-            </Button>
+            <Button variant="secondary" onClick={() => setShowAssignModal(false)}>Cancel</Button>
+            <Button onClick={handleAssignCaregiver} loading={assigning} disabled={!selectedEmployeeId}>Assign Caregiver</Button>
           </div>
         </div>
       </Modal>
