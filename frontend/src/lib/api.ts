@@ -8,10 +8,11 @@ const RAW_BASE_URL = import.meta.env.VITE_API_URL || 'http://localhost:8000';
 const BASE_URL = RAW_BASE_URL.replace(/\/api\/?$/, '');
 export const API_URL = `${BASE_URL}/api`;
 
-// Debug: log the API URL in development
-if (import.meta.env.DEV) {
-  console.log('[API] Using URL:', API_URL);
-}
+// Always log the API URL to help debug
+console.log('[API Config] RAW_BASE_URL:', RAW_BASE_URL);
+console.log('[API Config] BASE_URL:', BASE_URL);
+console.log('[API Config] API_URL:', API_URL);
+console.log('[API Config] VITE_API_URL env:', import.meta.env.VITE_API_URL);
 
 async function getAuthHeaders(): Promise<Record<string, string>> {
   const { data } = await supabase.auth.getSession();
