@@ -91,7 +91,7 @@ export default function ClientsPage() {
   // Compliance data for assigned employees
   const [employeeCompliance, setEmployeeCompliance] = useState<Record<string, ComplianceSummary>>({});
 
-  // Assign Caregiver modal
+  // Assign Caregiver modal - with server-side search
   const [showAssignModal, setShowAssignModal] = useState(false);
   const [employees, setEmployees] = useState<Employee[]>([]);
   const [loadingEmployees, setLoadingEmployees] = useState(false);
@@ -100,10 +100,30 @@ export default function ClientsPage() {
   const [assignmentNotes, setAssignmentNotes] = useState('');
   const [assigning, setAssigning] = useState(false);
   const [employeeSearch, setEmployeeSearch] = useState('');
+  const [employeeSearchDebounced, setEmployeeSearchDebounced] = useState('');
+  const [employeePage, setEmployeePage] = useState(1);
+  const [employeeTotal, setEmployeeTotal] = useState(0);
+  const employeePageSize = 20;
 
   useEffect(() => {
     loadClients();
   }, [page, statusFilter]);
+
+  // Debounce employee search
+  useEffect(() => {
+    const timer = setTimeout(() => {
+      setEmployeeSearchDebounced(employeeSearch);
+      setEmployeePage(1); // Reset to first page on new search
+    }, 300);
+    return () => clearTimeout(timer);
+  }, [employeeSearch]);
+
+  // Load employees when modal opens or search changes
+  useEffect(() => {
+    if (showAssignModal) {
+      loadEmployees();
+    }
+  }, [showAssignModal, employeeSearchDebounced, employeePage]);
 
   async function loadClients() {
     try {
@@ -161,8 +181,17 @@ export default function ClientsPage() {
   async function loadEmployees() {
     try {
       setLoadingEmployees(true);
-      const data = await api.get<EmployeeListResponse>('/employees?status=active&page_size=100');
+      const params = new URLSearchParams({
+        status: 'active',
+        page: employeePage.toString(),
+        page_size: employeePageSize.toString(),
+      });
+      if (employeeSearchDebounced.trim()) {
+        params.set('search', employeeSearchDebounced.trim());
+      }
+      const data = await api.get<EmployeeListResponse>(`/employees?${params}`);
       setEmployees(data.items);
+      setEmployeeTotal(data.total);
     } catch (err) {
       setError(err instanceof Error ? err.message : 'Failed to load employees');
     } finally {
@@ -202,7 +231,9 @@ export default function ClientsPage() {
     setAssignmentStartDate(new Date().toISOString().split('T')[0]);
     setAssignmentNotes('');
     setEmployeeSearch('');
-    loadEmployees();
+    setEmployeeSearchDebounced('');
+    setEmployeePage(1);
+    setEmployees([]);
   }
 
   async function handleAssignCaregiver() {
@@ -237,15 +268,6 @@ export default function ClientsPage() {
     );
   }, [clients, search]);
 
-  const filteredEmployees = useMemo(() => {
-    if (!employeeSearch.trim()) return employees;
-    const q = employeeSearch.toLowerCase();
-    return employees.filter((e) => {
-      const name = `${e.first_name || ''} ${e.last_name || ''}`.toLowerCase();
-      return name.includes(q) || e.employee_number?.toLowerCase().includes(q);
-    });
-  }, [employees, employeeSearch]);
-
   // Get IDs of already assigned employees
   const assignedEmployeeIds = useMemo(() => {
     if (!selectedClient) return new Set<string>();
@@ -253,6 +275,7 @@ export default function ClientsPage() {
   }, [selectedClient]);
 
   const totalPages = Math.ceil(total / pageSize);
+  const employeeTotalPages = Math.ceil(employeeTotal / employeePageSize);
 
   return (
     <div className="space-y-6">
@@ -674,7 +697,7 @@ export default function ClientsPage() {
         </div>
       </Modal>
 
-      {/* Assign Caregiver Modal */}
+      {/* Assign Caregiver Modal - with server-side search and pagination */}
       <Modal
         isOpen={showAssignModal}
         onClose={() => setShowAssignModal(false)}
@@ -686,10 +709,14 @@ export default function ClientsPage() {
               Search Employees
             </label>
             <Input
-              placeholder="Search by name or employee number..."
+              placeholder="Type to search by name or employee number..."
               value={employeeSearch}
               onChange={(e) => setEmployeeSearch(e.target.value)}
+              autoFocus
             />
+            <p className="mt-1 text-xs text-gray">
+              {employeeTotal > 0 ? `${employeeTotal} employees found` : 'Start typing to search'}
+            </p>
           </div>
 
           <div>
@@ -697,50 +724,81 @@ export default function ClientsPage() {
               Select Employee
             </label>
             {loadingEmployees ? (
-              <div className="flex justify-center py-4">
+              <div className="flex justify-center py-4 border border-border rounded-lg">
                 <svg className="h-5 w-5 animate-spin text-maroon" fill="none" viewBox="0 0 24 24">
                   <circle className="opacity-25" cx="12" cy="12" r="10" stroke="currentColor" strokeWidth="4" />
                   <path className="opacity-75" fill="currentColor" d="M4 12a8 8 0 018-8V0C5.373 0 0 5.373 0 12h4z" />
                 </svg>
               </div>
             ) : (
-              <div className="max-h-48 overflow-y-auto border border-border rounded-lg">
-                {filteredEmployees.length === 0 ? (
-                  <p className="p-3 text-sm text-gray text-center">No employees found</p>
-                ) : (
-                  filteredEmployees.map((emp) => {
-                    const name = `${emp.first_name || ''} ${emp.last_name || ''}`.trim() || 'Unknown';
-                    const isAssigned = assignedEmployeeIds.has(emp.id);
-                    return (
+              <div className="border border-border rounded-lg">
+                <div className="max-h-64 overflow-y-auto">
+                  {employees.length === 0 ? (
+                    <p className="p-3 text-sm text-gray text-center">
+                      {employeeSearch.trim() ? 'No employees found' : 'Type to search employees'}
+                    </p>
+                  ) : (
+                    employees.map((emp) => {
+                      const name = `${emp.first_name || ''} ${emp.last_name || ''}`.trim() || 'Unknown';
+                      const isAssigned = assignedEmployeeIds.has(emp.id);
+                      return (
+                        <button
+                          key={emp.id}
+                          type="button"
+                          disabled={isAssigned}
+                          onClick={() => setSelectedEmployeeId(emp.id)}
+                          className={`w-full flex items-center justify-between p-3 text-left border-b border-border last:border-0 transition-colors ${
+                            selectedEmployeeId === emp.id
+                              ? 'bg-maroon/10'
+                              : isAssigned
+                              ? 'bg-gray-50 opacity-50 cursor-not-allowed'
+                              : 'hover:bg-gray-50'
+                          }`}
+                        >
+                          <div>
+                            <p className="text-sm font-medium text-slate">{name}</p>
+                            <p className="text-xs text-gray">
+                              {emp.employee_number || 'No ID'} • {emp.job_title || 'Employee'}
+                            </p>
+                          </div>
+                          {isAssigned ? (
+                            <Badge variant="neutral" className="text-xs">Already assigned</Badge>
+                          ) : selectedEmployeeId === emp.id ? (
+                            <svg className="h-5 w-5 text-maroon" fill="none" viewBox="0 0 24 24" stroke="currentColor">
+                              <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M5 13l4 4L19 7" />
+                            </svg>
+                          ) : null}
+                        </button>
+                      );
+                    })
+                  )}
+                </div>
+                
+                {/* Pagination for employees */}
+                {employeeTotalPages > 1 && (
+                  <div className="flex items-center justify-between border-t border-border px-3 py-2 bg-gray-50">
+                    <p className="text-xs text-gray">
+                      Page {employeePage} of {employeeTotalPages}
+                    </p>
+                    <div className="flex gap-1">
                       <button
-                        key={emp.id}
                         type="button"
-                        disabled={isAssigned}
-                        onClick={() => setSelectedEmployeeId(emp.id)}
-                        className={`w-full flex items-center justify-between p-3 text-left border-b border-border last:border-0 transition-colors ${
-                          selectedEmployeeId === emp.id
-                            ? 'bg-maroon/10'
-                            : isAssigned
-                            ? 'bg-gray-50 opacity-50 cursor-not-allowed'
-                            : 'hover:bg-gray-50'
-                        }`}
+                        disabled={employeePage === 1}
+                        onClick={() => setEmployeePage((p) => p - 1)}
+                        className="px-2 py-1 text-xs rounded border border-border bg-white disabled:opacity-50 disabled:cursor-not-allowed hover:bg-gray-50"
                       >
-                        <div>
-                          <p className="text-sm font-medium text-slate">{name}</p>
-                          <p className="text-xs text-gray">
-                            {emp.employee_number || 'No ID'} • {emp.job_title || 'Employee'}
-                          </p>
-                        </div>
-                        {isAssigned ? (
-                          <Badge variant="neutral" className="text-xs">Already assigned</Badge>
-                        ) : selectedEmployeeId === emp.id ? (
-                          <svg className="h-5 w-5 text-maroon" fill="none" viewBox="0 0 24 24" stroke="currentColor">
-                            <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M5 13l4 4L19 7" />
-                          </svg>
-                        ) : null}
+                        Prev
                       </button>
-                    );
-                  })
+                      <button
+                        type="button"
+                        disabled={employeePage === employeeTotalPages}
+                        onClick={() => setEmployeePage((p) => p + 1)}
+                        className="px-2 py-1 text-xs rounded border border-border bg-white disabled:opacity-50 disabled:cursor-not-allowed hover:bg-gray-50"
+                      >
+                        Next
+                      </button>
+                    </div>
+                  </div>
                 )}
               </div>
             )}
