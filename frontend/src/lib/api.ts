@@ -2,15 +2,13 @@ import { supabase } from './supabase';
 
 // For local dev: http://localhost:8000
 // For production: https://medi-vault-api.onrender.com
-// The /api prefix is added here, not in the env var
-// Strip trailing /api if someone accidentally includes it in the env var
+// Note: No /api prefix - backend routes don't use it
 const RAW_BASE_URL = import.meta.env.VITE_API_URL || 'http://localhost:8000';
-const BASE_URL = RAW_BASE_URL.replace(/\/api\/?$/, '');
-export const API_URL = `${BASE_URL}/api`;
+// Strip any trailing /api if someone accidentally includes it
+const API_URL = RAW_BASE_URL.replace(/\/api\/?$/, '');
 
 // Always log the API URL to help debug
 console.log('[API Config] RAW_BASE_URL:', RAW_BASE_URL);
-console.log('[API Config] BASE_URL:', BASE_URL);
 console.log('[API Config] API_URL:', API_URL);
 console.log('[API Config] VITE_API_URL env:', import.meta.env.VITE_API_URL);
 
@@ -152,3 +150,5 @@ export const api = {
     return response.json();
   },
 };
+
+export { API_URL };
