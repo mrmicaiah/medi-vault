@@ -87,16 +87,15 @@ class EmployeeService:
         emp_number = f"EMP-{(emp_count.count or 0) + 1:05d}"
 
         # Create employee record
+        # Note: job_title from request goes into "position" column in DB
         emp_data = {
             "user_id": user_id,
             "application_id": request.application_id,
             "employee_number": emp_number,
             "status": EmployeeStatus.ACTIVE.value,
             "hire_date": hire_date,
-            "job_title": request.job_title,
-            "department": request.department,
+            "position": request.job_title,  # job_title -> position column
             "pay_rate": request.pay_rate,
-            "pay_type": request.pay_type,
             "notes": request.notes,
             "created_at": now,
             "updated_at": now,
@@ -136,7 +135,7 @@ class EmployeeService:
             employee_number=e.get("employee_number"),
             status=EmployeeStatus(e["status"]),
             hire_date=e["hire_date"],
-            job_title=e.get("job_title"),
+            job_title=e.get("position"),  # position column -> job_title in response
             department=e.get("department"),
             pay_rate=e.get("pay_rate"),
             pay_type=e.get("pay_type"),
@@ -156,7 +155,6 @@ class EmployeeService:
         search: Optional[str] = None,
     ) -> tuple[List[EmployeeResponse], int]:
         """List employees with optional filtering."""
-        # Don't join profiles - fetch separately to avoid FK ambiguity
         query = (
             self.supabase.table("employees")
             .select("*", count="exact")
@@ -189,7 +187,7 @@ class EmployeeService:
                 employee_number=e.get("employee_number"),
                 status=EmployeeStatus(e["status"]),
                 hire_date=e["hire_date"],
-                job_title=e.get("job_title"),
+                job_title=e.get("position"),  # position -> job_title
                 department=e.get("department"),
                 pay_rate=e.get("pay_rate"),
                 pay_type=e.get("pay_type"),
@@ -243,7 +241,7 @@ class EmployeeService:
             employee_number=e.get("employee_number"),
             status=EmployeeStatus(e["status"]),
             hire_date=e["hire_date"],
-            job_title=e.get("job_title"),
+            job_title=e.get("position"),  # position -> job_title
             department=e.get("department"),
             pay_rate=e.get("pay_rate"),
             pay_type=e.get("pay_type"),
@@ -265,6 +263,10 @@ class EmployeeService:
 
         if "status" in update_data:
             update_data["status"] = update_data["status"].value if hasattr(update_data["status"], "value") else update_data["status"]
+
+        # Map job_title to position column
+        if "job_title" in update_data:
+            update_data["position"] = update_data.pop("job_title")
 
         update_data["updated_at"] = now
 
