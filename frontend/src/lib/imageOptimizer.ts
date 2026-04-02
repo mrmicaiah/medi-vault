@@ -5,6 +5,9 @@
 
 import imageCompression from 'browser-image-compression';
 
+// Re-export formatFileSize from utils for convenience
+export { formatFileSize } from './utils';
+
 // Accepted file types
 export const ACCEPTED_TYPES = [
   'image/jpeg',
@@ -200,15 +203,4 @@ export async function processFileForUpload(
     updateProgress('error', error instanceof Error ? error.message : 'Processing failed');
     throw error;
   }
-}
-
-/**
- * Get human-readable file size
- */
-export function formatFileSize(bytes: number): string {
-  if (bytes === 0) return '0 B';
-  const k = 1024;
-  const sizes = ['B', 'KB', 'MB', 'GB'];
-  const i = Math.floor(Math.log(bytes) / Math.log(k));
-  return parseFloat((bytes / Math.pow(k, i)).toFixed(1)) + ' ' + sizes[i];
 }
