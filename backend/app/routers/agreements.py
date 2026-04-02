@@ -61,6 +61,7 @@ async def sign_agreement(
     return agreement
 
 
+@router.get("", response_model=AgreementListResponse)
 @router.get("/", response_model=AgreementListResponse)
 async def list_agreements(
     application_id: Optional[str] = Query(None),

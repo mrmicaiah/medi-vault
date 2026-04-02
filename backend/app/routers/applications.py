@@ -52,6 +52,7 @@ async def get_my_application(
         return {"application": app, "steps": steps}
 
 
+@router.post("", response_model=ApplicationResponse, status_code=201)
 @router.post("/", response_model=ApplicationResponse, status_code=201)
 async def create_application(
     user: UserProfile = Depends(get_current_user),
@@ -62,6 +63,7 @@ async def create_application(
     return service.create_application(user.id)
 
 
+@router.get("", response_model=List[ApplicationResponse])
 @router.get("/", response_model=List[ApplicationResponse])
 async def list_applications(
     user: UserProfile = Depends(get_current_user),
