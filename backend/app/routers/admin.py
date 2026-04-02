@@ -14,6 +14,21 @@ logger = logging.getLogger(__name__)
 router = APIRouter(prefix="/admin", tags=["admin"])
 
 
+# Position type to title mapping
+POSITION_TITLES = {
+    "cna": "CNA / Home Health Aide",
+    "hha": "CNA / Home Health Aide",
+    "pca": "CNA / Home Health Aide",
+    "lpn": "Licensed Practical Nurse (LPN)",
+    "rn": "Registered Nurse (RN)",
+}
+
+
+def get_position_title(position_type: str) -> str:
+    """Get the display title for a position type."""
+    return POSITION_TITLES.get(position_type.lower() if position_type else "", "Home Care Worker")
+
+
 async def get_staff_user(
     authorization: str = Header(None),
     supabase: Client = Depends(get_supabase),
@@ -143,6 +158,27 @@ def get_staff_location_filter(user: dict) -> Optional[str]:
     # Admins and managers see only their location
     location_id = profile.get("location_id")
     return location_id
+
+
+def get_applicant_position(supabase: Client, application_id: str) -> tuple[str, str]:
+    """
+    Get the position type and title for an application from Step 1 data.
+    Returns (position_type, position_title).
+    """
+    try:
+        step1_res = supabase.table("application_steps").select("data").eq(
+            "application_id", application_id
+        ).eq("step_number", 1).single().execute()
+        
+        if step1_res.data:
+            step1_data = step1_res.data.get("data") or {}
+            position_type = step1_data.get("position_applied", "").lower()
+            position_title = get_position_title(position_type)
+            return position_type, position_title
+    except Exception as e:
+        logger.warning(f"Could not fetch position for application {application_id}: {e}")
+    
+    return "", "Home Care Worker"
 
 
 @router.get("/dashboard")
@@ -730,6 +766,9 @@ async def preview_agreement_html(
         step2_res = supabase.table("application_steps").select("data").eq("application_id", application_id).eq("step_number", 2).single().execute()
         personal_info = step2_res.data.get("data") if step2_res.data else {}
         
+        # Get position info for job description agreement
+        position_type, position_title = get_applicant_position(supabase, application_id)
+        
         context = {
             "applicant_name": f"{personal_info.get('first_name', '')} {personal_info.get('last_name', '')}".strip() or "Applicant",
             "signature_text": step_data.get("signature", ""),
@@ -738,6 +777,8 @@ async def preview_agreement_html(
             "agreed": step_data.get("agreed", False),
             "generated_at": datetime.now().strftime("%B %d, %Y at %I:%M %p"),
             "company_name": "Eveready HomeCare",
+            "position_type": position_type,
+            "position_title": position_title,
         }
         
         template_map = {
@@ -967,6 +1008,9 @@ async def generate_agreement_pdf(
         step2_res = supabase.table("application_steps").select("data").eq("application_id", application_id).eq("step_number", 2).single().execute()
         personal_info = step2_res.data.get("data") if step2_res.data else {}
         
+        # Get position info for job description agreement
+        position_type, position_title = get_applicant_position(supabase, application_id)
+        
         context = {
             "applicant_name": f"{personal_info.get('first_name', '')} {personal_info.get('last_name', '')}".strip() or "Applicant",
             "signature_text": step_data.get("signature", ""),
@@ -975,6 +1019,8 @@ async def generate_agreement_pdf(
             "agreed": step_data.get("agreed", False),
             "generated_at": datetime.now().strftime("%B %d, %Y at %I:%M %p"),
             "company_name": "Eveready HomeCare",
+            "position_type": position_type,
+            "position_title": position_title,
         }
         
         template_map = {
