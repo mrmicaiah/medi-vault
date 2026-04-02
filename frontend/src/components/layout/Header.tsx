@@ -1,5 +1,5 @@
 import React, { useState, useRef, useEffect } from 'react';
-import { useNavigate, useLocation } from 'react-router-dom';
+import { useNavigate } from 'react-router-dom';
 import { useAuth } from '../../hooks/useAuth';
 import { useAgency } from '../../contexts/AgencyContext';
 import { getInitials } from '../../lib/utils';
@@ -11,13 +11,10 @@ export function Header() {
   const { user, profile, role, signOut } = useAuth();
   const { agency } = useAgency();
   const navigate = useNavigate();
-  const location = useLocation();
   const [menuOpen, setMenuOpen] = useState(false);
   const menuRef = useRef<HTMLDivElement>(null);
 
   const isStaff = role !== null && STAFF_ROLES.includes(role);
-  const isOnAdminPage = location.pathname.startsWith('/admin');
-  const isOnApplicantPage = location.pathname.startsWith('/applicant');
 
   useEffect(() => {
     const handleClick = (e: MouseEvent) => {
@@ -63,32 +60,6 @@ export function Header() {
             </>
           )}
         </div>
-
-        {/* Dev Mode Toggle - Only for staff */}
-        {isStaff && (
-          <div className="ml-6 flex items-center gap-1 rounded-lg bg-gray-100 p-1">
-            <button
-              onClick={() => navigate('/admin')}
-              className={`px-3 py-1 text-xs font-medium rounded-md transition-colors ${
-                isOnAdminPage
-                  ? 'bg-white text-maroon shadow-sm'
-                  : 'text-gray hover:text-slate'
-              }`}
-            >
-              Admin View
-            </button>
-            <button
-              onClick={() => navigate('/applicant')}
-              className={`px-3 py-1 text-xs font-medium rounded-md transition-colors ${
-                isOnApplicantPage
-                  ? 'bg-white text-maroon shadow-sm'
-                  : 'text-gray hover:text-slate'
-              }`}
-            >
-              Applicant View
-            </button>
-          </div>
-        )}
       </div>
 
       <div className="flex items-center gap-4">
