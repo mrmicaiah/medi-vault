@@ -107,6 +107,16 @@ body {
     color: #444;
 }
 
+/* Warning Banner - for bloodborne pathogens notice */
+.warning-banner {
+    background-color: #fff3cd;
+    border-left: 4px solid #ffc107;
+    padding: 10px 16px;
+    margin: 15px 0;
+    font-size: 10pt;
+    color: #856404;
+}
+
 /* Signature Section */
 .signature-section {
     margin-top: 30px;
