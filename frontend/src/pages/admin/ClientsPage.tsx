@@ -62,11 +62,65 @@ interface ClientListResponse {
   page_size: number;
 }
 
+// Assignment history types
+interface AuditLogEntry {
+  id: string;
+  action: string;
+  performed_by_name?: string;
+  performed_at: string;
+  employee_compliant?: boolean;
+  background_check_status?: string;
+  oig_check_status?: string;
+  end_reason?: string;
+  notes?: string;
+}
+
+interface AssignmentHistoryEntry {
+  id: string;
+  employee_id: string;
+  employee_name: string;
+  employee_number?: string;
+  client_id: string;
+  client_name: string;
+  start_date?: string;
+  end_date?: string;
+  is_active: boolean;
+  notes?: string;
+  assigned_by_name?: string;
+  created_at?: string;
+  was_compliant_at_assignment?: boolean;
+  background_check_at_assignment?: string;
+  oig_check_at_assignment?: string;
+  ended_by_name?: string;
+  ended_at?: string;
+  end_reason?: string;
+  audit_log: AuditLogEntry[];
+}
+
+interface ClientAssignmentHistory {
+  client_id: string;
+  client_name: string;
+  total_assignments: number;
+  active_assignments: number;
+  assignments: AssignmentHistoryEntry[];
+}
+
 const statusBadgeVariant: Record<string, 'success' | 'warning' | 'error' | 'neutral'> = {
   active: 'success',
   inactive: 'neutral',
   discharged: 'error',
 };
+
+const END_REASONS = [
+  { value: 'client_discharged', label: 'Client Discharged' },
+  { value: 'client_request', label: 'Client Request' },
+  { value: 'caregiver_resigned', label: 'Caregiver Resigned' },
+  { value: 'caregiver_terminated', label: 'Caregiver Terminated' },
+  { value: 'schedule_conflict', label: 'Schedule Conflict' },
+  { value: 'reassignment', label: 'Reassigned to Another Caregiver' },
+  { value: 'temporary_assignment_ended', label: 'Temporary Assignment Ended' },
+  { value: 'other', label: 'Other' },
+];
 
 export default function ClientsPage() {
   const [clients, setClients] = useState<Client[]>([]);
@@ -83,15 +137,21 @@ export default function ClientsPage() {
   const [newClientName, setNewClientName] = useState('');
   const [adding, setAdding] = useState(false);
 
-  // Slide-out panel state (matching ApplicantsPage pattern)
+  // Slide-out panel state
   const [selectedClient, setSelectedClient] = useState<ClientDetail | null>(null);
   const [loadingDetail, setLoadingDetail] = useState(false);
   const [panelOpen, setPanelOpen] = useState(false);
   
+  // Assignment history (for audits)
+  const [assignmentHistory, setAssignmentHistory] = useState<ClientAssignmentHistory | null>(null);
+  const [loadingHistory, setLoadingHistory] = useState(false);
+  const [showHistoryTab, setShowHistoryTab] = useState(false);
+  const [expandedAssignment, setExpandedAssignment] = useState<string | null>(null);
+  
   // Compliance data for assigned employees
   const [employeeCompliance, setEmployeeCompliance] = useState<Record<string, ComplianceSummary>>({});
 
-  // Assign Caregiver modal - with server-side search
+  // Assign Caregiver modal
   const [showAssignModal, setShowAssignModal] = useState(false);
   const [employees, setEmployees] = useState<Employee[]>([]);
   const [loadingEmployees, setLoadingEmployees] = useState(false);
@@ -104,6 +164,13 @@ export default function ClientsPage() {
   const [employeePage, setEmployeePage] = useState(1);
   const [employeeTotal, setEmployeeTotal] = useState(0);
   const employeePageSize = 20;
+
+  // End Assignment modal
+  const [showEndModal, setShowEndModal] = useState(false);
+  const [endingAssignment, setEndingAssignment] = useState<AssignmentHistoryEntry | null>(null);
+  const [endReason, setEndReason] = useState('');
+  const [endNotes, setEndNotes] = useState('');
+  const [ending, setEnding] = useState(false);
 
   useEffect(() => {
     loadClients();
@@ -156,6 +223,9 @@ export default function ClientsPage() {
     setPanelOpen(true);
     setLoadingDetail(true);
     setEmployeeCompliance({});
+    setShowHistoryTab(false);
+    setAssignmentHistory(null);
+    setExpandedAssignment(null);
     
     try {
       const data = await api.get<ClientDetail>(`/clients/${client.id}`);
@@ -181,9 +251,32 @@ export default function ClientsPage() {
     }
   }
 
+  async function loadAssignmentHistory(clientId: string) {
+    try {
+      setLoadingHistory(true);
+      const data = await api.get<ClientAssignmentHistory>(`/assignments/client/${clientId}/history`);
+      setAssignmentHistory(data);
+    } catch (err) {
+      console.error('Failed to load assignment history:', err);
+      setError(err instanceof Error ? err.message : 'Failed to load assignment history');
+    } finally {
+      setLoadingHistory(false);
+    }
+  }
+
+  function handleShowHistory() {
+    if (!selectedClient) return;
+    setShowHistoryTab(true);
+    if (!assignmentHistory) {
+      loadAssignmentHistory(selectedClient.id);
+    }
+  }
+
   function closePanel() {
     setPanelOpen(false);
     setEmployeeCompliance({});
+    setShowHistoryTab(false);
+    setAssignmentHistory(null);
     setTimeout(() => {
       setSelectedClient(null);
     }, 250);
@@ -254,13 +347,45 @@ export default function ClientsPage() {
         notes: assignmentNotes || null,
       });
       setShowAssignModal(false);
-      // Reload client detail to show new assignment
+      // Reload client detail and history
       selectClient(selectedClient);
+      setAssignmentHistory(null); // Force reload of history
       loadClients();
     } catch (err) {
       setError(err instanceof Error ? err.message : 'Failed to assign caregiver');
     } finally {
       setAssigning(false);
+    }
+  }
+
+  function handleOpenEndModal(assignment: AssignmentHistoryEntry) {
+    setEndingAssignment(assignment);
+    setEndReason('');
+    setEndNotes('');
+    setShowEndModal(true);
+  }
+
+  async function handleEndAssignment() {
+    if (!endingAssignment || !endReason) return;
+
+    try {
+      setEnding(true);
+      await api.post(`/assignments/${endingAssignment.id}/end`, {
+        end_reason: endReason,
+        notes: endNotes || null,
+      });
+      setShowEndModal(false);
+      setEndingAssignment(null);
+      // Reload history
+      if (selectedClient) {
+        loadAssignmentHistory(selectedClient.id);
+        selectClient(selectedClient);
+      }
+      loadClients();
+    } catch (err) {
+      setError(err instanceof Error ? err.message : 'Failed to end assignment');
+    } finally {
+      setEnding(false);
     }
   }
 
@@ -419,14 +544,14 @@ export default function ClientsPage() {
         )}
       </div>
 
-      {/* Slide-out Panel (matching ApplicantsPage pattern) */}
+      {/* Slide-out Panel */}
       {selectedClient && (
         <>
           <div
             className={`fixed inset-0 bg-black/20 z-40 transition-opacity duration-250 ${panelOpen ? 'opacity-100' : 'opacity-0 pointer-events-none'}`}
             onClick={closePanel}
           />
-          <div className={`fixed top-0 right-0 h-full w-[420px] bg-white shadow-2xl z-50 flex flex-col transition-transform duration-250 ease-out ${panelOpen ? 'translate-x-0' : 'translate-x-full'}`}>
+          <div className={`fixed top-0 right-0 h-full w-[480px] bg-white shadow-2xl z-50 flex flex-col transition-transform duration-250 ease-out ${panelOpen ? 'translate-x-0' : 'translate-x-full'}`}>
             {/* Header */}
             <div className="px-6 py-5 bg-navy flex items-center justify-between flex-shrink-0">
               <div>
@@ -438,6 +563,26 @@ export default function ClientsPage() {
               <button onClick={closePanel} className="text-white/60 hover:text-white text-2xl leading-none p-1">×</button>
             </div>
 
+            {/* Tab Navigation */}
+            <div className="flex border-b border-border bg-white flex-shrink-0">
+              <button
+                onClick={() => setShowHistoryTab(false)}
+                className={`flex-1 py-3 text-sm font-medium transition-colors ${
+                  !showHistoryTab ? 'text-maroon border-b-2 border-maroon' : 'text-gray hover:text-slate'
+                }`}
+              >
+                Overview
+              </button>
+              <button
+                onClick={handleShowHistory}
+                className={`flex-1 py-3 text-sm font-medium transition-colors ${
+                  showHistoryTab ? 'text-maroon border-b-2 border-maroon' : 'text-gray hover:text-slate'
+                }`}
+              >
+                Assignment History
+              </button>
+            </div>
+
             {/* Content */}
             <div className="flex-1 overflow-y-auto p-5 bg-gray-50">
               {loadingDetail ? (
@@ -447,7 +592,192 @@ export default function ClientsPage() {
                     <path className="opacity-75" fill="currentColor" d="M4 12a8 8 0 018-8V0C5.373 0 0 5.373 0 12h4z" />
                   </svg>
                 </div>
+              ) : showHistoryTab ? (
+                /* Assignment History Tab */
+                <div className="space-y-4">
+                  <div className="flex items-center justify-between">
+                    <p className="text-xs text-gray uppercase font-semibold tracking-wide">
+                      Full Assignment History (for audits)
+                    </p>
+                    {assignmentHistory && (
+                      <span className="text-xs text-gray">
+                        {assignmentHistory.total_assignments} total, {assignmentHistory.active_assignments} active
+                      </span>
+                    )}
+                  </div>
+
+                  {loadingHistory ? (
+                    <div className="flex items-center justify-center py-8">
+                      <svg className="h-6 w-6 animate-spin text-maroon" fill="none" viewBox="0 0 24 24">
+                        <circle className="opacity-25" cx="12" cy="12" r="10" stroke="currentColor" strokeWidth="4" />
+                        <path className="opacity-75" fill="currentColor" d="M4 12a8 8 0 018-8V0C5.373 0 0 5.373 0 12h4z" />
+                      </svg>
+                    </div>
+                  ) : !assignmentHistory || assignmentHistory.assignments.length === 0 ? (
+                    <div className="bg-white rounded-lg shadow-sm p-6 text-center">
+                      <p className="text-sm text-gray">No assignment history</p>
+                    </div>
+                  ) : (
+                    <div className="space-y-3">
+                      {assignmentHistory.assignments.map((assignment) => (
+                        <div key={assignment.id} className="bg-white rounded-lg shadow-sm overflow-hidden">
+                          {/* Assignment Header */}
+                          <div
+                            className="p-4 cursor-pointer hover:bg-gray-50"
+                            onClick={() => setExpandedAssignment(expandedAssignment === assignment.id ? null : assignment.id)}
+                          >
+                            <div className="flex items-start justify-between">
+                              <div>
+                                <div className="flex items-center gap-2">
+                                  <Link
+                                    to={`/admin/employee/${assignment.employee_id}`}
+                                    className="text-sm font-semibold text-navy hover:text-maroon"
+                                    onClick={(e) => e.stopPropagation()}
+                                  >
+                                    {assignment.employee_name}
+                                  </Link>
+                                  <Badge variant={assignment.is_active ? 'success' : 'neutral'} className="text-xs">
+                                    {assignment.is_active ? 'Active' : 'Ended'}
+                                  </Badge>
+                                </div>
+                                {assignment.employee_number && (
+                                  <p className="text-xs text-gray">{assignment.employee_number}</p>
+                                )}
+                                <p className="text-xs text-gray mt-1">
+                                  {assignment.start_date ? formatDate(assignment.start_date) : 'N/A'}
+                                  {assignment.end_date ? ` — ${formatDate(assignment.end_date)}` : ' — Present'}
+                                </p>
+                              </div>
+                              <div className="flex items-center gap-2">
+                                {assignment.was_compliant_at_assignment !== undefined && (
+                                  <Badge
+                                    variant={assignment.was_compliant_at_assignment ? 'success' : 'error'}
+                                    className="text-xs"
+                                  >
+                                    {assignment.was_compliant_at_assignment ? 'Compliant' : 'Non-Compliant'}
+                                  </Badge>
+                                )}
+                                <svg
+                                  className={`h-4 w-4 text-gray transition-transform ${expandedAssignment === assignment.id ? 'rotate-180' : ''}`}
+                                  fill="none"
+                                  viewBox="0 0 24 24"
+                                  stroke="currentColor"
+                                >
+                                  <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M19 9l-7 7-7-7" />
+                                </svg>
+                              </div>
+                            </div>
+                          </div>
+
+                          {/* Expanded Details */}
+                          {expandedAssignment === assignment.id && (
+                            <div className="border-t border-gray-100 p-4 bg-gray-50 space-y-3">
+                              {/* Assignment Details */}
+                              <div className="grid grid-cols-2 gap-3 text-xs">
+                                <div>
+                                  <span className="text-gray">Assigned by:</span>
+                                  <p className="font-medium text-slate">{assignment.assigned_by_name || 'Unknown'}</p>
+                                </div>
+                                <div>
+                                  <span className="text-gray">Created:</span>
+                                  <p className="font-medium text-slate">
+                                    {assignment.created_at ? new Date(assignment.created_at).toLocaleString() : 'N/A'}
+                                  </p>
+                                </div>
+                              </div>
+
+                              {/* Compliance at Assignment */}
+                              <div className="bg-white rounded border border-gray-200 p-3">
+                                <p className="text-xs font-semibold text-gray uppercase mb-2">Compliance at Assignment Time</p>
+                                <div className="grid grid-cols-2 gap-2 text-xs">
+                                  <div className="flex items-center justify-between">
+                                    <span className="text-gray">Background Check:</span>
+                                    <span className={assignment.background_check_at_assignment === 'valid' || assignment.background_check_at_assignment === 'clear' ? 'text-green-600' : 'text-red-600'}>
+                                      {assignment.background_check_at_assignment || 'Missing'}
+                                    </span>
+                                  </div>
+                                  <div className="flex items-center justify-between">
+                                    <span className="text-gray">OIG Check:</span>
+                                    <span className={assignment.oig_check_at_assignment === 'clear' ? 'text-green-600' : 'text-red-600'}>
+                                      {assignment.oig_check_at_assignment || 'Missing'}
+                                    </span>
+                                  </div>
+                                </div>
+                              </div>
+
+                              {/* End Details (if ended) */}
+                              {!assignment.is_active && (
+                                <div className="bg-red-50 rounded border border-red-100 p-3">
+                                  <p className="text-xs font-semibold text-red-800 uppercase mb-2">Assignment Ended</p>
+                                  <div className="text-xs space-y-1">
+                                    <div className="flex justify-between">
+                                      <span className="text-red-600">Reason:</span>
+                                      <span className="font-medium text-red-800">
+                                        {END_REASONS.find(r => r.value === assignment.end_reason)?.label || assignment.end_reason || 'Not specified'}
+                                      </span>
+                                    </div>
+                                    {assignment.ended_by_name && (
+                                      <div className="flex justify-between">
+                                        <span className="text-red-600">Ended by:</span>
+                                        <span className="font-medium text-red-800">{assignment.ended_by_name}</span>
+                                      </div>
+                                    )}
+                                    {assignment.ended_at && (
+                                      <div className="flex justify-between">
+                                        <span className="text-red-600">Ended on:</span>
+                                        <span className="font-medium text-red-800">{new Date(assignment.ended_at).toLocaleString()}</span>
+                                      </div>
+                                    )}
+                                  </div>
+                                </div>
+                              )}
+
+                              {/* Audit Log */}
+                              {assignment.audit_log.length > 0 && (
+                                <div>
+                                  <p className="text-xs font-semibold text-gray uppercase mb-2">Audit Trail</p>
+                                  <div className="space-y-2">
+                                    {assignment.audit_log.map((entry) => (
+                                      <div key={entry.id} className="flex items-start gap-2 text-xs">
+                                        <div className={`w-2 h-2 rounded-full mt-1 flex-shrink-0 ${
+                                          entry.action === 'created' ? 'bg-green-500' :
+                                          entry.action === 'ended' ? 'bg-red-500' : 'bg-yellow-500'
+                                        }`} />
+                                        <div className="flex-1">
+                                          <p className="text-slate">
+                                            <span className="font-medium capitalize">{entry.action}</span>
+                                            {entry.performed_by_name && ` by ${entry.performed_by_name}`}
+                                          </p>
+                                          <p className="text-gray">{new Date(entry.performed_at).toLocaleString()}</p>
+                                          {entry.notes && <p className="text-gray mt-0.5">Note: {entry.notes}</p>}
+                                        </div>
+                                      </div>
+                                    ))}
+                                  </div>
+                                </div>
+                              )}
+
+                              {/* End Assignment Button (if active) */}
+                              {assignment.is_active && (
+                                <button
+                                  onClick={(e) => {
+                                    e.stopPropagation();
+                                    handleOpenEndModal(assignment);
+                                  }}
+                                  className="w-full py-2 text-sm text-red-600 border border-red-200 rounded-lg hover:bg-red-50 transition-colors"
+                                >
+                                  End Assignment
+                                </button>
+                              )}
+                            </div>
+                          )}
+                        </div>
+                      ))}
+                    </div>
+                  )}
+                </div>
               ) : (
+                /* Overview Tab */
                 <>
                   {/* Client Info */}
                   <div className="bg-white rounded-lg shadow-sm overflow-hidden">
@@ -463,11 +793,11 @@ export default function ClientsPage() {
                     ))}
                   </div>
 
-                  {/* Assigned Caregivers */}
+                  {/* Active Caregivers */}
                   <div className="bg-white rounded-lg shadow-sm p-4 mt-5">
                     <div className="flex items-center justify-between mb-3">
                       <span className="text-xs font-semibold text-gray uppercase tracking-wide">
-                        Assigned Caregivers ({selectedClient.assignments.filter(a => a.is_active).length})
+                        Active Caregivers ({selectedClient.assignments.filter(a => a.is_active).length})
                       </span>
                     </div>
 
@@ -523,18 +853,6 @@ export default function ClientsPage() {
                                       <span className="text-xs text-red-600">Missing</span>
                                     )}
                                   </div>
-                                  {compliance.alerts.length > 0 && (
-                                    <div className="mt-1">
-                                      {compliance.alerts.slice(0, 2).map((alert, i) => (
-                                        <p key={i} className="text-xs text-warning flex items-center gap-1">
-                                          <svg className="h-3 w-3 flex-shrink-0" fill="none" viewBox="0 0 24 24" stroke="currentColor">
-                                            <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M12 9v2m0 4h.01m-6.938 4h13.856c1.54 0 2.502-1.667 1.732-3L13.732 4c-.77-1.333-2.694-1.333-3.464 0L3.34 16c-.77 1.333.192 3 1.732 3z" />
-                                          </svg>
-                                          <span className="truncate">{alert}</span>
-                                        </p>
-                                      ))}
-                                    </div>
-                                  )}
                                 </div>
                               )}
                             </div>
@@ -708,6 +1026,53 @@ export default function ClientsPage() {
           <div className="flex justify-end gap-3 pt-4">
             <Button variant="secondary" onClick={() => setShowAssignModal(false)}>Cancel</Button>
             <Button onClick={handleAssignCaregiver} loading={assigning} disabled={!selectedEmployeeId}>Assign Caregiver</Button>
+          </div>
+        </div>
+      </Modal>
+
+      {/* End Assignment Modal */}
+      <Modal isOpen={showEndModal} onClose={() => setShowEndModal(false)} title="End Assignment">
+        <div className="space-y-4">
+          {endingAssignment && (
+            <div className="bg-gray-50 rounded-lg p-3">
+              <p className="text-sm font-medium text-slate">{endingAssignment.employee_name}</p>
+              <p className="text-xs text-gray">
+                Assigned since {endingAssignment.start_date ? formatDate(endingAssignment.start_date) : 'N/A'}
+              </p>
+            </div>
+          )}
+
+          <div>
+            <label className="mb-1.5 block text-sm font-medium text-slate">Reason for Ending *</label>
+            <select
+              value={endReason}
+              onChange={(e) => setEndReason(e.target.value)}
+              className="w-full rounded-lg border border-border bg-white px-3 py-2 text-sm focus:border-maroon focus:outline-none focus:ring-1 focus:ring-maroon"
+            >
+              <option value="">Select a reason...</option>
+              {END_REASONS.map((reason) => (
+                <option key={reason.value} value={reason.value}>{reason.label}</option>
+              ))}
+            </select>
+            <p className="mt-1 text-xs text-gray">Required for audit compliance</p>
+          </div>
+
+          <div>
+            <label className="mb-1.5 block text-sm font-medium text-slate">Additional Notes</label>
+            <textarea
+              value={endNotes}
+              onChange={(e) => setEndNotes(e.target.value)}
+              rows={3}
+              className="w-full rounded-lg border border-border bg-white px-3 py-2 text-sm focus:border-maroon focus:outline-none focus:ring-1 focus:ring-maroon"
+              placeholder="Any additional details about ending this assignment..."
+            />
+          </div>
+
+          <div className="flex justify-end gap-3 pt-4">
+            <Button variant="secondary" onClick={() => setShowEndModal(false)}>Cancel</Button>
+            <Button onClick={handleEndAssignment} loading={ending} disabled={!endReason} variant="primary">
+              End Assignment
+            </Button>
           </div>
         </div>
       </Modal>
