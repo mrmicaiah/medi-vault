@@ -69,7 +69,6 @@ class ClientService:
         location_id: Optional[str] = None,
     ) -> Tuple[List[ClientResponse], int]:
         """List clients with optional filtering."""
-        # Don't join on locations since FK doesn't exist
         query = (
             self.supabase.table("clients")
             .select("*", count="exact")
@@ -83,7 +82,6 @@ class ClientService:
             query = query.eq("location_id", location_id)
 
         if search:
-            # Search by nickname (and name if expanded)
             query = query.or_(
                 f"nickname.ilike.%{search}%,"
                 f"first_name.ilike.%{search}%,"
@@ -155,7 +153,6 @@ class ClientService:
                 detail="Client not found",
             )
 
-        # Refetch
         return self._to_response(result.data[0])
 
     def delete_client(self, client_id: str, agency_id: str) -> bool:
@@ -178,7 +175,7 @@ class ClientService:
             self.supabase.table("employee_client_assignments")
             .select("*, employees(id, employee_number, user_id)")
             .eq("client_id", client_id)
-            .order("start_date", desc=True)
+            .order("assignment_start", desc=True)
             .execute()
         )
 
@@ -210,8 +207,8 @@ class ClientService:
                     employee_id=a["employee_id"],
                     employee_name=employee_name,
                     employee_number=emp.get("employee_number"),
-                    start_date=a["start_date"],
-                    end_date=a.get("end_date"),
+                    start_date=a.get("assignment_start"),
+                    end_date=a.get("assignment_end"),
                     schedule=a.get("schedule"),
                     is_active=a.get("is_active", True),
                     notes=a.get("notes"),
@@ -247,9 +244,9 @@ class ClientService:
 
         return ClientResponse(
             id=data["id"],
-            agency_id=data["agency_id"],
+            agency_id=data.get("agency_id"),
             location_id=data.get("location_id"),
-            nickname=data["nickname"],
+            nickname=data.get("nickname") or data.get("client_code") or "Unknown",
             status=data.get("status", "active"),
             notes=data.get("notes"),
             first_name=data.get("first_name"),
