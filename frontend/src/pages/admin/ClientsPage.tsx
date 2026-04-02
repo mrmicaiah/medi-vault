@@ -151,13 +151,16 @@ export default function ClientsPage() {
   // Compliance data for assigned employees
   const [employeeCompliance, setEmployeeCompliance] = useState<Record<string, ComplianceSummary>>({});
 
-  // Assign Caregiver modal
+  // Assign/Reassign Caregiver modal
   const [showAssignModal, setShowAssignModal] = useState(false);
+  const [isReassignment, setIsReassignment] = useState(false);
+  const [reassigningFrom, setReassigningFrom] = useState<ClientAssignment | null>(null);
   const [employees, setEmployees] = useState<Employee[]>([]);
   const [loadingEmployees, setLoadingEmployees] = useState(false);
   const [selectedEmployeeId, setSelectedEmployeeId] = useState('');
   const [assignmentStartDate, setAssignmentStartDate] = useState(new Date().toISOString().split('T')[0]);
   const [assignmentNotes, setAssignmentNotes] = useState('');
+  const [reassignReason, setReassignReason] = useState('reassignment');
   const [assigning, setAssigning] = useState(false);
   const [employeeSearch, setEmployeeSearch] = useState('');
   const [employeeSearchDebounced, setEmployeeSearchDebounced] = useState('');
@@ -325,11 +328,30 @@ export default function ClientsPage() {
     }
   }
 
+  // Open modal for new assignment (no current caregiver)
   function handleOpenAssignModal() {
     setShowAssignModal(true);
+    setIsReassignment(false);
+    setReassigningFrom(null);
     setSelectedEmployeeId('');
     setAssignmentStartDate(new Date().toISOString().split('T')[0]);
     setAssignmentNotes('');
+    setReassignReason('reassignment');
+    setEmployeeSearch('');
+    setEmployeeSearchDebounced('');
+    setEmployeePage(1);
+    setEmployees([]);
+  }
+
+  // Open modal for reassignment (replacing current caregiver)
+  function handleOpenReassignModal(currentAssignment: ClientAssignment) {
+    setShowAssignModal(true);
+    setIsReassignment(true);
+    setReassigningFrom(currentAssignment);
+    setSelectedEmployeeId('');
+    setAssignmentStartDate(new Date().toISOString().split('T')[0]);
+    setAssignmentNotes('');
+    setReassignReason('reassignment');
     setEmployeeSearch('');
     setEmployeeSearchDebounced('');
     setEmployeePage(1);
@@ -341,11 +363,24 @@ export default function ClientsPage() {
 
     try {
       setAssigning(true);
+      
+      // If this is a reassignment, first end the current assignment
+      if (isReassignment && reassigningFrom) {
+        await api.post(`/assignments/${reassigningFrom.assignment_id}/end`, {
+          end_reason: reassignReason,
+          notes: `Reassigned to new caregiver. ${assignmentNotes}`.trim(),
+        });
+      }
+      
+      // Create the new assignment
       await api.post(`/employees/${selectedEmployeeId}/assignments`, {
         client_id: selectedClient.id,
         start_date: assignmentStartDate,
-        notes: assignmentNotes || null,
+        notes: isReassignment 
+          ? `Reassigned from ${reassigningFrom?.employee_name}. ${assignmentNotes}`.trim()
+          : assignmentNotes || null,
       });
+      
       setShowAssignModal(false);
       // Reload client detail and history
       selectClient(selectedClient);
@@ -400,10 +435,23 @@ export default function ClientsPage() {
     );
   }, [clients, search]);
 
-  // Get IDs of already assigned employees
+  // Get IDs of already assigned employees (excluding the one being reassigned)
   const assignedEmployeeIds = useMemo(() => {
     if (!selectedClient) return new Set<string>();
-    return new Set(selectedClient.assignments.filter(a => a.is_active).map(a => a.employee_id));
+    return new Set(
+      selectedClient.assignments
+        .filter(a => a.is_active && (!isReassignment || a.assignment_id !== reassigningFrom?.assignment_id))
+        .map(a => a.employee_id)
+    );
+  }, [selectedClient, isReassignment, reassigningFrom]);
+
+  // Check if client has active assignments
+  const hasActiveAssignment = useMemo(() => {
+    return selectedClient?.assignments.some(a => a.is_active) || false;
+  }, [selectedClient]);
+
+  const activeAssignments = useMemo(() => {
+    return selectedClient?.assignments.filter(a => a.is_active) || [];
   }, [selectedClient]);
 
   const totalPages = Math.ceil(total / pageSize);
@@ -797,15 +845,15 @@ export default function ClientsPage() {
                   <div className="bg-white rounded-lg shadow-sm p-4 mt-5">
                     <div className="flex items-center justify-between mb-3">
                       <span className="text-xs font-semibold text-gray uppercase tracking-wide">
-                        Active Caregivers ({selectedClient.assignments.filter(a => a.is_active).length})
+                        Active Caregivers ({activeAssignments.length})
                       </span>
                     </div>
 
-                    {selectedClient.assignments.filter(a => a.is_active).length === 0 ? (
+                    {activeAssignments.length === 0 ? (
                       <p className="text-xs text-gray">No caregivers assigned</p>
                     ) : (
                       <div className="space-y-3">
-                        {selectedClient.assignments.filter(a => a.is_active).map((assignment) => {
+                        {activeAssignments.map((assignment) => {
                           const compliance = employeeCompliance[assignment.employee_id];
                           return (
                             <div key={assignment.assignment_id} className="rounded-lg border border-gray-100 p-3">
@@ -824,11 +872,21 @@ export default function ClientsPage() {
                                     Since {formatDate(assignment.start_date)}
                                   </p>
                                 </div>
-                                {compliance && (
-                                  <Badge variant={compliance.is_compliant ? 'success' : 'error'} className="text-xs">
-                                    {compliance.is_compliant ? 'Compliant' : 'Non-Compliant'}
-                                  </Badge>
-                                )}
+                                <div className="flex items-center gap-2">
+                                  {compliance && (
+                                    <Badge variant={compliance.is_compliant ? 'success' : 'error'} className="text-xs">
+                                      {compliance.is_compliant ? 'Compliant' : 'Non-Compliant'}
+                                    </Badge>
+                                  )}
+                                  {/* Reassign button */}
+                                  <button
+                                    onClick={() => handleOpenReassignModal(assignment)}
+                                    className="text-xs text-maroon hover:underline"
+                                    title="Change caregiver"
+                                  >
+                                    Change
+                                  </button>
+                                </div>
                               </div>
 
                               {compliance && (
@@ -871,7 +929,7 @@ export default function ClientsPage() {
                       <svg className="h-4 w-4" fill="none" viewBox="0 0 24 24" stroke="currentColor">
                         <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M18 9v3m0 0v3m0-3h3m-3 0h-3m-2-5a4 4 0 11-8 0 4 4 0 018 0zM3 20a6 6 0 0112 0v1H3v-1z" />
                       </svg>
-                      Assign Caregiver
+                      {hasActiveAssignment ? 'Add Caregiver' : 'Assign Caregiver'}
                     </button>
                     <button className="py-3 bg-white border border-border text-navy text-sm font-semibold rounded-lg hover:bg-gray-50 transition-colors">
                       Edit Details
@@ -911,16 +969,51 @@ export default function ClientsPage() {
         </div>
       </Modal>
 
-      {/* Assign Caregiver Modal */}
-      <Modal isOpen={showAssignModal} onClose={() => setShowAssignModal(false)} title={`Assign Caregiver to ${selectedClient?.nickname || 'Client'}`}>
+      {/* Assign/Reassign Caregiver Modal */}
+      <Modal 
+        isOpen={showAssignModal} 
+        onClose={() => setShowAssignModal(false)} 
+        title={isReassignment 
+          ? `Reassign Caregiver for ${selectedClient?.nickname || 'Client'}` 
+          : `Assign Caregiver to ${selectedClient?.nickname || 'Client'}`
+        }
+      >
         <div className="space-y-4">
+          {/* Show current caregiver being replaced */}
+          {isReassignment && reassigningFrom && (
+            <div className="bg-yellow-50 border border-yellow-200 rounded-lg p-3">
+              <p className="text-xs font-semibold text-yellow-800 uppercase mb-1">Replacing Current Caregiver</p>
+              <p className="text-sm text-yellow-900">{reassigningFrom.employee_name}</p>
+              <p className="text-xs text-yellow-700">
+                Assigned since {formatDate(reassigningFrom.start_date)}
+              </p>
+            </div>
+          )}
+
+          {/* Reason for reassignment */}
+          {isReassignment && (
+            <div>
+              <label className="mb-1.5 block text-sm font-medium text-slate">Reason for Change *</label>
+              <select
+                value={reassignReason}
+                onChange={(e) => setReassignReason(e.target.value)}
+                className="w-full rounded-lg border border-border bg-white px-3 py-2 text-sm focus:border-maroon focus:outline-none focus:ring-1 focus:ring-maroon"
+              >
+                {END_REASONS.map((reason) => (
+                  <option key={reason.value} value={reason.value}>{reason.label}</option>
+                ))}
+              </select>
+              <p className="mt-1 text-xs text-gray">This will be logged in the audit trail</p>
+            </div>
+          )}
+
           <div>
             <label className="mb-1.5 block text-sm font-medium text-slate">Search Employees</label>
             <Input
               placeholder="Type to search by name or employee number..."
               value={employeeSearch}
               onChange={(e) => setEmployeeSearch(e.target.value)}
-              autoFocus
+              autoFocus={!isReassignment}
             />
             <p className="mt-1 text-xs text-gray">
               {employeeTotal > 0 ? `${employeeTotal} employees found` : 'Start typing to search'}
@@ -928,7 +1021,7 @@ export default function ClientsPage() {
           </div>
 
           <div>
-            <label className="mb-1.5 block text-sm font-medium text-slate">Select Employee</label>
+            <label className="mb-1.5 block text-sm font-medium text-slate">Select New Caregiver</label>
             {loadingEmployees ? (
               <div className="flex justify-center py-4 border border-border rounded-lg">
                 <svg className="h-5 w-5 animate-spin text-maroon" fill="none" viewBox="0 0 24 24">
@@ -938,7 +1031,7 @@ export default function ClientsPage() {
               </div>
             ) : (
               <div className="border border-border rounded-lg">
-                <div className="max-h-64 overflow-y-auto">
+                <div className="max-h-48 overflow-y-auto">
                   {employees.length === 0 ? (
                     <p className="p-3 text-sm text-gray text-center">
                       {employeeSearch.trim() ? 'No employees found' : 'Type to search employees'}
@@ -947,16 +1040,17 @@ export default function ClientsPage() {
                     employees.map((emp) => {
                       const name = `${emp.first_name || ''} ${emp.last_name || ''}`.trim() || 'Unknown';
                       const isAssigned = assignedEmployeeIds.has(emp.id);
+                      const isCurrentCaregiver = reassigningFrom?.employee_id === emp.id;
                       return (
                         <button
                           key={emp.id}
                           type="button"
-                          disabled={isAssigned}
+                          disabled={isAssigned || isCurrentCaregiver}
                           onClick={() => setSelectedEmployeeId(emp.id)}
                           className={`w-full flex items-center justify-between p-3 text-left border-b border-border last:border-0 transition-colors ${
                             selectedEmployeeId === emp.id
                               ? 'bg-maroon/10'
-                              : isAssigned
+                              : isAssigned || isCurrentCaregiver
                               ? 'bg-gray-50 opacity-50 cursor-not-allowed'
                               : 'hover:bg-gray-50'
                           }`}
@@ -967,7 +1061,9 @@ export default function ClientsPage() {
                               {emp.employee_number || 'No ID'} • {emp.job_title || 'Employee'}
                             </p>
                           </div>
-                          {isAssigned ? (
+                          {isCurrentCaregiver ? (
+                            <Badge variant="warning" className="text-xs">Current</Badge>
+                          ) : isAssigned ? (
                             <Badge variant="neutral" className="text-xs">Already assigned</Badge>
                           ) : selectedEmployeeId === emp.id ? (
                             <svg className="h-5 w-5 text-maroon" fill="none" viewBox="0 0 24 24" stroke="currentColor">
@@ -1019,13 +1115,15 @@ export default function ClientsPage() {
               onChange={(e) => setAssignmentNotes(e.target.value)}
               rows={2}
               className="w-full rounded-lg border border-border bg-white px-3 py-2 text-sm focus:border-maroon focus:outline-none focus:ring-1 focus:ring-maroon"
-              placeholder="Any notes about this assignment..."
+              placeholder={isReassignment ? "Additional notes about this change..." : "Any notes about this assignment..."}
             />
           </div>
 
           <div className="flex justify-end gap-3 pt-4">
             <Button variant="secondary" onClick={() => setShowAssignModal(false)}>Cancel</Button>
-            <Button onClick={handleAssignCaregiver} loading={assigning} disabled={!selectedEmployeeId}>Assign Caregiver</Button>
+            <Button onClick={handleAssignCaregiver} loading={assigning} disabled={!selectedEmployeeId}>
+              {isReassignment ? 'Reassign Caregiver' : 'Assign Caregiver'}
+            </Button>
           </div>
         </div>
       </Modal>
