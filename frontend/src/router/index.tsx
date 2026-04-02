@@ -30,6 +30,7 @@ import { HirePage } from '../pages/admin/HirePage';
 import { UsersPage } from '../pages/admin/UsersPage';
 import { TrainingLeadsPage } from '../pages/admin/TrainingLeadsPage';
 import { SettingsPage } from '../pages/admin/SettingsPage';
+import { SuperadminDashboardPage } from '../pages/superadmin/DashboardPage';
 
 const STAFF_ROLES: UserRole[] = ['admin', 'superadmin', 'manager'];
 
@@ -107,6 +108,22 @@ function AdminRoute({ children }: { children: React.ReactNode }) {
 
   if (!isStaffRole(role)) {
     return <Navigate to="/applicant" replace />;
+  }
+
+  return <>{children}</>;
+}
+
+function SuperadminRoute({ children }: { children: React.ReactNode }) {
+  const { role, profile, loading, initialized } = useAuth();
+
+  if (!initialized || loading) return null;
+
+  if (!profile) {
+    return <ProfileErrorScreen />;
+  }
+
+  if (role !== 'superadmin') {
+    return <Navigate to="/admin" replace />;
   }
 
   return <>{children}</>;
@@ -203,6 +220,18 @@ export function RouterConfig() {
         <Route path="/admin/training-leads" element={<TrainingLeadsPage />} />
         <Route path="/admin/settings" element={<SettingsPage />} />
       </Route>
+
+      {/* Superadmin-only routes (no AppLayout - custom dark theme) */}
+      <Route
+        path="/superadmin"
+        element={
+          <ProtectedRoute>
+            <SuperadminRoute>
+              <SuperadminDashboardPage />
+            </SuperadminRoute>
+          </ProtectedRoute>
+        }
+      />
 
       {/* Root redirect */}
       <Route
