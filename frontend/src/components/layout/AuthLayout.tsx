@@ -19,6 +19,9 @@ export function AuthLayout() {
         <div className="rounded-xl border border-border bg-white p-8 shadow-sm">
           <Outlet />
         </div>
+        <p className="mt-6 text-center text-xs text-gray-light">
+          Powered by MediVault
+        </p>
       </div>
     </div>
   );
