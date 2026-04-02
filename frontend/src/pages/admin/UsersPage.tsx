@@ -8,7 +8,6 @@ import { Alert } from '../../components/ui/Alert';
 import { api } from '../../lib/api';
 import { formatDate } from '../../lib/utils';
 import { useAuth } from '../../hooks/useAuth';
-import { useAgency } from '../../contexts/AgencyContext';
 
 interface Location {
   id: string;
@@ -59,7 +58,6 @@ const roleLabels: Record<string, string> = {
 
 export function UsersPage() {
   const { profile } = useAuth();
-  const { agency } = useAgency();
   
   // Users state
   const [users, setUsers] = useState<User[]>([]);
@@ -89,12 +87,6 @@ export function UsersPage() {
     location_id: '',
   });
   const [saving, setSaving] = useState(false);
-
-  // Reset password modal
-  const [showResetModal, setShowResetModal] = useState(false);
-  const [resetUser, setResetUser] = useState<User | null>(null);
-  const [newPassword, setNewPassword] = useState('');
-  const [resetting, setResetting] = useState(false);
 
   // Credentials display
   const [createdCredentials, setCreatedCredentials] = useState<{
@@ -225,38 +217,15 @@ export function UsersPage() {
     }
   };
 
-  const handleOpenResetPassword = (user: User) => {
-    setResetUser(user);
-    setNewPassword(generateTempPassword());
-    setShowResetModal(true);
-  };
-
-  const handleResetPassword = async () => {
-    if (!resetUser) return;
+  const handleSendPasswordReset = async (user: User) => {
+    if (!confirm(`Send a password reset email to ${user.email}?`)) return;
     
     try {
-      setResetting(true);
       setError(null);
-      
-      await api.post(`/users/${resetUser.id}/reset-password`, {
-        new_password: newPassword,
-      });
-      
-      // Show the new credentials
-      setCreatedCredentials({
-        email: resetUser.email,
-        password: newPassword,
-        name: `${resetUser.first_name} ${resetUser.last_name}`,
-      });
-      
-      setShowResetModal(false);
-      setResetUser(null);
-      setNewPassword('');
-      
+      await api.post(`/users/${user.id}/send-password-reset`);
+      setSuccess(`Password reset email sent to ${user.email}`);
     } catch (err) {
-      setError(err instanceof Error ? err.message : 'Failed to reset password');
-    } finally {
-      setResetting(false);
+      setError(err instanceof Error ? err.message : 'Failed to send reset email');
     }
   };
 
@@ -444,7 +413,8 @@ export function UsersPage() {
                             <Button
                               variant="ghost"
                               size="sm"
-                              onClick={() => handleOpenResetPassword(user)}
+                              onClick={() => handleSendPasswordReset(user)}
+                              title="Send password reset email"
                             >
                               Reset PW
                             </Button>
@@ -642,55 +612,6 @@ export function UsersPage() {
               {isSuperadmin && <option value="admin">Admin</option>}
               <option value="applicant">Applicant (demote)</option>
             </select>
-          </div>
-        </div>
-      </Modal>
-
-      {/* Reset Password Modal */}
-      <Modal
-        isOpen={showResetModal}
-        onClose={() => { setShowResetModal(false); setResetUser(null); setNewPassword(''); }}
-        title={`Reset Password for ${resetUser?.first_name}`}
-        actions={
-          <>
-            <Button variant="secondary" onClick={() => { setShowResetModal(false); setResetUser(null); }}>
-              Cancel
-            </Button>
-            <Button onClick={handleResetPassword} loading={resetting}>
-              Reset Password
-            </Button>
-          </>
-        }
-      >
-        <div className="space-y-4">
-          <p className="text-sm text-gray">
-            Set a new temporary password for <strong>{resetUser?.first_name} {resetUser?.last_name}</strong>.
-            You'll need to share this with them directly.
-          </p>
-          
-          <div>
-            <label className="block text-sm font-medium text-slate mb-1">New Temporary Password</label>
-            <div className="flex gap-2">
-              <Input
-                value={newPassword}
-                onChange={(e) => setNewPassword(e.target.value)}
-                className="flex-1 font-mono"
-              />
-              <Button 
-                type="button" 
-                variant="secondary"
-                onClick={() => setNewPassword(generateTempPassword())}
-              >
-                Generate
-              </Button>
-            </div>
-          </div>
-
-          <div className="bg-warning-bg rounded-lg p-3 border border-warning/20">
-            <p className="text-xs text-warning">
-              <strong>Important:</strong> After resetting, you'll see the new password to share.
-              The user will need to change it after logging in.
-            </p>
           </div>
         </div>
       </Modal>
