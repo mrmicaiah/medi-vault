@@ -8,7 +8,7 @@ Prerequisites:
     1. Run migrate_quickbase_users.py first (creates users + applications)
     2. Download attachments from Quickbase into a folder
     3. Have file_matching.csv (maps files to applicants)
-    4. Install Pillow: pip install Pillow
+    4. Install dependencies: pip install Pillow pillow-heif
 
 Usage:
     python scripts/upload_documents.py --folder ./quickbase_files
@@ -40,6 +40,16 @@ except ImportError:
     PILLOW_AVAILABLE = False
     print("⚠️  Pillow not installed. Images will not be optimized.")
     print("   Install with: pip install Pillow\n")
+
+# Try to import HEIC support
+try:
+    import pillow_heif
+    pillow_heif.register_heif_opener()
+    HEIC_AVAILABLE = True
+except ImportError:
+    HEIC_AVAILABLE = False
+    print("⚠️  pillow-heif not installed. HEIC files will be skipped.")
+    print("   Install with: pip install pillow-heif\n")
 
 load_dotenv()
 
@@ -77,6 +87,7 @@ STEP_DOC_TYPES = {
 
 # Image extensions that should be optimized
 IMAGE_EXTENSIONS = {'.jpg', '.jpeg', '.png', '.webp', '.heic', '.heif', '.bmp', '.tiff', '.tif'}
+HEIC_EXTENSIONS = {'.heic', '.heif'}
 
 
 # ============================================================================
@@ -117,8 +128,16 @@ def optimize_image(file_path: Path) -> Tuple[bytes, str, str]:
         with open(file_path, 'rb') as f:
             return f.read(), file_path.name, get_content_type(file_path.name)
     
+    extension = file_path.suffix.lower()
+    
+    # Check if HEIC and we don't have support
+    if extension in HEIC_EXTENSIONS and not HEIC_AVAILABLE:
+        print("    ⚠️  HEIC not supported, uploading as-is")
+        with open(file_path, 'rb') as f:
+            return f.read(), file_path.name, get_content_type(file_path.name)
+    
     try:
-        # Open image
+        # Open image (pillow-heif registers itself so HEIC should work)
         img = Image.open(file_path)
         
         # Convert to RGB if necessary (for JPEG output)
@@ -127,7 +146,14 @@ def optimize_image(file_path: Path) -> Tuple[bytes, str, str]:
             background = Image.new('RGB', img.size, (255, 255, 255))
             if img.mode == 'P':
                 img = img.convert('RGBA')
-            background.paste(img, mask=img.split()[-1] if img.mode == 'RGBA' else None)
+            if img.mode in ('RGBA', 'LA'):
+                # Handle transparency
+                try:
+                    background.paste(img, mask=img.split()[-1])
+                except Exception:
+                    background.paste(img)
+            else:
+                background.paste(img)
             img = background
         elif img.mode != 'RGB':
             img = img.convert('RGB')
@@ -147,11 +173,10 @@ def optimize_image(file_path: Path) -> Tuple[bytes, str, str]:
                     img = img.rotate(270, expand=True)
                 elif orientation_value == 8:
                     img = img.rotate(90, expand=True)
-        except (AttributeError, KeyError, IndexError):
+        except (AttributeError, KeyError, IndexError, TypeError):
             pass  # No EXIF data
         
         # Resize if larger than max dimensions
-        original_size = img.size
         if img.width > MAX_IMAGE_WIDTH or img.height > MAX_IMAGE_HEIGHT:
             img.thumbnail((MAX_IMAGE_WIDTH, MAX_IMAGE_HEIGHT), Image.LANCZOS)
         
@@ -298,7 +323,10 @@ def main():
     
     if PILLOW_AVAILABLE:
         print("🖼️  Image optimization: ENABLED")
-        print("   Max size: {}x{}, Quality: {}%\n".format(MAX_IMAGE_WIDTH, MAX_IMAGE_HEIGHT, JPEG_QUALITY))
+        print("   Max size: {}x{}, Quality: {}%".format(MAX_IMAGE_WIDTH, MAX_IMAGE_HEIGHT, JPEG_QUALITY))
+    if HEIC_AVAILABLE:
+        print("📱 HEIC support: ENABLED")
+    print()
     
     # Validate environment
     SUPABASE_URL = os.getenv("SUPABASE_URL")
