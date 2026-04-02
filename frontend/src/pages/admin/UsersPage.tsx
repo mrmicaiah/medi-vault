@@ -40,6 +40,17 @@ interface AgencyWithLocations {
   locations: Location[];
 }
 
+interface Invitation {
+  id: string;
+  email: string;
+  role: string;
+  location_id: string | null;
+  location_name?: string;
+  status: string;
+  created_at: string;
+  expires_at: string;
+}
+
 const roleBadgeVariant: Record<string, 'success' | 'warning' | 'info' | 'neutral'> = {
   superadmin: 'success',
   admin: 'info',
@@ -61,19 +72,17 @@ export function UsersPage() {
   
   // Users state
   const [users, setUsers] = useState<User[]>([]);
+  const [invitations, setInvitations] = useState<Invitation[]>([]);
   const [locations, setLocations] = useState<Location[]>([]);
   const [loading, setLoading] = useState(true);
   const [error, setError] = useState<string | null>(null);
   const [success, setSuccess] = useState<string | null>(null);
   
-  // Create user modal
-  const [showCreateModal, setShowCreateModal] = useState(false);
-  const [creating, setCreating] = useState(false);
-  const [newUser, setNewUser] = useState({
+  // Invite modal
+  const [showInviteModal, setShowInviteModal] = useState(false);
+  const [inviting, setInviting] = useState(false);
+  const [inviteForm, setInviteForm] = useState({
     email: '',
-    password: '',
-    first_name: '',
-    last_name: '',
     role: 'manager',
     location_id: '',
   });
@@ -88,12 +97,8 @@ export function UsersPage() {
   });
   const [saving, setSaving] = useState(false);
 
-  // Credentials display
-  const [createdCredentials, setCreatedCredentials] = useState<{
-    email: string;
-    password: string;
-    name: string;
-  } | null>(null);
+  // Invitation link display
+  const [inviteLink, setInviteLink] = useState<string | null>(null);
 
   const loadUsers = async () => {
     try {
@@ -104,6 +109,15 @@ export function UsersPage() {
       setError(err instanceof Error ? err.message : 'Failed to load users');
     } finally {
       setLoading(false);
+    }
+  };
+
+  const loadInvitations = async () => {
+    try {
+      const res = await api.get<{ invitations: Invitation[] }>('/invitations');
+      setInvitations(res.invitations || []);
+    } catch (err) {
+      console.error('Failed to load invitations:', err);
     }
   };
 
@@ -118,67 +132,71 @@ export function UsersPage() {
 
   useEffect(() => {
     loadUsers();
+    loadInvitations();
     loadLocations();
   }, []);
 
-  const generateTempPassword = () => {
-    // Generate a readable temporary password
-    const chars = 'ABCDEFGHJKLMNPQRSTUVWXYZabcdefghjkmnpqrstuvwxyz23456789';
-    let password = '';
-    for (let i = 0; i < 10; i++) {
-      password += chars.charAt(Math.floor(Math.random() * chars.length));
-    }
-    return password;
-  };
-
-  const handleCreateUser = async () => {
+  const handleInviteUser = async () => {
     try {
-      setCreating(true);
+      setInviting(true);
       setError(null);
       
-      // Validate
-      if (!newUser.email || !newUser.password || !newUser.first_name || !newUser.last_name) {
-        setError('Please fill in all required fields');
+      if (!inviteForm.email) {
+        setError('Please enter an email address');
         return;
       }
       
-      if (newUser.role === 'manager' && !newUser.location_id) {
+      if (inviteForm.role === 'manager' && !inviteForm.location_id) {
         setError('Please select a location for the manager');
         return;
       }
       
-      await api.post('/users', {
-        email: newUser.email,
-        password: newUser.password,
-        first_name: newUser.first_name,
-        last_name: newUser.last_name,
-        role: newUser.role,
-        location_id: newUser.location_id || null,
+      const res = await api.post<{ invitation: Invitation; invite_url: string }>('/invitations', {
+        email: inviteForm.email,
+        role: inviteForm.role,
+        location_id: inviteForm.location_id || null,
       });
       
-      // Store credentials to display
-      setCreatedCredentials({
-        email: newUser.email,
-        password: newUser.password,
-        name: `${newUser.first_name} ${newUser.last_name}`,
-      });
+      setInviteLink(res.invite_url);
+      setSuccess(`Invitation sent to ${inviteForm.email}`);
       
       // Reset form
-      setNewUser({
+      setInviteForm({
         email: '',
-        password: '',
-        first_name: '',
-        last_name: '',
         role: 'manager',
         location_id: '',
       });
-      setShowCreateModal(false);
-      loadUsers();
+      setShowInviteModal(false);
+      loadInvitations();
       
     } catch (err) {
-      setError(err instanceof Error ? err.message : 'Failed to create user');
+      setError(err instanceof Error ? err.message : 'Failed to send invitation');
     } finally {
-      setCreating(false);
+      setInviting(false);
+    }
+  };
+
+  const handleResendInvitation = async (invitation: Invitation) => {
+    try {
+      setError(null);
+      const res = await api.post<{ invite_url: string }>(`/invitations/${invitation.id}/resend`);
+      setInviteLink(res.invite_url);
+      setSuccess(`Invitation resent to ${invitation.email}`);
+    } catch (err) {
+      setError(err instanceof Error ? err.message : 'Failed to resend invitation');
+    }
+  };
+
+  const handleCancelInvitation = async (invitationId: string) => {
+    if (!confirm('Cancel this invitation?')) return;
+    
+    try {
+      setError(null);
+      await api.delete(`/invitations/${invitationId}`);
+      setSuccess('Invitation cancelled');
+      loadInvitations();
+    } catch (err) {
+      setError(err instanceof Error ? err.message : 'Failed to cancel invitation');
     }
   };
 
@@ -262,27 +280,26 @@ export function UsersPage() {
 
   const isSuperadmin = profile?.role === 'superadmin';
 
+  const pendingInvitations = invitations.filter(i => i.status === 'pending');
+
   return (
     <div className="space-y-6">
       <div className="flex items-center justify-between">
         <div>
           <h1 className="font-display text-2xl font-bold text-navy">Team Management</h1>
           <p className="mt-1 text-sm text-gray">
-            Create and manage staff accounts for your agency
+            Invite and manage staff accounts for your agency
           </p>
         </div>
         <Button onClick={() => {
-          setNewUser({
+          setInviteForm({
             email: '',
-            password: generateTempPassword(),
-            first_name: '',
-            last_name: '',
             role: 'manager',
             location_id: locations.length > 0 ? locations[0].id : '',
           });
-          setShowCreateModal(true);
+          setShowInviteModal(true);
         }}>
-          + Add Team Member
+          + Invite Team Member
         </Button>
       </div>
 
@@ -298,55 +315,80 @@ export function UsersPage() {
         </Alert>
       )}
 
-      {/* Credentials Display */}
-      {createdCredentials && (
-        <Card className="border-2 border-success bg-success-bg">
+      {/* Invitation Link Display */}
+      {inviteLink && (
+        <Card className="border-2 border-info bg-info-bg">
           <div className="flex items-start justify-between">
-            <div className="space-y-3">
+            <div className="space-y-3 flex-1">
               <div className="flex items-center gap-2">
-                <svg className="h-5 w-5 text-success" fill="none" viewBox="0 0 24 24" stroke="currentColor">
-                  <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M9 12l2 2 4-4m6 2a9 9 0 11-18 0 9 9 0 0118 0z" />
+                <svg className="h-5 w-5 text-info" fill="none" viewBox="0 0 24 24" stroke="currentColor">
+                  <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M13.828 10.172a4 4 0 00-5.656 0l-4 4a4 4 0 105.656 5.656l1.102-1.101m-.758-4.899a4 4 0 005.656 0l4-4a4 4 0 00-5.656-5.656l-1.1 1.1" />
                 </svg>
-                <p className="font-semibold text-success">Account Created for {createdCredentials.name}</p>
+                <p className="font-semibold text-info">Invitation Link</p>
               </div>
               <p className="text-sm text-slate">
-                Share these login credentials with the user. They can change their password after logging in.
+                Share this link with the team member. They'll create their own password when they sign up.
               </p>
-              <div className="bg-white rounded-lg p-4 border border-border space-y-2">
-                <div className="flex items-center justify-between">
-                  <div>
-                    <p className="text-xs text-gray uppercase font-medium">Email</p>
-                    <p className="text-sm font-mono text-slate">{createdCredentials.email}</p>
-                  </div>
-                  <Button size="sm" variant="ghost" onClick={() => copyToClipboard(createdCredentials.email)}>
-                    Copy
-                  </Button>
-                </div>
-                <div className="border-t border-border my-2" />
-                <div className="flex items-center justify-between">
-                  <div>
-                    <p className="text-xs text-gray uppercase font-medium">Temporary Password</p>
-                    <p className="text-sm font-mono text-slate">{createdCredentials.password}</p>
-                  </div>
-                  <Button size="sm" variant="ghost" onClick={() => copyToClipboard(createdCredentials.password)}>
-                    Copy
-                  </Button>
-                </div>
+              <div className="bg-white rounded-lg p-3 border border-border">
+                <p className="text-sm font-mono text-slate break-all">{inviteLink}</p>
               </div>
               <Button 
                 size="sm" 
                 variant="secondary"
-                onClick={() => copyToClipboard(`Login: ${createdCredentials.email}\nPassword: ${createdCredentials.password}`)}
+                onClick={() => copyToClipboard(inviteLink)}
               >
-                Copy Both to Clipboard
+                Copy Link
               </Button>
             </div>
             <button 
-              onClick={() => setCreatedCredentials(null)}
-              className="text-gray hover:text-slate text-xl leading-none p-1"
+              onClick={() => setInviteLink(null)}
+              className="text-gray hover:text-slate text-xl leading-none p-1 ml-4"
             >
               ×
             </button>
+          </div>
+        </Card>
+      )}
+
+      {/* Pending Invitations */}
+      {pendingInvitations.length > 0 && (
+        <Card
+          header={
+            <div className="flex items-center gap-2">
+              <h3 className="font-semibold text-navy">Pending Invitations</h3>
+              <Badge variant="warning">{pendingInvitations.length}</Badge>
+            </div>
+          }
+          padding="none"
+        >
+          <div className="divide-y divide-border">
+            {pendingInvitations.map((inv) => (
+              <div key={inv.id} className="flex items-center justify-between px-4 py-3">
+                <div>
+                  <p className="text-sm font-medium text-slate">{inv.email}</p>
+                  <p className="text-xs text-gray">
+                    {roleLabels[inv.role]} • Sent {formatDate(inv.created_at)}
+                  </p>
+                </div>
+                <div className="flex items-center gap-2">
+                  <Button
+                    variant="ghost"
+                    size="sm"
+                    onClick={() => handleResendInvitation(inv)}
+                  >
+                    Resend
+                  </Button>
+                  <Button
+                    variant="ghost"
+                    size="sm"
+                    onClick={() => handleCancelInvitation(inv.id)}
+                    className="text-error hover:text-error"
+                  >
+                    Cancel
+                  </Button>
+                </div>
+              </div>
+            ))}
           </div>
         </Card>
       )}
@@ -437,7 +479,7 @@ export function UsersPage() {
                 {users.length === 0 && (
                   <tr>
                     <td colSpan={5} className="px-4 py-8 text-center text-sm text-gray">
-                      No staff users found. Click "Add Team Member" to create one.
+                      No staff users found. Click "Invite Team Member" to send an invitation.
                     </td>
                   </tr>
                 )}
@@ -447,76 +489,41 @@ export function UsersPage() {
         )}
       </Card>
 
-      {/* Create User Modal */}
+      {/* Invite User Modal */}
       <Modal
-        isOpen={showCreateModal}
-        onClose={() => setShowCreateModal(false)}
-        title="Add Team Member"
+        isOpen={showInviteModal}
+        onClose={() => setShowInviteModal(false)}
+        title="Invite Team Member"
         actions={
           <>
-            <Button variant="secondary" onClick={() => setShowCreateModal(false)}>
+            <Button variant="secondary" onClick={() => setShowInviteModal(false)}>
               Cancel
             </Button>
-            <Button onClick={handleCreateUser} loading={creating}>
-              Create Account
+            <Button onClick={handleInviteUser} loading={inviting}>
+              Send Invitation
             </Button>
           </>
         }
       >
         <div className="space-y-4">
           <p className="text-sm text-gray">
-            Create an account and share the credentials with the team member directly.
+            Send an invitation email. The recipient will create their own password when they sign up.
           </p>
-          
-          <div className="grid grid-cols-2 gap-4">
-            <Input
-              label="First Name"
-              value={newUser.first_name}
-              onChange={(e) => setNewUser({ ...newUser, first_name: e.target.value })}
-              required
-            />
-            <Input
-              label="Last Name"
-              value={newUser.last_name}
-              onChange={(e) => setNewUser({ ...newUser, last_name: e.target.value })}
-              required
-            />
-          </div>
           
           <Input
             label="Email Address"
             type="email"
-            value={newUser.email}
-            onChange={(e) => setNewUser({ ...newUser, email: e.target.value })}
+            value={inviteForm.email}
+            onChange={(e) => setInviteForm({ ...inviteForm, email: e.target.value })}
             placeholder="manager@example.com"
             required
           />
           
           <div>
-            <label className="block text-sm font-medium text-slate mb-1">Temporary Password</label>
-            <div className="flex gap-2">
-              <Input
-                value={newUser.password}
-                onChange={(e) => setNewUser({ ...newUser, password: e.target.value })}
-                className="flex-1 font-mono"
-                required
-              />
-              <Button 
-                type="button" 
-                variant="secondary"
-                onClick={() => setNewUser({ ...newUser, password: generateTempPassword() })}
-              >
-                Generate
-              </Button>
-            </div>
-            <p className="text-xs text-gray mt-1">The user can change this after logging in.</p>
-          </div>
-          
-          <div>
             <label className="block text-sm font-medium text-slate mb-1">Role</label>
             <select
-              value={newUser.role}
-              onChange={(e) => setNewUser({ ...newUser, role: e.target.value })}
+              value={inviteForm.role}
+              onChange={(e) => setInviteForm({ ...inviteForm, role: e.target.value })}
               className="w-full rounded-lg border border-border px-3 py-2 text-sm"
             >
               <option value="manager">Manager - Manages a location</option>
@@ -524,12 +531,12 @@ export function UsersPage() {
             </select>
           </div>
 
-          {newUser.role === 'manager' && (
+          {inviteForm.role === 'manager' && (
             <div>
               <label className="block text-sm font-medium text-slate mb-1">Assign to Location</label>
               <select
-                value={newUser.location_id}
-                onChange={(e) => setNewUser({ ...newUser, location_id: e.target.value })}
+                value={inviteForm.location_id}
+                onChange={(e) => setInviteForm({ ...inviteForm, location_id: e.target.value })}
                 className="w-full rounded-lg border border-border px-3 py-2 text-sm"
                 required
               >
@@ -542,13 +549,6 @@ export function UsersPage() {
               </select>
             </div>
           )}
-
-          <div className="bg-blue-50 rounded-lg p-3 border border-blue-100">
-            <p className="text-xs text-blue-700">
-              <strong>Note:</strong> After creating, you'll see the credentials to share with the user.
-              They can log in at your agency's portal and change their password.
-            </p>
-          </div>
         </div>
       </Modal>
 
