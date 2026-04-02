@@ -176,6 +176,27 @@ COL_DATE_CREATED = "Date Created"
 # HELPER FUNCTIONS
 # ============================================================================
 
+def read_csv_with_encoding(csv_path: str) -> List[Dict]:
+    """Try multiple encodings to read the CSV file."""
+    encodings = ['utf-8-sig', 'utf-8', 'latin-1', 'cp1252', 'iso-8859-1']
+    
+    for encoding in encodings:
+        try:
+            with open(csv_path, 'r', encoding=encoding) as f:
+                reader = csv.DictReader(f)
+                rows = list(reader)
+                print("   Using encoding: {}".format(encoding))
+                return rows
+        except UnicodeDecodeError:
+            continue
+    
+    # Last resort: read with errors='replace'
+    print("   Warning: Using fallback encoding with replacement characters")
+    with open(csv_path, 'r', encoding='utf-8', errors='replace') as f:
+        reader = csv.DictReader(f)
+        return list(reader)
+
+
 def generate_temp_password(length: int = 20) -> str:
     alphabet = string.ascii_letters + string.digits + "!@#$%"
     return ''.join(secrets.choice(alphabet) for _ in range(length))
@@ -674,11 +695,9 @@ def main():
     print("📡 Connecting to Supabase...")
     supabase = create_client(SUPABASE_URL, SUPABASE_SERVICE_KEY)
     
-    # Read CSV
+    # Read CSV with encoding detection
     print("📂 Reading {}...".format(CSV_PATH))
-    with open(csv_path, 'r', encoding='utf-8-sig') as f:
-        reader = csv.DictReader(f)
-        rows = list(reader)
+    rows = read_csv_with_encoding(CSV_PATH)
     
     if LIMIT:
         rows = rows[:LIMIT]
