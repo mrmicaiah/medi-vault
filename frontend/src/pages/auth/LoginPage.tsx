@@ -78,7 +78,7 @@ export function LoginPage() {
           Looking to apply for a position?
         </p>
         <Link to="/apply">
-          <Button variant="secondary" className="w-full">
+          <Button variant="secondary" className="w-full border-teal text-teal hover:bg-teal/5">
             Start Your Application
           </Button>
         </Link>
