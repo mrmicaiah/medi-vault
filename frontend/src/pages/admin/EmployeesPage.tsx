@@ -27,6 +27,35 @@ interface EmployeeDetail extends Employee {
   compliance?: ComplianceStatus;
 }
 
+interface EmployeePreferences {
+  // Step 1 - Application Basics
+  position_applied?: string;
+  employment_type?: string;
+  desired_hourly_rate?: string;
+  desired_start_date?: string;
+  speaks_other_languages?: string;
+  other_languages?: string;
+  how_heard?: string;
+  
+  // Step 2 - Personal Info
+  city?: string;
+  state?: string;
+  address_line1?: string;
+  zip?: string;
+  
+  // Step 8 - Work Preferences
+  available_days?: string[];
+  shift_preferences?: string[];
+  hours_per_week?: string;
+  has_transportation?: string;
+  max_travel_miles?: string;
+  comfortable_with_pets?: string;
+  comfortable_with_smokers?: string;
+  
+  // Step 15 - Credentials
+  credential_type?: string;
+}
+
 interface ClientAssignment {
   id: string;
   client_id: string;
@@ -126,6 +155,51 @@ const END_REASONS = [
 
 type SortField = 'name' | 'job_title' | 'status' | 'hire_date';
 
+// Helper functions for formatting preferences
+const formatAvailability = (days?: string[]) => {
+  if (!days || days.length === 0) return '—';
+  if (days.length === 7) return 'Any Day';
+  if (days.length >= 5) return 'Most Days';
+  return days.slice(0, 3).map(d => d.charAt(0).toUpperCase() + d.slice(1, 3)).join(', ') + (days.length > 3 ? '...' : '');
+};
+
+const formatHours = (hours?: string) => {
+  const map: Record<string, string> = { 
+    'part_time': 'Part Time', 
+    'full_time': 'Full Time', 
+    'fill_in': 'Fill In',
+    'live_in': 'Live-In',
+    '10-20': '10–20 hrs', 
+    '20-30': '20–30 hrs', 
+    '30-40': '30–40 hrs', 
+    '40+': '40+ hrs' 
+  };
+  return map[hours || ''] || hours || '—';
+};
+
+const formatSmokerPref = (pref?: string) => {
+  const map: Record<string, string> = { 
+    yes: 'OK with', 
+    no: 'Not OK', 
+    prefer_no_smoking: 'Prefer No',
+    no_preference: 'No pref' 
+  };
+  return map[pref || ''] || pref || '—';
+};
+
+const formatTransportation = (hasTransport?: string, maxMiles?: string) => {
+  if (hasTransport === 'yes') {
+    return maxMiles ? `Yes (${maxMiles} mi)` : 'Yes';
+  }
+  return hasTransport === 'no' ? 'No' : '—';
+};
+
+const getPositionLabel = (position?: string) => {
+  if (!position) return '—';
+  const labels: Record<string, string> = { pca: 'PCA', hha: 'HHA', cna: 'CNA', lpn: 'LPN', rn: 'RN' };
+  return labels[position.toLowerCase()] || position.toUpperCase();
+};
+
 export function EmployeesPage() {
   const [employees, setEmployees] = useState<Employee[]>([]);
   const [loading, setLoading] = useState(true);
@@ -138,6 +212,10 @@ export function EmployeesPage() {
   const [selectedEmployee, setSelectedEmployee] = useState<EmployeeDetail | null>(null);
   const [panelOpen, setPanelOpen] = useState(false);
   const [loadingDetail, setLoadingDetail] = useState(false);
+  
+  // Preferences state
+  const [preferences, setPreferences] = useState<EmployeePreferences | null>(null);
+  const [loadingPreferences, setLoadingPreferences] = useState(false);
 
   // Assignment state
   const [assignments, setAssignments] = useState<ClientAssignment[]>([]);
@@ -220,12 +298,26 @@ export function EmployeesPage() {
     setPanelOpen(true);
     setShowHistorySection(false);
     setLoadingDetail(true);
+    setPreferences(null);
 
     try {
       // Load assignments
       const assignRes = await api.get<ClientAssignment[]>(`/employees/${employee.id}/assignments`);
       setAssignments(assignRes || []);
       setSelectedEmployee(prev => prev ? { ...prev, assignments: assignRes || [] } : null);
+      
+      // Load preferences from original application
+      setLoadingPreferences(true);
+      try {
+        const prefRes = await api.get<{ preferences: EmployeePreferences; has_application: boolean }>(`/employees/${employee.id}/preferences`);
+        if (prefRes.has_application && prefRes.preferences) {
+          setPreferences(prefRes.preferences);
+        }
+      } catch (prefErr) {
+        console.error('Failed to load preferences:', prefErr);
+      } finally {
+        setLoadingPreferences(false);
+      }
     } catch (err) {
       console.error('Failed to load assignments:', err);
     } finally {
@@ -270,6 +362,7 @@ export function EmployeesPage() {
       setSelectedEmployee(null);
       setAssignments([]);
       setAssignmentHistory([]);
+      setPreferences(null);
     }, 250);
   };
 
@@ -551,11 +644,18 @@ export function EmployeesPage() {
           />
           <div className={`fixed top-0 right-0 h-full w-[420px] bg-white shadow-2xl z-50 flex flex-col transition-transform duration-250 ease-out ${panelOpen ? 'translate-x-0' : 'translate-x-full'}`}>
             <div className="px-6 py-5 bg-navy flex items-center justify-between flex-shrink-0">
-              <div>
-                <h2 className="text-lg font-semibold text-white">
-                  {selectedEmployee.first_name} {selectedEmployee.last_name}
-                </h2>
-                <p className="text-sm text-white/70">{selectedEmployee.position || 'No position'}</p>
+              <div className="flex items-center gap-3">
+                <div>
+                  <h2 className="text-lg font-semibold text-white">
+                    {selectedEmployee.first_name} {selectedEmployee.last_name}
+                  </h2>
+                  <p className="text-sm text-white/70">{selectedEmployee.position || 'No position'}</p>
+                </div>
+                {preferences?.position_applied && (
+                  <span className="text-sm font-bold text-white bg-white/20 px-2 py-0.5 rounded">
+                    {getPositionLabel(preferences.position_applied)}
+                  </span>
+                )}
               </div>
               <button onClick={closePanel} className="text-white/60 hover:text-white text-2xl leading-none p-1">×</button>
             </div>
@@ -570,8 +670,44 @@ export function EmployeesPage() {
                 </div>
               ) : (
                 <>
+                  {/* Work Preferences - Similar to Applicants Panel */}
+                  {preferences && (
+                    <div className="bg-white rounded-lg shadow-sm overflow-hidden mb-5">
+                      <div className="px-4 py-2 bg-gray-50 border-b border-gray-100">
+                        <span className="text-xs font-semibold text-gray uppercase tracking-wide">Work Preferences</span>
+                      </div>
+                      {[
+                        { label: 'City', value: preferences.city || '—' },
+                        { label: 'Position', value: getPositionLabel(preferences.position_applied) },
+                        { label: 'Credential', value: preferences.credential_type ? preferences.credential_type.toUpperCase() : '—' },
+                        { label: 'Hours', value: formatHours(preferences.hours_per_week) },
+                        { label: 'Transport', value: formatTransportation(preferences.has_transportation, preferences.max_travel_miles) },
+                        { label: 'Availability', value: formatAvailability(preferences.available_days) },
+                        { label: 'Smokers?', value: formatSmokerPref(preferences.comfortable_with_smokers) },
+                      ].map((row, i, arr) => (
+                        <div key={i} className={`grid grid-cols-[110px_1fr] px-4 py-3 items-center ${i < arr.length - 1 ? 'border-b border-gray-100' : ''}`}>
+                          <span className="text-xs font-semibold text-navy">{row.label}</span>
+                          <span className="text-sm text-slate">{row.value}</span>
+                        </div>
+                      ))}
+                    </div>
+                  )}
+                  
+                  {loadingPreferences && (
+                    <div className="bg-white rounded-lg shadow-sm p-4 mb-5 text-center">
+                      <svg className="h-5 w-5 animate-spin text-maroon mx-auto" fill="none" viewBox="0 0 24 24">
+                        <circle className="opacity-25" cx="12" cy="12" r="10" stroke="currentColor" strokeWidth="4" />
+                        <path className="opacity-75" fill="currentColor" d="M4 12a8 8 0 018-8V0C5.373 0 0 5.373 0 12h4z" />
+                      </svg>
+                      <p className="text-xs text-gray mt-2">Loading preferences...</p>
+                    </div>
+                  )}
+
                   {/* Basic Info */}
                   <div className="bg-white rounded-lg shadow-sm overflow-hidden">
+                    <div className="px-4 py-2 bg-gray-50 border-b border-gray-100">
+                      <span className="text-xs font-semibold text-gray uppercase tracking-wide">Contact Info</span>
+                    </div>
                     {[
                       { label: 'Email', value: selectedEmployee.email },
                       { label: 'Phone', value: selectedEmployee.phone || '—' },
@@ -709,7 +845,7 @@ export function EmployeesPage() {
             </div>
 
             <div className="px-6 py-3 border-t border-gray-100 bg-white flex-shrink-0">
-              <p className="text-[10px] text-gray-400 text-center">Powered by MediSVault</p>
+              <p className="text-[10px] text-gray-400 text-center">Powered by MediVault</p>
             </div>
           </div>
         </>
