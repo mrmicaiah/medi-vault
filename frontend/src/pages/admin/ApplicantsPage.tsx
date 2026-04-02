@@ -158,6 +158,10 @@ export function ApplicantsPage() {
   const [transferReason, setTransferReason] = useState('');
   const [transferring, setTransferring] = useState(false);
 
+  // Delete state
+  const [showDeleteConfirm, setShowDeleteConfirm] = useState(false);
+  const [deleting, setDeleting] = useState(false);
+
   useEffect(() => {
     loadApplicants();
     loadLocations();
@@ -216,6 +220,30 @@ export function ApplicantsPage() {
       setError(err instanceof Error ? err.message : 'Failed to transfer applicant');
     } finally {
       setTransferring(false);
+    }
+  };
+
+  const handleDeleteApplicant = async () => {
+    if (!selectedApplicant) return;
+    
+    try {
+      setDeleting(true);
+      await api.delete(`/admin/applicants/${selectedApplicant.id}`);
+      
+      // Remove from local state
+      setApplicants(prev => prev.filter(a => a.id !== selectedApplicant.id));
+      detailCache.delete(selectedApplicant.id);
+      
+      // Close panel
+      setShowDeleteConfirm(false);
+      closePanel();
+      
+      setError(null);
+    } catch (err) {
+      setError(err instanceof Error ? err.message : 'Failed to delete application');
+      setShowDeleteConfirm(false);
+    } finally {
+      setDeleting(false);
     }
   };
 
@@ -631,6 +659,9 @@ export function ApplicantsPage() {
     );
   };
 
+  // Check if applicant can be deleted (not hired)
+  const canDelete = selectedApplicant && selectedApplicant.status !== 'hired';
+
   if (loading) {
     return (
       <div className="flex items-center justify-center py-12">
@@ -1000,6 +1031,16 @@ export function ApplicantsPage() {
                   </div>
 
                   <button onClick={handleUploadClick} className="w-full mt-5 py-3 bg-white border border-border text-navy text-sm font-medium rounded-lg hover:bg-gray-50 transition-colors">Upload Document</button>
+
+                  {/* Delete Application Button - Only shows if not hired */}
+                  {canDelete && (
+                    <button 
+                      onClick={() => setShowDeleteConfirm(true)} 
+                      className="w-full mt-3 py-3 bg-white border border-error/30 text-error text-sm font-medium rounded-lg hover:bg-error/5 transition-colors"
+                    >
+                      Delete Application
+                    </button>
+                  )}
                 </>
               )}
             </div>
@@ -1087,6 +1128,45 @@ export function ApplicantsPage() {
             <div className="flex gap-3">
               <Button variant="secondary" className="flex-1" onClick={() => { setShowTransferModal(false); setTransferToLocation(''); setTransferReason(''); }}>Cancel</Button>
               <Button className="flex-1" disabled={!transferToLocation || transferring} loading={transferring} onClick={handleTransferApplicant}>Transfer</Button>
+            </div>
+          </div>
+        </>
+      )}
+
+      {/* Delete Confirmation Modal */}
+      {showDeleteConfirm && selectedApplicant && (
+        <>
+          <div className="fixed inset-0 bg-black/40 z-[60]" onClick={() => setShowDeleteConfirm(false)} />
+          <div className="fixed top-1/2 left-1/2 -translate-x-1/2 -translate-y-1/2 w-full max-w-md bg-white rounded-xl shadow-2xl z-[70] p-6">
+            <div className="flex items-center gap-3 mb-4">
+              <div className="w-10 h-10 rounded-full bg-error/10 flex items-center justify-center">
+                <svg className="w-5 h-5 text-error" fill="none" viewBox="0 0 24 24" stroke="currentColor">
+                  <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M19 7l-.867 12.142A2 2 0 0116.138 21H7.862a2 2 0 01-1.995-1.858L5 7m5 4v6m4-6v6m1-10V4a1 1 0 00-1-1h-4a1 1 0 00-1 1v3M4 7h16" />
+                </svg>
+              </div>
+              <h3 className="text-lg font-semibold text-navy">Delete Application</h3>
+            </div>
+            <p className="text-sm text-gray mb-2">
+              Are you sure you want to delete the application for <strong>{selectedApplicant.first_name} {selectedApplicant.last_name}</strong>?
+            </p>
+            <p className="text-sm text-gray mb-6">
+              This will move the application to the trash. A superadmin can restore it if needed.
+            </p>
+            <div className="flex gap-3">
+              <Button 
+                variant="secondary" 
+                className="flex-1" 
+                onClick={() => setShowDeleteConfirm(false)}
+              >
+                Cancel
+              </Button>
+              <button 
+                onClick={handleDeleteApplicant}
+                disabled={deleting}
+                className="flex-1 py-2.5 bg-error text-white text-sm font-semibold rounded-lg hover:bg-error/90 transition-colors disabled:opacity-50"
+              >
+                {deleting ? 'Deleting...' : 'Delete Application'}
+              </button>
             </div>
           </div>
         </>
