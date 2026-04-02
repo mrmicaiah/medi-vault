@@ -37,11 +37,11 @@ async def list_employees(
     page: int = Query(1, ge=1),
     page_size: int = Query(25, ge=1, le=100),
     status: Optional[EmployeeStatus] = Query(None),
-    search: Optional[str] = Query(None),
+    search: Optional[str] = Query(None, description="Search by name, email, or employee number"),
     admin: UserProfile = Depends(require_admin),
     supabase: Client = Depends(get_supabase),
 ):
-    """List all employees with optional filtering (admin only)."""
+    """List all employees with optional filtering and search (admin only)."""
     service = EmployeeService(supabase)
     employees, total = service.get_employees(page, page_size, status, search)
     return EmployeeListResponse(
@@ -75,7 +75,7 @@ async def update_employee(
     return service.update_employee(emp_id, update)
 
 
-@router.post("/{emp_id}/assign-client", response_model=ClientAssignmentResponse, status_code=201)
+@router.post("/{emp_id}/assignments", response_model=ClientAssignmentResponse, status_code=201)
 async def assign_client(
     emp_id: str,
     request: ClientAssignmentRequest,

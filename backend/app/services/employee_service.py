@@ -154,11 +154,52 @@ class EmployeeService:
         status_filter: Optional[EmployeeStatus] = None,
         search: Optional[str] = None,
     ) -> tuple[List[EmployeeResponse], int]:
-        """List employees with optional filtering."""
-        query = (
-            self.supabase.table("employees")
-            .select("*", count="exact")
-        )
+        """List employees with optional filtering and search."""
+        
+        # If searching, we need to search profiles first then filter employees
+        if search:
+            search_term = search.strip().lower()
+            
+            # Search profiles for matching names/email
+            profile_result = (
+                self.supabase.table("profiles")
+                .select("id, first_name, last_name, email")
+                .or_(
+                    f"first_name.ilike.%{search_term}%,"
+                    f"last_name.ilike.%{search_term}%,"
+                    f"email.ilike.%{search_term}%"
+                )
+                .execute()
+            )
+            matching_user_ids = [p["id"] for p in (profile_result.data or [])]
+            
+            # Also search by employee_number
+            emp_number_result = (
+                self.supabase.table("employees")
+                .select("user_id")
+                .ilike("employee_number", f"%{search_term}%")
+                .execute()
+            )
+            matching_user_ids.extend([e["user_id"] for e in (emp_number_result.data or []) if e.get("user_id")])
+            
+            # Deduplicate
+            matching_user_ids = list(set(matching_user_ids))
+            
+            if not matching_user_ids:
+                # No matches found
+                return [], 0
+            
+            # Now query employees with those user_ids
+            query = (
+                self.supabase.table("employees")
+                .select("*", count="exact")
+                .in_("user_id", matching_user_ids)
+            )
+        else:
+            query = (
+                self.supabase.table("employees")
+                .select("*", count="exact")
+            )
 
         if status_filter:
             query = query.eq("status", status_filter.value)
