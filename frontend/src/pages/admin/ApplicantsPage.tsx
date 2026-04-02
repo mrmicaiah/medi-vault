@@ -15,8 +15,22 @@ interface Applicant {
   first_name: string;
   last_name: string;
   email: string;
+  location_id?: string;
   location_name: string;
   position?: string;  // Now comes from API
+}
+
+interface Location {
+  id: string;
+  name: string;
+  city?: string;
+  state?: string;
+}
+
+interface AgencyWithLocations {
+  id: string;
+  name: string;
+  locations: Location[];
 }
 
 interface ApplicantDetail {
@@ -136,8 +150,16 @@ export function ApplicantsPage() {
   const [previewDoc, setPreviewDoc] = useState<{ url: string; name: string; type: string } | null>(null);
   const [loadingDoc, setLoadingDoc] = useState<string | null>(null);
 
+  // Location transfer state
+  const [locations, setLocations] = useState<Location[]>([]);
+  const [showTransferModal, setShowTransferModal] = useState(false);
+  const [transferToLocation, setTransferToLocation] = useState('');
+  const [transferReason, setTransferReason] = useState('');
+  const [transferring, setTransferring] = useState(false);
+
   useEffect(() => {
     loadApplicants();
+    loadLocations();
   }, []);
 
   const loadApplicants = async () => {
@@ -151,6 +173,48 @@ export function ApplicantsPage() {
       setError(err instanceof Error ? err.message : 'Failed to load applicants');
     } finally {
       setLoading(false);
+    }
+  };
+
+  const loadLocations = async () => {
+    try {
+      const res = await api.get<AgencyWithLocations>('/agencies/me');
+      setLocations(res.locations || []);
+    } catch (err) {
+      console.error('Failed to load locations:', err);
+    }
+  };
+
+  const handleTransferApplicant = async () => {
+    if (!selectedApplicant || !transferToLocation) return;
+    
+    try {
+      setTransferring(true);
+      await api.post(`/transfers/applicant/${selectedApplicant.id}`, {
+        to_location_id: transferToLocation,
+        reason: transferReason || undefined,
+      });
+      
+      // Update local state
+      const newLocation = locations.find(l => l.id === transferToLocation);
+      setApplicants(prev => prev.map(a => 
+        a.id === selectedApplicant.id 
+          ? { ...a, location_id: transferToLocation, location_name: newLocation?.name || '' }
+          : a
+      ));
+      setSelectedApplicant(prev => prev ? { ...prev, location_id: transferToLocation, location_name: newLocation?.name || '' } : null);
+      
+      setShowTransferModal(false);
+      setTransferToLocation('');
+      setTransferReason('');
+      setError(null);
+      
+      // Reload to get fresh data
+      loadApplicants();
+    } catch (err) {
+      setError(err instanceof Error ? err.message : 'Failed to transfer applicant');
+    } finally {
+      setTransferring(false);
     }
   };
 
@@ -805,6 +869,22 @@ export function ApplicantsPage() {
                     </div>
                   </div>
 
+                  {/* Location Section */}
+                  <div className="bg-white rounded-lg shadow-sm p-4 space-y-3">
+                    <h3 className="text-xs font-semibold text-gray uppercase tracking-wide">Location</h3>
+                    <div className="flex items-center justify-between">
+                      <span className="text-sm text-slate">{selectedApplicant.location_name || 'Not assigned'}</span>
+                      {locations.length > 1 && (
+                        <button 
+                          onClick={() => setShowTransferModal(true)} 
+                          className="text-xs text-maroon hover:underline"
+                        >
+                          Transfer
+                        </button>
+                      )}
+                    </div>
+                  </div>
+
                   <div className="grid grid-cols-2 gap-3 pt-2">
                     <button onClick={() => setEditMode(false)} className="py-3 bg-white border border-border text-navy text-sm font-semibold rounded-lg hover:bg-gray-50 transition-colors">Cancel</button>
                     <button onClick={handleSaveEdit} disabled={saving} className="py-3 bg-maroon text-white text-sm font-semibold rounded-lg hover:bg-maroon/90 transition-colors disabled:opacity-50">{saving ? 'Saving...' : 'Save Changes'}</button>
@@ -932,6 +1012,56 @@ export function ApplicantsPage() {
             <div className="flex gap-3">
               <Button variant="secondary" className="flex-1" onClick={() => setShowUploadModal(false)}>Cancel</Button>
               <Button className="flex-1" disabled={!uploadType || uploading} loading={uploading} onClick={() => fileInputRef.current?.click()}>Select File</Button>
+            </div>
+          </div>
+        </>
+      )}
+
+      {/* Transfer Location Modal */}
+      {showTransferModal && selectedApplicant && (
+        <>
+          <div className="fixed inset-0 bg-black/40 z-[60]" onClick={() => setShowTransferModal(false)} />
+          <div className="fixed top-1/2 left-1/2 -translate-x-1/2 -translate-y-1/2 w-full max-w-md bg-white rounded-xl shadow-2xl z-[70] p-6">
+            <h3 className="text-lg font-semibold text-navy mb-4">Transfer Applicant</h3>
+            <p className="text-sm text-gray mb-4">
+              Transfer {selectedApplicant.first_name} {selectedApplicant.last_name} to another location
+            </p>
+            {error && <Alert variant="error" className="mb-4">{error}</Alert>}
+            <div className="mb-4">
+              <label className="block text-sm font-medium text-slate mb-1">Current Location</label>
+              <div className="px-3 py-2 bg-gray-50 rounded-lg text-sm text-gray">
+                {selectedApplicant.location_name || 'Not assigned'}
+              </div>
+            </div>
+            <div className="mb-4">
+              <label className="block text-sm font-medium text-slate mb-1">Transfer To</label>
+              <select 
+                value={transferToLocation} 
+                onChange={(e) => setTransferToLocation(e.target.value)} 
+                className="w-full rounded-lg border border-border px-3 py-2 text-sm focus:border-maroon focus:outline-none focus:ring-2 focus:ring-maroon/20"
+              >
+                <option value="">Select location...</option>
+                {locations
+                  .filter(l => l.id !== selectedApplicant.location_id)
+                  .map(l => (
+                    <option key={l.id} value={l.id}>{l.name}</option>
+                  ))
+                }
+              </select>
+            </div>
+            <div className="mb-4">
+              <label className="block text-sm font-medium text-slate mb-1">Reason (optional)</label>
+              <input 
+                type="text" 
+                value={transferReason} 
+                onChange={(e) => setTransferReason(e.target.value)} 
+                placeholder="e.g., Closer to applicant's home"
+                className="w-full rounded-lg border border-border px-3 py-2 text-sm focus:border-maroon focus:outline-none focus:ring-2 focus:ring-maroon/20" 
+              />
+            </div>
+            <div className="flex gap-3">
+              <Button variant="secondary" className="flex-1" onClick={() => { setShowTransferModal(false); setTransferToLocation(''); setTransferReason(''); }}>Cancel</Button>
+              <Button className="flex-1" disabled={!transferToLocation || transferring} loading={transferring} onClick={handleTransferApplicant}>Transfer</Button>
             </div>
           </div>
         </>
