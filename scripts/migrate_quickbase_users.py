@@ -23,6 +23,8 @@ Options:
     --limit N     Only process first N records
 """
 
+from __future__ import annotations
+
 import csv
 import json
 import os
@@ -32,6 +34,7 @@ import string
 import sys
 from datetime import datetime
 from pathlib import Path
+from typing import Optional, List, Dict, Tuple
 
 from dotenv import load_dotenv
 from supabase import create_client, Client
@@ -185,7 +188,7 @@ def clean_phone(phone: str) -> str:
     return re.sub(r'[^\d]', '', phone)
 
 
-def parse_date(date_str: str) -> str | None:
+def parse_date(date_str: str) -> Optional[str]:
     """Parse various date formats to YYYY-MM-DD."""
     if not date_str:
         return None
@@ -212,7 +215,7 @@ def parse_bool(val: str) -> bool:
     return val.strip().upper() in ("YES", "TRUE", "1", "Y")
 
 
-def parse_certifications(cert_str: str) -> list:
+def parse_certifications(cert_str: str) -> List[str]:
     """Parse certification string to list."""
     if not cert_str:
         return []
@@ -238,7 +241,7 @@ def parse_certifications(cert_str: str) -> list:
     return certs
 
 
-def parse_days(days_str: str) -> list:
+def parse_days(days_str: str) -> List[str]:
     """Parse availability days string to list."""
     if not days_str:
         return []
@@ -263,7 +266,7 @@ def parse_days(days_str: str) -> list:
     return days
 
 
-def parse_shifts(shifts_str: str) -> list:
+def parse_shifts(shifts_str: str) -> List[str]:
     """Parse shift preferences to list."""
     if not shifts_str:
         return []
@@ -283,7 +286,7 @@ def parse_shifts(shifts_str: str) -> list:
     return shifts or ["morning", "afternoon", "evening"]
 
 
-def split_name(full_name: str) -> tuple[str, str]:
+def split_name(full_name: str) -> Tuple[str, str]:
     """Split full name into first and last."""
     if not full_name:
         return "", ""
@@ -293,7 +296,7 @@ def split_name(full_name: str) -> tuple[str, str]:
     return parts[0], " ".join(parts[1:])
 
 
-def get_location_id(supabase: Client, location_name: str) -> str | None:
+def get_location_id(supabase: Client, location_name: str) -> Optional[str]:
     """Look up location UUID by name."""
     if not location_name:
         return None
@@ -312,7 +315,7 @@ def get_location_id(supabase: Client, location_name: str) -> str | None:
 # STEP DATA BUILDERS
 # ============================================================================
 
-def build_step1_data(row: dict) -> dict:
+def build_step1_data(row: Dict) -> Dict:
     """Step 1: Application Basics"""
     position = POSITION_MAP.get(row.get(COL_POSITION, "").upper(), "pca")
     
@@ -331,7 +334,7 @@ def build_step1_data(row: dict) -> dict:
     }
 
 
-def build_step2_data(row: dict) -> dict:
+def build_step2_data(row: Dict) -> Dict:
     """Step 2: Personal Information"""
     return {
         "first_name": row.get(COL_FIRST, "").strip(),
@@ -348,7 +351,7 @@ def build_step2_data(row: dict) -> dict:
     }
 
 
-def build_step3_data(row: dict) -> dict:
+def build_step3_data(row: Dict) -> Dict:
     """Step 3: Emergency Contact"""
     ec_name = row.get(COL_EC_NAME, "").strip()
     ec_first, ec_last = split_name(ec_name)
@@ -362,7 +365,7 @@ def build_step3_data(row: dict) -> dict:
     }
 
 
-def build_step4_data(row: dict) -> dict:
+def build_step4_data(row: Dict) -> Dict:
     """Step 4: Education & Certifications"""
     return {
         "graduated_high_school": "yes" if parse_bool(row.get(COL_GRADUATED_HS, "")) else "no",
@@ -378,7 +381,7 @@ def build_step4_data(row: dict) -> dict:
     }
 
 
-def build_step5_data(row: dict) -> dict:
+def build_step5_data(row: Dict) -> Dict:
     """Step 5: Reference 1"""
     return {
         "ref1_name": row.get(COL_REF1_NAME, "").strip(),
@@ -388,7 +391,7 @@ def build_step5_data(row: dict) -> dict:
     }
 
 
-def build_step6_data(row: dict) -> dict:
+def build_step6_data(row: Dict) -> Dict:
     """Step 6: Reference 2"""
     return {
         "ref2_name": row.get(COL_REF2_NAME, "").strip(),
@@ -398,7 +401,7 @@ def build_step6_data(row: dict) -> dict:
     }
 
 
-def build_step7_data(row: dict) -> dict:
+def build_step7_data(row: Dict) -> Dict:
     """Step 7: Employment History"""
     employers = []
     
@@ -430,7 +433,7 @@ def build_step7_data(row: dict) -> dict:
     }
 
 
-def build_step8_data(row: dict) -> dict:
+def build_step8_data(row: Dict) -> Dict:
     """Step 8: Work Preferences"""
     return {
         "has_transportation": "yes" if parse_bool(row.get(COL_TRANSPORT, "yes")) else "no",
@@ -441,11 +444,11 @@ def build_step8_data(row: dict) -> dict:
     }
 
 
-def build_agreement_step(row: dict, agreed_col: str, signature_col: str = COL_SIGNATURE) -> dict:
+def build_agreement_step(row: Dict, agreed_col: str, signature_col: str = COL_SIGNATURE) -> Dict:
     """Build data for agreement steps (9, 10, 18, 19, 20, 21, 22)"""
     signature = row.get(signature_col, "").strip() or row.get(COL_PRINT_NAME, "").strip()
     if not signature:
-        signature = f"{row.get(COL_FIRST, '')} {row.get(COL_LAST, '')}".strip()
+        signature = "{} {}".format(row.get(COL_FIRST, ''), row.get(COL_LAST, '')).strip()
     
     agreed = parse_bool(row.get(agreed_col, "yes"))
     
@@ -456,7 +459,7 @@ def build_agreement_step(row: dict, agreed_col: str, signature_col: str = COL_SI
     }
 
 
-def build_upload_step() -> dict:
+def build_upload_step() -> Dict:
     """Build placeholder data for upload steps (11-17)"""
     return {
         "skip": True,
@@ -468,7 +471,7 @@ def build_upload_step() -> dict:
 # MAIN MIGRATION LOGIC
 # ============================================================================
 
-def migrate_applicant(supabase: Client, row: dict, index: int) -> dict | None:
+def migrate_applicant(supabase: Client, row: Dict, index: int) -> Optional[Dict]:
     """Migrate a single applicant from Quickbase to MediVault."""
     
     email = row.get(COL_EMAIL, "").strip().lower()
@@ -476,13 +479,13 @@ def migrate_applicant(supabase: Client, row: dict, index: int) -> dict | None:
     last_name = row.get(COL_LAST, "").strip()
     
     if not email or not first_name or not last_name:
-        print(f"  ⚠️  Skipping - missing required fields")
+        print("  ⚠️  Skipping - missing required fields")
         return None
     
-    print(f"[{index}] {first_name} {last_name} <{email}>")
+    print("[{}] {} {} <{}>".format(index, first_name, last_name, email))
     
     if DRY_RUN:
-        print(f"  🔍 DRY RUN - would create user and application")
+        print("  🔍 DRY RUN - would create user and application")
         return {"email": email, "status": "dry_run"}
     
     # 1. Create Auth User
@@ -500,25 +503,25 @@ def migrate_applicant(supabase: Client, row: dict, index: int) -> dict | None:
         })
         
         if not auth_response.user:
-            print(f"  ❌ Failed to create auth user")
+            print("  ❌ Failed to create auth user")
             return None
         
         user_id = str(auth_response.user.id)
-        print(f"  ✅ Created auth user: {user_id[:8]}...")
+        print("  ✅ Created auth user: {}...".format(user_id[:8]))
         
     except Exception as e:
         error_msg = str(e)
         if "already" in error_msg.lower():
-            print(f"  ⏭️  User already exists, looking up...")
+            print("  ⏭️  User already exists, looking up...")
             existing = supabase.table("profiles").select("id").eq("email", email).execute()
             if existing.data:
                 user_id = existing.data[0]["id"]
-                print(f"  📎 Found existing user: {user_id[:8]}...")
+                print("  📎 Found existing user: {}...".format(user_id[:8]))
             else:
-                print(f"  ❌ User exists in auth but not profiles - manual fix needed")
+                print("  ❌ User exists in auth but not profiles - manual fix needed")
                 return None
         else:
-            print(f"  ❌ Auth error: {error_msg[:60]}")
+            print("  ❌ Auth error: {}".format(error_msg[:60]))
             return None
     
     # 2. Create/Update Profile
@@ -537,10 +540,10 @@ def migrate_applicant(supabase: Client, row: dict, index: int) -> dict | None:
         }
         
         supabase.table("profiles").upsert(profile_data).execute()
-        print(f"  ✅ Profile created/updated")
+        print("  ✅ Profile created/updated")
         
     except Exception as e:
-        print(f"  ⚠️  Profile error: {str(e)[:60]}")
+        print("  ⚠️  Profile error: {}".format(str(e)[:60]))
     
     # 3. Create Application
     qb_status = row.get(COL_STATUS, "").strip()
@@ -559,10 +562,10 @@ def migrate_applicant(supabase: Client, row: dict, index: int) -> dict | None:
         
         app_result = supabase.table("applications").insert(app_data).execute()
         application_id = app_result.data[0]["id"]
-        print(f"  ✅ Application created: {application_id[:8]}...")
+        print("  ✅ Application created: {}...".format(application_id[:8]))
         
     except Exception as e:
-        print(f"  ❌ Application error: {str(e)[:60]}")
+        print("  ❌ Application error: {}".format(str(e)[:60]))
         return None
     
     # 4. Create Application Steps
@@ -616,10 +619,10 @@ def migrate_applicant(supabase: Client, row: dict, index: int) -> dict | None:
             
             supabase.table("application_steps").insert(step_record).execute()
         
-        print(f"  ✅ All 22 steps created")
+        print("  ✅ All 22 steps created")
         
     except Exception as e:
-        print(f"  ⚠️  Steps error: {str(e)[:60]}")
+        print("  ⚠️  Steps error: {}".format(str(e)[:60]))
     
     # 5. Send Password Reset Email
     if SEND_RESET_EMAILS:
@@ -631,15 +634,15 @@ def migrate_applicant(supabase: Client, row: dict, index: int) -> dict | None:
                     "redirect_to": "https://medisvault.com/auth/reset-callback"
                 }
             })
-            print(f"  📧 Password reset email queued")
+            print("  📧 Password reset email queued")
         except Exception as e:
-            print(f"  ⚠️  Email error: {str(e)[:40]}")
+            print("  ⚠️  Email error: {}".format(str(e)[:40]))
     
     return {
         "user_id": user_id,
         "application_id": application_id,
         "email": email,
-        "name": f"{first_name} {last_name}",
+        "name": "{} {}".format(first_name, last_name),
         "status": "created",
     }
 
@@ -663,25 +666,25 @@ def main():
     # Check CSV
     csv_path = Path(CSV_PATH)
     if not csv_path.exists():
-        print(f"❌ Error: CSV not found at {CSV_PATH}")
-        print(f"   Place your Quickbase export there and try again.")
+        print("❌ Error: CSV not found at {}".format(CSV_PATH))
+        print("   Place your Quickbase export there and try again.")
         return
     
     # Connect
-    print(f"📡 Connecting to Supabase...")
+    print("📡 Connecting to Supabase...")
     supabase = create_client(SUPABASE_URL, SUPABASE_SERVICE_KEY)
     
     # Read CSV
-    print(f"📂 Reading {CSV_PATH}...")
+    print("📂 Reading {}...".format(CSV_PATH))
     with open(csv_path, 'r', encoding='utf-8-sig') as f:
         reader = csv.DictReader(f)
         rows = list(reader)
     
     if LIMIT:
         rows = rows[:LIMIT]
-        print(f"   Limited to first {LIMIT} records")
+        print("   Limited to first {} records".format(LIMIT))
     
-    print(f"   Found {len(rows)} applicants to migrate\n")
+    print("   Found {} applicants to migrate\n".format(len(rows)))
     
     # Migrate
     results = []
@@ -698,17 +701,17 @@ def main():
     created = [r for r in results if r.get("status") == "created"]
     dry_run = [r for r in results if r.get("status") == "dry_run"]
     
-    print(f"✅ Created: {len(created)}")
+    print("✅ Created: {}".format(len(created)))
     if dry_run:
-        print(f"🔍 Dry run: {len(dry_run)}")
-    print(f"❌ Failed: {len(rows) - len(results)}")
+        print("🔍 Dry run: {}".format(len(dry_run)))
+    print("❌ Failed: {}".format(len(rows) - len(results)))
     
     # Save mapping
     if results and not DRY_RUN:
         mapping_file = "scripts/migration_results.json"
         with open(mapping_file, 'w') as f:
             json.dump(results, f, indent=2)
-        print(f"\n📁 Results saved to: {mapping_file}")
+        print("\n📁 Results saved to: {}".format(mapping_file))
     
     print()
 
