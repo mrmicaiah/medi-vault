@@ -320,6 +320,7 @@ export function WizardShell({
           pendingFile={pendingFile}
           saving={saving}
           onChange={onChange}
+          allStepsData={allStepsData}
         />
 
         {showValidationError && !canProceed() && (
