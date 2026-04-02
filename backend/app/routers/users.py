@@ -7,8 +7,8 @@ from fastapi import APIRouter, Depends, HTTPException, status
 from pydantic import BaseModel, EmailStr
 from supabase import Client
 
-from app.dependencies import get_supabase, require_admin
-from app.models.user import UserProfile
+from app.dependencies import get_supabase, require_admin, require_superadmin
+from app.models.user import UserProfile, UserRole
 from app.schemas.common import SuccessResponse
 
 router = APIRouter(prefix="/users", tags=["Users"])
@@ -20,6 +20,9 @@ class UserResponse(BaseModel):
     first_name: Optional[str] = None
     last_name: Optional[str] = None
     role: str
+    agency_id: Optional[str] = None
+    location_id: Optional[str] = None
+    location_name: Optional[str] = None
     created_at: str
     updated_at: str
 
@@ -29,89 +32,135 @@ class UsersListResponse(BaseModel):
     total: int
 
 
-class CreateUserRequest(BaseModel):
+class CreateStaffRequest(BaseModel):
+    """Create a staff user (manager/admin) with direct credentials."""
     email: EmailStr
-    password: str
+    password: str  # Temporary password to share with the user
     first_name: str
     last_name: str
     role: str  # 'admin' or 'manager'
+    location_id: Optional[str] = None  # Required for managers
 
 
 class UpdateUserRoleRequest(BaseModel):
     role: str
 
 
+class UpdateUserRequest(BaseModel):
+    """Update user details."""
+    first_name: Optional[str] = None
+    last_name: Optional[str] = None
+    location_id: Optional[str] = None
+
+
+class ResetPasswordRequest(BaseModel):
+    """Reset a user's password (admin sets new temp password)."""
+    new_password: str
+
+
+def get_user_agency_id(supabase: Client, user_id: str) -> Optional[str]:
+    """Get the agency_id for a user."""
+    result = (
+        supabase.table("profiles")
+        .select("agency_id")
+        .eq("id", user_id)
+        .single()
+        .execute()
+    )
+    return result.data.get("agency_id") if result.data else None
+
+
 @router.get("", response_model=UsersListResponse)
+@router.get("/", response_model=UsersListResponse)
 async def list_users(
     role: Optional[str] = None,
     admin: UserProfile = Depends(require_admin),
     supabase: Client = Depends(get_supabase),
 ):
     """List all users (optionally filtered by role)."""
-    query = supabase.table("profiles").select("*").order("created_at", desc=True)
+    query = supabase.table("profiles").select("*, locations(name)").order("created_at", desc=True)
     
     if role:
         query = query.eq("role", role)
     
     result = query.execute()
     
-    users = [
-        UserResponse(
-            id=u["id"],
-            email=u["email"],
-            first_name=u.get("first_name"),
-            last_name=u.get("last_name"),
-            role=u.get("role", "applicant"),
-            created_at=u["created_at"],
-            updated_at=u["updated_at"],
+    users = []
+    for u in result.data or []:
+        location_data = u.get("locations") or {}
+        users.append(
+            UserResponse(
+                id=u["id"],
+                email=u["email"],
+                first_name=u.get("first_name"),
+                last_name=u.get("last_name"),
+                role=u.get("role", "applicant"),
+                agency_id=u.get("agency_id"),
+                location_id=u.get("location_id"),
+                location_name=location_data.get("name") if location_data else None,
+                created_at=u["created_at"],
+                updated_at=u["updated_at"],
+            )
         )
-        for u in result.data or []
-    ]
     
     return UsersListResponse(users=users, total=len(users))
 
 
 @router.get("/staff", response_model=UsersListResponse)
+@router.get("/staff/", response_model=UsersListResponse)
 async def list_staff(
     admin: UserProfile = Depends(require_admin),
     supabase: Client = Depends(get_supabase),
 ):
     """List admin and manager users only."""
-    result = (
+    agency_id = get_user_agency_id(supabase, admin.id)
+    
+    query = (
         supabase.table("profiles")
-        .select("*")
+        .select("*, locations(name)")
         .in_("role", ["admin", "manager", "superadmin"])
         .order("created_at", desc=True)
-        .execute()
     )
     
-    users = [
-        UserResponse(
-            id=u["id"],
-            email=u["email"],
-            first_name=u.get("first_name"),
-            last_name=u.get("last_name"),
-            role=u.get("role", "applicant"),
-            created_at=u["created_at"],
-            updated_at=u["updated_at"],
+    # Filter by agency for non-superadmins
+    if admin.role != UserRole.SUPERADMIN and agency_id:
+        query = query.eq("agency_id", agency_id)
+    
+    result = query.execute()
+    
+    users = []
+    for u in result.data or []:
+        location_data = u.get("locations") or {}
+        users.append(
+            UserResponse(
+                id=u["id"],
+                email=u["email"],
+                first_name=u.get("first_name"),
+                last_name=u.get("last_name"),
+                role=u.get("role", "applicant"),
+                agency_id=u.get("agency_id"),
+                location_id=u.get("location_id"),
+                location_name=location_data.get("name") if location_data else None,
+                created_at=u["created_at"],
+                updated_at=u["updated_at"],
+            )
         )
-        for u in result.data or []
-    ]
     
     return UsersListResponse(users=users, total=len(users))
 
 
 @router.post("", response_model=UserResponse)
-async def create_user(
-    request: CreateUserRequest,
+@router.post("/", response_model=UserResponse)
+async def create_staff_user(
+    request: CreateStaffRequest,
     admin: UserProfile = Depends(require_admin),
     supabase: Client = Depends(get_supabase),
 ):
     """
-    Create a new admin or manager user.
+    Create a new staff user (admin or manager) with direct credentials.
     
-    This creates a user in Supabase Auth and sets up their profile.
-    Only admins can create other admins or managers.
+    The admin provides an email and temporary password which they can
+    share with the user directly. No email invite is sent.
     """
     # Validate role
     if request.role not in ["admin", "manager"]:
@@ -121,15 +170,58 @@ async def create_user(
         )
     
     # Only superadmins can create other admins
-    if request.role == "admin" and admin.role != "superadmin":
+    if request.role == "admin" and admin.role != UserRole.SUPERADMIN:
         raise HTTPException(
             status_code=status.HTTP_403_FORBIDDEN,
             detail="Only superadmins can create admin users",
         )
     
+    # Managers should have a location
+    if request.role == "manager" and not request.location_id:
+        raise HTTPException(
+            status_code=status.HTTP_400_BAD_REQUEST,
+            detail="Managers must be assigned to a location",
+        )
+    
+    # Get admin's agency
+    agency_id = get_user_agency_id(supabase, admin.id)
+    if not agency_id:
+        raise HTTPException(
+            status_code=status.HTTP_400_BAD_REQUEST,
+            detail="You must be associated with an agency to create users",
+        )
+    
+    # Validate location belongs to agency
+    location_name = None
+    if request.location_id:
+        loc_result = (
+            supabase.table("locations")
+            .select("name, agency_id")
+            .eq("id", request.location_id)
+            .single()
+            .execute()
+        )
+        if not loc_result.data:
+            raise HTTPException(
+                status_code=status.HTTP_404_NOT_FOUND,
+                detail="Location not found",
+            )
+        if loc_result.data.get("agency_id") != agency_id:
+            raise HTTPException(
+                status_code=status.HTTP_400_BAD_REQUEST,
+                detail="Location does not belong to your agency",
+            )
+        location_name = loc_result.data.get("name")
+    
+    # Validate password strength
+    if len(request.password) < 8:
+        raise HTTPException(
+            status_code=status.HTTP_400_BAD_REQUEST,
+            detail="Password must be at least 8 characters",
+        )
+    
     try:
         # Create user in Supabase Auth using admin API
-        # Note: This requires the service key, not anon key
         auth_response = supabase.auth.admin.create_user({
             "email": request.email,
             "password": request.password,
@@ -143,14 +235,15 @@ async def create_user(
         user_id = auth_response.user.id
         now = datetime.now(timezone.utc).isoformat()
         
-        # Update the profile with the correct role
-        # The profile should be auto-created by the trigger, but we update it
+        # Create/update the profile with role, agency, and location
         supabase.table("profiles").upsert({
             "id": user_id,
             "email": request.email,
             "first_name": request.first_name,
             "last_name": request.last_name,
             "role": request.role,
+            "agency_id": agency_id,
+            "location_id": request.location_id,
             "created_at": now,
             "updated_at": now,
         }).execute()
@@ -161,6 +254,9 @@ async def create_user(
             first_name=request.first_name,
             last_name=request.last_name,
             role=request.role,
+            agency_id=agency_id,
+            location_id=request.location_id,
+            location_name=location_name,
             created_at=now,
             updated_at=now,
         )
@@ -178,6 +274,88 @@ async def create_user(
         )
 
 
+@router.patch("/{user_id}", response_model=UserResponse)
+async def update_user(
+    user_id: str,
+    request: UpdateUserRequest,
+    admin: UserProfile = Depends(require_admin),
+    supabase: Client = Depends(get_supabase),
+):
+    """Update a user's details (name, location assignment)."""
+    agency_id = get_user_agency_id(supabase, admin.id)
+    
+    # Check user exists and belongs to same agency
+    user_result = (
+        supabase.table("profiles")
+        .select("*, locations(name)")
+        .eq("id", user_id)
+        .single()
+        .execute()
+    )
+    if not user_result.data:
+        raise HTTPException(
+            status_code=status.HTTP_404_NOT_FOUND,
+            detail="User not found",
+        )
+    
+    user_data = user_result.data
+    
+    # Can't edit superadmins unless you're a superadmin
+    if user_data.get("role") == "superadmin" and admin.role != UserRole.SUPERADMIN:
+        raise HTTPException(
+            status_code=status.HTTP_403_FORBIDDEN,
+            detail="Cannot edit superadmin users",
+        )
+    
+    # Validate location if provided
+    location_name = None
+    if request.location_id:
+        loc_result = (
+            supabase.table("locations")
+            .select("name, agency_id")
+            .eq("id", request.location_id)
+            .single()
+            .execute()
+        )
+        if not loc_result.data or loc_result.data.get("agency_id") != agency_id:
+            raise HTTPException(
+                status_code=status.HTTP_400_BAD_REQUEST,
+                detail="Invalid location",
+            )
+        location_name = loc_result.data.get("name")
+    
+    # Build update
+    update_data = {"updated_at": datetime.now(timezone.utc).isoformat()}
+    if request.first_name is not None:
+        update_data["first_name"] = request.first_name
+    if request.last_name is not None:
+        update_data["last_name"] = request.last_name
+    if request.location_id is not None:
+        update_data["location_id"] = request.location_id
+    
+    result = supabase.table("profiles").update(update_data).eq("id", user_id).execute()
+    u = result.data[0]
+    
+    # Re-fetch to get location name
+    if request.location_id:
+        loc_data = {"name": location_name}
+    else:
+        loc_data = user_data.get("locations") or {}
+    
+    return UserResponse(
+        id=u["id"],
+        email=u["email"],
+        first_name=u.get("first_name"),
+        last_name=u.get("last_name"),
+        role=u.get("role", "applicant"),
+        agency_id=u.get("agency_id"),
+        location_id=u.get("location_id"),
+        location_name=loc_data.get("name") if loc_data else None,
+        created_at=u["created_at"],
+        updated_at=u["updated_at"],
+    )
+
+
 @router.patch("/{user_id}/role", response_model=SuccessResponse)
 async def update_user_role(
     user_id: str,
@@ -187,7 +365,7 @@ async def update_user_role(
 ):
     """Update a user's role."""
     # Validate role
-    valid_roles = ["applicant", "manager", "admin"]
+    valid_roles = ["applicant", "employee", "manager", "admin"]
     if request.role not in valid_roles:
         raise HTTPException(
             status_code=status.HTTP_400_BAD_REQUEST,
@@ -195,7 +373,7 @@ async def update_user_role(
         )
     
     # Only superadmins can set admin role
-    if request.role == "admin" and admin.role != "superadmin":
+    if request.role == "admin" and admin.role != UserRole.SUPERADMIN:
         raise HTTPException(
             status_code=status.HTTP_403_FORBIDDEN,
             detail="Only superadmins can promote users to admin",
@@ -232,6 +410,73 @@ async def update_user_role(
     return SuccessResponse(message=f"User role updated to {request.role}")
 
 
+@router.post("/{user_id}/reset-password", response_model=SuccessResponse)
+async def reset_user_password(
+    user_id: str,
+    request: ResetPasswordRequest,
+    admin: UserProfile = Depends(require_admin),
+    supabase: Client = Depends(get_supabase),
+):
+    """
+    Reset a user's password (admin action).
+    
+    Sets a new temporary password that the admin can share with the user.
+    """
+    agency_id = get_user_agency_id(supabase, admin.id)
+    
+    # Check user exists
+    user_result = (
+        supabase.table("profiles")
+        .select("id, role, agency_id")
+        .eq("id", user_id)
+        .single()
+        .execute()
+    )
+    if not user_result.data:
+        raise HTTPException(
+            status_code=status.HTTP_404_NOT_FOUND,
+            detail="User not found",
+        )
+    
+    user_data = user_result.data
+    
+    # Can't reset your own password this way
+    if user_id == admin.id:
+        raise HTTPException(
+            status_code=status.HTTP_400_BAD_REQUEST,
+            detail="Use the profile settings to change your own password",
+        )
+    
+    # Can't reset superadmin passwords unless you're superadmin
+    if user_data.get("role") == "superadmin" and admin.role != UserRole.SUPERADMIN:
+        raise HTTPException(
+            status_code=status.HTTP_403_FORBIDDEN,
+            detail="Cannot reset superadmin passwords",
+        )
+    
+    # Validate password
+    if len(request.new_password) < 8:
+        raise HTTPException(
+            status_code=status.HTTP_400_BAD_REQUEST,
+            detail="Password must be at least 8 characters",
+        )
+    
+    try:
+        # Use Supabase admin API to update password
+        supabase.auth.admin.update_user_by_id(
+            user_id,
+            {"password": request.new_password}
+        )
+        
+        return SuccessResponse(message="Password reset successfully")
+        
+    except Exception as e:
+        raise HTTPException(
+            status_code=status.HTTP_500_INTERNAL_SERVER_ERROR,
+            detail=f"Failed to reset password: {str(e)}",
+        )
+
+
 @router.delete("/{user_id}", response_model=SuccessResponse)
 async def delete_user(
     user_id: str,
@@ -262,7 +507,7 @@ async def delete_user(
         )
     
     # Only superadmins can delete admins
-    if user_result.data.get("role") == "admin" and admin.role != "superadmin":
+    if user_result.data.get("role") == "admin" and admin.role != UserRole.SUPERADMIN:
         raise HTTPException(
             status_code=status.HTTP_403_FORBIDDEN,
             detail="Only superadmins can delete admin users",
