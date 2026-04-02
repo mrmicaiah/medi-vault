@@ -126,13 +126,13 @@ export function ApplyPage() {
   // Loading state
   if (loadingAgency) {
     return (
-      <div className="min-h-screen bg-gradient-to-br from-navy via-navy to-maroon flex items-center justify-center">
+      <div className="min-h-screen bg-bg flex items-center justify-center">
         <div className="text-center">
-          <svg className="mx-auto h-8 w-8 animate-spin text-white" fill="none" viewBox="0 0 24 24">
+          <svg className="mx-auto h-8 w-8 animate-spin text-teal" fill="none" viewBox="0 0 24 24">
             <circle className="opacity-25" cx="12" cy="12" r="10" stroke="currentColor" strokeWidth="4" />
             <path className="opacity-75" fill="currentColor" d="M4 12a8 8 0 018-8V0C5.373 0 0 5.373 0 12h4z" />
           </svg>
-          <p className="mt-3 text-white/60">Loading...</p>
+          <p className="mt-3 text-gray">Loading...</p>
         </div>
       </div>
     );
@@ -141,7 +141,7 @@ export function ApplyPage() {
   // Agency not found
   if (agencyError || !agency) {
     return (
-      <div className="min-h-screen bg-gradient-to-br from-navy via-navy to-maroon flex items-center justify-center p-4">
+      <div className="min-h-screen bg-bg flex items-center justify-center p-4">
         <Card className="max-w-md w-full p-8 text-center">
           <div className="mx-auto mb-4 flex h-16 w-16 items-center justify-center rounded-full bg-red-100">
             <svg className="h-8 w-8 text-red-600" fill="none" viewBox="0 0 24 24" stroke="currentColor">
@@ -161,7 +161,7 @@ export function ApplyPage() {
   // Success state
   if (success) {
     return (
-      <div className="min-h-screen bg-gradient-to-br from-navy via-navy to-maroon flex items-center justify-center p-4">
+      <div className="min-h-screen bg-bg flex items-center justify-center p-4">
         <Card className="max-w-md w-full p-8 text-center">
           <div className="mx-auto mb-4 flex h-16 w-16 items-center justify-center rounded-full bg-green-100">
             <svg className="h-8 w-8 text-green-600" fill="none" viewBox="0 0 24 24" stroke="currentColor">
@@ -203,21 +203,21 @@ export function ApplyPage() {
   const selectedLocationData = agency.locations.find(l => l.id === selectedLocation);
 
   return (
-    <div className="min-h-screen bg-gradient-to-br from-navy via-navy to-maroon">
+    <div className="min-h-screen bg-bg">
       {/* Header */}
-      <header className="p-4">
+      <header className="bg-teal px-4 py-5">
         <div className="max-w-4xl mx-auto flex items-center gap-3">
           {agency.logo_url ? (
-            <img src={agency.logo_url} alt={agency.name} className="h-10 w-10 rounded-lg object-contain bg-white" />
+            <img src={agency.logo_url} alt={agency.name} className="h-12 w-auto max-w-[180px] object-contain bg-white rounded-lg p-1" />
           ) : (
-            <div className="h-10 w-10 rounded-lg bg-white/10 flex items-center justify-center">
+            <div className="h-10 w-10 rounded-lg bg-white/20 flex items-center justify-center">
               <span className="text-white font-bold text-lg">{agency.name[0]}</span>
             </div>
           )}
           <div>
             <h1 className="text-white font-display font-bold">{agency.name}</h1>
             {agency.tagline && (
-              <p className="text-white/60 text-xs">{agency.tagline}</p>
+              <p className="text-white/70 text-xs">{agency.tagline}</p>
             )}
           </div>
         </div>
@@ -227,43 +227,43 @@ export function ApplyPage() {
         {/* Welcome Step */}
         {step === 'welcome' && (
           <div className="text-center py-12">
-            <h2 className="text-4xl font-display font-bold text-white mb-4">
+            <h2 className="text-4xl font-display font-bold text-navy mb-4">
               Join Our Team
             </h2>
-            <p className="text-xl text-white/80 mb-8 max-w-2xl mx-auto">
+            <p className="text-xl text-gray mb-8 max-w-2xl mx-auto">
               We're looking for compassionate caregivers to help families across Virginia. 
               Start your application today and make a difference in people's lives.
             </p>
             
             <div className="grid grid-cols-1 md:grid-cols-3 gap-6 mb-12">
-              <div className="bg-white/10 backdrop-blur rounded-xl p-6 text-left">
-                <div className="h-10 w-10 rounded-lg bg-maroon flex items-center justify-center mb-4">
+              <div className="bg-white border border-border rounded-xl p-6 text-left shadow-sm">
+                <div className="h-10 w-10 rounded-lg bg-teal flex items-center justify-center mb-4">
                   <svg className="h-5 w-5 text-white" fill="none" viewBox="0 0 24 24" stroke="currentColor">
                     <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M12 8v4l3 3m6-3a9 9 0 11-18 0 9 9 0 0118 0z" />
                   </svg>
                 </div>
-                <h3 className="text-white font-semibold mb-2">Flexible Hours</h3>
-                <p className="text-white/70 text-sm">Choose shifts that work with your schedule</p>
+                <h3 className="text-navy font-semibold mb-2">Flexible Hours</h3>
+                <p className="text-gray text-sm">Choose shifts that work with your schedule</p>
               </div>
               
-              <div className="bg-white/10 backdrop-blur rounded-xl p-6 text-left">
-                <div className="h-10 w-10 rounded-lg bg-maroon flex items-center justify-center mb-4">
+              <div className="bg-white border border-border rounded-xl p-6 text-left shadow-sm">
+                <div className="h-10 w-10 rounded-lg bg-teal flex items-center justify-center mb-4">
                   <svg className="h-5 w-5 text-white" fill="none" viewBox="0 0 24 24" stroke="currentColor">
                     <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M17 9V7a2 2 0 00-2-2H5a2 2 0 00-2 2v6a2 2 0 002 2h2m2 4h10a2 2 0 002-2v-6a2 2 0 00-2-2H9a2 2 0 00-2 2v6a2 2 0 002 2zm7-5a2 2 0 11-4 0 2 2 0 014 0z" />
                   </svg>
                 </div>
-                <h3 className="text-white font-semibold mb-2">Competitive Pay</h3>
-                <p className="text-white/70 text-sm">Earn great wages with weekly pay</p>
+                <h3 className="text-navy font-semibold mb-2">Competitive Pay</h3>
+                <p className="text-gray text-sm">Earn great wages with weekly pay</p>
               </div>
               
-              <div className="bg-white/10 backdrop-blur rounded-xl p-6 text-left">
-                <div className="h-10 w-10 rounded-lg bg-maroon flex items-center justify-center mb-4">
+              <div className="bg-white border border-border rounded-xl p-6 text-left shadow-sm">
+                <div className="h-10 w-10 rounded-lg bg-teal flex items-center justify-center mb-4">
                   <svg className="h-5 w-5 text-white" fill="none" viewBox="0 0 24 24" stroke="currentColor">
                     <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M4.318 6.318a4.5 4.5 0 000 6.364L12 20.364l7.682-7.682a4.5 4.5 0 00-6.364-6.364L12 7.636l-1.318-1.318a4.5 4.5 0 00-6.364 0z" />
                   </svg>
                 </div>
-                <h3 className="text-white font-semibold mb-2">Make an Impact</h3>
-                <p className="text-white/70 text-sm">Help families and seniors in your community</p>
+                <h3 className="text-navy font-semibold mb-2">Make an Impact</h3>
+                <p className="text-gray text-sm">Help families and seniors in your community</p>
               </div>
             </div>
 
@@ -275,9 +275,9 @@ export function ApplyPage() {
               Start Your Application
             </Button>
             
-            <p className="mt-6 text-white/60 text-sm">
+            <p className="mt-6 text-gray text-sm">
               Already have an account?{' '}
-              <Link to="/auth/login" className="text-white hover:underline">
+              <Link to="/auth/login" className="text-teal font-medium hover:underline">
                 Sign in here
               </Link>
             </p>
@@ -289,7 +289,7 @@ export function ApplyPage() {
           <div className="py-12">
             <button 
               onClick={() => setStep('welcome')}
-              className="text-white/60 hover:text-white mb-6 flex items-center gap-2 text-sm"
+              className="text-gray hover:text-navy mb-6 flex items-center gap-2 text-sm"
             >
               <svg className="h-4 w-4" fill="none" viewBox="0 0 24 24" stroke="currentColor">
                 <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M15 19l-7-7 7-7" />
@@ -297,16 +297,16 @@ export function ApplyPage() {
               Back
             </button>
             
-            <h2 className="text-3xl font-display font-bold text-white mb-2">
+            <h2 className="text-3xl font-display font-bold text-navy mb-2">
               Select Your Location
             </h2>
-            <p className="text-white/70 mb-8">
+            <p className="text-gray mb-8">
               Choose the office location closest to you. You can work with clients throughout the area.
             </p>
             
             {agency.locations.length === 0 ? (
-              <div className="bg-white/10 rounded-xl p-8 text-center">
-                <p className="text-white/70">No locations are currently hiring. Please check back later.</p>
+              <div className="bg-white border border-border rounded-xl p-8 text-center">
+                <p className="text-gray">No locations are currently hiring. Please check back later.</p>
               </div>
             ) : (
               <>
@@ -315,17 +315,17 @@ export function ApplyPage() {
                     <button
                       key={location.id}
                       onClick={() => setSelectedLocation(location.id)}
-                      className={`p-6 rounded-xl text-left transition-all ${
+                      className={`p-6 rounded-xl text-left transition-all border ${
                         selectedLocation === location.id
-                          ? 'bg-white ring-4 ring-maroon'
-                          : 'bg-white/10 hover:bg-white/20'
+                          ? 'bg-white border-teal ring-2 ring-teal shadow-sm'
+                          : 'bg-white border-border hover:border-gray-300'
                       }`}
                     >
                       <div className="flex items-start gap-4">
                         <div className={`h-6 w-6 rounded-full border-2 flex items-center justify-center flex-shrink-0 mt-0.5 ${
                           selectedLocation === location.id
-                            ? 'border-maroon bg-maroon'
-                            : 'border-white/40'
+                            ? 'border-teal bg-teal'
+                            : 'border-gray-300'
                         }`}>
                           {selectedLocation === location.id && (
                             <svg className="h-4 w-4 text-white" fill="none" viewBox="0 0 24 24" stroke="currentColor">
@@ -334,14 +334,10 @@ export function ApplyPage() {
                           )}
                         </div>
                         <div>
-                          <h3 className={`font-semibold text-lg ${
-                            selectedLocation === location.id ? 'text-navy' : 'text-white'
-                          }`}>
+                          <h3 className="font-semibold text-lg text-navy">
                             {location.name}
                           </h3>
-                          <p className={`text-sm ${
-                            selectedLocation === location.id ? 'text-gray' : 'text-white/60'
-                          }`}>
+                          <p className="text-sm text-gray">
                             {location.address_line1 
                               ? `${location.address_line1}, ${location.city}, ${location.state}`
                               : `${location.city}, ${location.state}`
@@ -371,7 +367,7 @@ export function ApplyPage() {
           <div className="py-12 max-w-md mx-auto">
             <button 
               onClick={() => setStep('location')}
-              className="text-white/60 hover:text-white mb-6 flex items-center gap-2 text-sm"
+              className="text-gray hover:text-navy mb-6 flex items-center gap-2 text-sm"
             >
               <svg className="h-4 w-4" fill="none" viewBox="0 0 24 24" stroke="currentColor">
                 <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M15 19l-7-7 7-7" />
