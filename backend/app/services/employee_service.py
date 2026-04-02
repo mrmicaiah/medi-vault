@@ -30,7 +30,7 @@ class EmployeeService:
         # Verify application exists and is approved
         app_result = (
             self.supabase.table("applications")
-            .select("*, profiles(first_name, last_name, email)")
+            .select("*")
             .eq("id", request.application_id)
             .single()
             .execute()
@@ -50,6 +50,16 @@ class EmployeeService:
             )
 
         user_id = app["user_id"]
+
+        # Get profile separately
+        profile_result = (
+            self.supabase.table("profiles")
+            .select("first_name, last_name, email")
+            .eq("id", user_id)
+            .single()
+            .execute()
+        )
+        profile = profile_result.data or {}
 
         # Check if already hired
         existing = (
@@ -77,25 +87,27 @@ class EmployeeService:
         emp_number = f"EMP-{(emp_count.count or 0) + 1:05d}"
 
         # Create employee record
+        emp_data = {
+            "user_id": user_id,
+            "application_id": request.application_id,
+            "employee_number": emp_number,
+            "status": EmployeeStatus.ACTIVE.value,
+            "hire_date": hire_date,
+            "job_title": request.job_title,
+            "department": request.department,
+            "pay_rate": request.pay_rate,
+            "pay_type": request.pay_type,
+            "notes": request.notes,
+            "created_at": now,
+            "updated_at": now,
+        }
+        
+        # Remove None values
+        emp_data = {k: v for k, v in emp_data.items() if v is not None}
+
         emp_result = (
             self.supabase.table("employees")
-            .insert(
-                {
-                    "user_id": user_id,
-                    "application_id": request.application_id,
-                    "employee_number": emp_number,
-                    "status": EmployeeStatus.ACTIVE.value,
-                    "hire_date": hire_date,
-                    "job_title": request.job_title,
-                    "department": request.department,
-                    "pay_rate": request.pay_rate,
-                    "pay_type": request.pay_type,
-                    "start_date": request.start_date,
-                    "notes": request.notes,
-                    "created_at": now,
-                    "updated_at": now,
-                }
-            )
+            .insert(emp_data)
             .execute()
         )
 
@@ -116,7 +128,6 @@ class EmployeeService:
         ).eq("id", user_id).execute()
 
         e = emp_result.data[0]
-        profile = app.get("profiles", {}) or {}
 
         return EmployeeResponse(
             id=e["id"],
@@ -145,9 +156,10 @@ class EmployeeService:
         search: Optional[str] = None,
     ) -> tuple[List[EmployeeResponse], int]:
         """List employees with optional filtering."""
+        # Don't join profiles - fetch separately to avoid FK ambiguity
         query = (
             self.supabase.table("employees")
-            .select("*, profiles(first_name, last_name, email)", count="exact")
+            .select("*", count="exact")
         )
 
         if status_filter:
@@ -158,7 +170,18 @@ class EmployeeService:
 
         employees = []
         for e in result.data or []:
-            profile = e.get("profiles", {}) or {}
+            # Fetch profile separately
+            profile = {}
+            if e.get("user_id"):
+                profile_result = (
+                    self.supabase.table("profiles")
+                    .select("first_name, last_name, email")
+                    .eq("id", e["user_id"])
+                    .single()
+                    .execute()
+                )
+                profile = profile_result.data or {}
+
             emp = EmployeeResponse(
                 id=e["id"],
                 user_id=e["user_id"],
@@ -187,7 +210,7 @@ class EmployeeService:
         """Get a single employee by ID."""
         result = (
             self.supabase.table("employees")
-            .select("*, profiles(first_name, last_name, email)")
+            .select("*")
             .eq("id", emp_id)
             .single()
             .execute()
@@ -200,7 +223,18 @@ class EmployeeService:
             )
 
         e = result.data
-        profile = e.get("profiles", {}) or {}
+        
+        # Fetch profile separately
+        profile = {}
+        if e.get("user_id"):
+            profile_result = (
+                self.supabase.table("profiles")
+                .select("first_name, last_name, email")
+                .eq("id", e["user_id"])
+                .single()
+                .execute()
+            )
+            profile = profile_result.data or {}
 
         return EmployeeResponse(
             id=e["id"],
@@ -259,7 +293,7 @@ class EmployeeService:
         # Verify client exists
         client_result = (
             self.supabase.table("clients")
-            .select("id, first_name, last_name")
+            .select("id, nickname, first_name, last_name")
             .eq("id", request.client_id)
             .single()
             .execute()
@@ -299,11 +333,13 @@ class EmployeeService:
             )
 
         a = assignment_result.data[0]
+        client_name = client.get("nickname") or f"{client.get('first_name', '')} {client.get('last_name', '')}".strip()
+        
         return ClientAssignmentResponse(
             id=a["id"],
             employee_id=a["employee_id"],
             client_id=a["client_id"],
-            client_name=f"{client['first_name']} {client['last_name']}",
+            client_name=client_name,
             assigned_by=a.get("assigned_by"),
             start_date=a["start_date"],
             end_date=a.get("end_date"),
@@ -317,7 +353,7 @@ class EmployeeService:
         """Get all client assignments for an employee."""
         result = (
             self.supabase.table("employee_client_assignments")
-            .select("*, clients(first_name, last_name)")
+            .select("*, clients(nickname, first_name, last_name)")
             .eq("employee_id", emp_id)
             .order("created_at", desc=True)
             .execute()
@@ -326,12 +362,14 @@ class EmployeeService:
         assignments = []
         for a in result.data or []:
             client = a.get("clients", {}) or {}
+            client_name = client.get("nickname") or f"{client.get('first_name', '')} {client.get('last_name', '')}".strip() or None
+            
             assignments.append(
                 ClientAssignmentResponse(
                     id=a["id"],
                     employee_id=a["employee_id"],
                     client_id=a["client_id"],
-                    client_name=f"{client.get('first_name', '')} {client.get('last_name', '')}".strip() or None,
+                    client_name=client_name,
                     assigned_by=a.get("assigned_by"),
                     start_date=a["start_date"],
                     end_date=a.get("end_date"),
