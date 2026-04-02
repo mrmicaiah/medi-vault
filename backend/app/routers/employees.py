@@ -17,6 +17,7 @@ from app.schemas.employee import (
     HireRequest,
 )
 from app.services.employee_service import EmployeeService
+from app.services.assignment_service import AssignmentService
 
 router = APIRouter(prefix="/employees", tags=["Employees"])
 
@@ -82,9 +83,9 @@ async def assign_client(
     admin: UserProfile = Depends(require_admin),
     supabase: Client = Depends(get_supabase),
 ):
-    """Assign a client to an employee."""
-    service = EmployeeService(supabase)
-    return service.assign_client(emp_id, request, admin.id)
+    """Assign a client to an employee (with audit trail)."""
+    service = AssignmentService(supabase)
+    return service.create_assignment(emp_id, request, admin.id)
 
 
 @router.get("/{emp_id}/assignments", response_model=List[ClientAssignmentResponse])
