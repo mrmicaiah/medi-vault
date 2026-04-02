@@ -25,13 +25,8 @@ import { FinalSignature } from './steps/FinalSignature';
 // Steps that involve file uploads
 const UPLOAD_STEPS = [11, 12, 13, 14, 15, 16, 17];
 
-// Steps that need access to all steps data (e.g., to read position from step 1)
-const NEEDS_ALL_STEPS_DATA = [21];
-
-interface StepState {
-  data: Record<string, unknown>;
-  status: string;
-}
+// Steps that need access to all steps data (for cross-step references)
+const CROSS_REFERENCE_STEPS = [21]; // JobDescription needs Step 1 position
 
 interface StepRendererProps {
   step: number;
@@ -41,7 +36,7 @@ interface StepRendererProps {
   pendingFile?: File | null;
   saving: boolean;
   onChange?: () => void;
-  allStepsData?: Record<number, StepState>;
+  allStepsData?: Record<number, { data: Record<string, unknown>; status: string }>;
 }
 
 export function StepRenderer({ 
@@ -61,8 +56,8 @@ export function StepRenderer({
     ? { ...baseProps, onFileSelect, pendingFile }
     : baseProps;
 
-  // Add allStepsData for steps that need it
-  const allStepsProps = NEEDS_ALL_STEPS_DATA.includes(step)
+  // Add allStepsData for cross-reference steps
+  const crossRefProps = CROSS_REFERENCE_STEPS.includes(step)
     ? { ...baseProps, allStepsData }
     : baseProps;
 
@@ -87,7 +82,7 @@ export function StepRenderer({
     case 18: return <OrientationTraining {...baseProps} />;
     case 19: return <CriminalBackground {...baseProps} />;
     case 20: return <VACodeDisclosure {...baseProps} />;
-    case 21: return <JobDescription {...allStepsProps} />;
+    case 21: return <JobDescription {...crossRefProps} />;
     case 22: return <FinalSignature {...baseProps} />;
     default: return <div className="text-center text-gray">Unknown step</div>;
   }
