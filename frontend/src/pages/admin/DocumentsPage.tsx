@@ -101,7 +101,6 @@ export default function DocumentsPage() {
   
   // Pool collapse state
   const [expandedPools, setExpandedPools] = useState<Set<string>>(new Set());
-  const [recentExpanded, setRecentExpanded] = useState(false);
   const [completeExpanded, setCompleteExpanded] = useState(false);
   const [partialExpanded, setPartialExpanded] = useState(false);
   const [missingExpanded, setMissingExpanded] = useState(false);
@@ -249,10 +248,7 @@ export default function DocumentsPage() {
   }
 
   // Filter and organize applicants
-  const { recentSubmissions, byPosition, completeApplicants, partialApplicants, missingApplicants } = useMemo(() => {
-    const now = new Date();
-    const oneWeekAgo = new Date(now.getTime() - 7 * 24 * 60 * 60 * 1000);
-    
+  const { byPosition, completeApplicants, partialApplicants, missingApplicants } = useMemo(() => {
     // Apply search
     let filtered = applicants;
     if (searchQuery.trim()) {
@@ -272,9 +268,6 @@ export default function DocumentsPage() {
       return dateB - dateA;
     });
     
-    // Recent = submitted in past 7 days
-    const recent = filtered.filter(a => a.submitted_at && new Date(a.submitted_at) >= oneWeekAgo);
-    
     // Group by position
     const pools: Record<string, ApplicantWithDocs[]> = {};
     filtered.forEach(a => {
@@ -285,14 +278,12 @@ export default function DocumentsPage() {
       }
     });
     
-    // For now, we'll categorize by status as proxy for document completion
-    // In production, you'd want to actually check document counts
+    // Categorize by status as proxy for document completion
     const complete = filtered.filter(a => a.status === 'approved' || a.status === 'hired');
     const partial = filtered.filter(a => a.status === 'under_review');
     const missing = filtered.filter(a => a.status === 'submitted');
     
     return {
-      recentSubmissions: recent,
       byPosition: pools,
       completeApplicants: complete,
       partialApplicants: partial,
@@ -310,26 +301,6 @@ export default function DocumentsPage() {
       }
       return next;
     });
-  };
-
-  const getStatusBadge = (status: string) => {
-    const styles: Record<string, string> = {
-      submitted: 'bg-amber-100 text-amber-700',
-      under_review: 'bg-purple-100 text-purple-700',
-      approved: 'bg-green-100 text-green-700',
-      hired: 'bg-success text-white',
-    };
-    const labels: Record<string, string> = {
-      submitted: 'Submitted',
-      under_review: 'Reviewing',
-      approved: 'Approved',
-      hired: 'Hired',
-    };
-    return (
-      <span className={`inline-flex items-center px-2 py-0.5 rounded text-xs font-medium ${styles[status] || 'bg-gray-100 text-gray'}`}>
-        {labels[status] || status}
-      </span>
-    );
   };
 
   const getDocStatusBadge = (status: string) => {
@@ -405,7 +376,6 @@ export default function DocumentsPage() {
     expanded,
     onToggle,
     borderColor = 'border-border',
-    bgGradient = '',
   }: { 
     id: string;
     title: string; 
@@ -415,14 +385,13 @@ export default function DocumentsPage() {
     expanded: boolean;
     onToggle: () => void;
     borderColor?: string;
-    bgGradient?: string;
   }) => {
     const count = poolApplicants.length;
     
     if (count === 0) return null;
     
     return (
-      <div className={`bg-white rounded-xl border ${borderColor} overflow-hidden ${bgGradient}`}>
+      <div className={`bg-white rounded-xl border ${borderColor} overflow-hidden`}>
         <button
           onClick={onToggle}
           className="w-full flex items-center justify-between px-5 py-4 hover:bg-gray-50 transition-colors"
@@ -483,7 +452,7 @@ export default function DocumentsPage() {
         <div>
           <h1 className="font-display text-2xl font-bold text-navy">Documents</h1>
           <p className="text-sm text-gray mt-1">
-            {applicants.length} applicants • {recentSubmissions.length} submitted this week
+            {applicants.length} applicants with documents to review
           </p>
         </div>
       </div>
@@ -507,38 +476,6 @@ export default function DocumentsPage() {
           </div>
         </div>
       </div>
-
-      {/* Recently Submitted */}
-      {recentSubmissions.length > 0 && (
-        <div className="bg-gradient-to-r from-maroon/5 to-transparent rounded-xl border border-maroon/20 overflow-hidden">
-          <button
-            onClick={() => setRecentExpanded(!recentExpanded)}
-            className="w-full flex items-center justify-between px-5 py-4 hover:bg-maroon/5 transition-colors"
-          >
-            <div className="flex items-center gap-3">
-              <span className="text-xl">📄</span>
-              <span className="font-semibold text-navy">Recently Submitted</span>
-              <span className="px-2 py-0.5 rounded-full text-xs font-bold text-white bg-maroon">{recentSubmissions.length}</span>
-            </div>
-            <svg 
-              className={`w-5 h-5 text-gray transition-transform ${recentExpanded ? 'rotate-180' : ''}`} 
-              fill="none" 
-              viewBox="0 0 24 24" 
-              stroke="currentColor"
-            >
-              <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M19 9l-7 7-7-7" />
-            </svg>
-          </button>
-          
-          {recentExpanded && (
-            <div className="border-t border-maroon/20 bg-white">
-              {recentSubmissions.map(a => (
-                <ApplicantRow key={a.id} applicant={a} />
-              ))}
-            </div>
-          )}
-        </div>
-      )}
 
       {/* By Document Status */}
       <div className="space-y-4">
