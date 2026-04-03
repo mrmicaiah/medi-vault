@@ -1,5 +1,6 @@
 """User management endpoints for admins."""
 
+import os
 from datetime import datetime, timezone
 from typing import List, Optional
 
@@ -12,6 +13,9 @@ from app.models.user import UserProfile, UserRole
 from app.schemas.common import SuccessResponse
 
 router = APIRouter(prefix="/users", tags=["Users"])
+
+# Get frontend URL from environment
+FRONTEND_URL = os.getenv("FRONTEND_URL", "https://medi-vault.pages.dev")
 
 
 class UserResponse(BaseModel):
@@ -461,8 +465,14 @@ async def send_password_reset_email(
         )
     
     try:
-        # Use Supabase's password recovery email
-        supabase.auth.reset_password_email(user_email)
+        # Use Supabase's password recovery email with redirect URL
+        # The redirect URL tells Supabase where to send the user after clicking the link
+        redirect_url = f"{FRONTEND_URL}/auth/reset-callback"
+        
+        supabase.auth.reset_password_email(
+            user_email,
+            options={"redirect_to": redirect_url}
+        )
         
         return SuccessResponse(
             message=f"Password reset email sent to {user_email}",
