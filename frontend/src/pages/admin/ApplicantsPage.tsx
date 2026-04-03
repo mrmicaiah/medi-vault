@@ -112,9 +112,10 @@ export function ApplicantsPage() {
   const [loadingDetail, setLoadingDetail] = useState(false);
   const [panelOpen, setPanelOpen] = useState(false);
   
-  // Pool collapse state
-  const [collapsedPools, setCollapsedPools] = useState<Set<string>>(new Set());
-  const [recentExpanded, setRecentExpanded] = useState(true);
+  // Pool collapse state - using Set for expanded pools (all collapsed by default)
+  const [expandedPools, setExpandedPools] = useState<Set<string>>(new Set());
+  const [recentExpanded, setRecentExpanded] = useState(false);
+  const [hiredExpanded, setHiredExpanded] = useState(false);
   
   // Toggles for hidden statuses
   const [showRejected, setShowRejected] = useState(false);
@@ -180,18 +181,22 @@ export function ApplicantsPage() {
   };
 
   // Filter and organize applicants
-  const { recentApplicants, positionPools, uncategorizedApplicants, rejectedCount, notStartedCount } = useMemo(() => {
+  const { recentApplicants, positionPools, uncategorizedApplicants, hiredByPosition, rejectedCount, notStartedCount } = useMemo(() => {
     const now = new Date();
     const oneWeekAgo = new Date(now.getTime() - 7 * 24 * 60 * 60 * 1000);
     
-    // Base filter: exclude rejected and not_started unless toggled
-    let filtered = applicants.filter(a => {
+    // Separate hired applicants first
+    const hired = applicants.filter(a => a.status === 'hired');
+    const nonHired = applicants.filter(a => a.status !== 'hired');
+    
+    // Base filter for non-hired: exclude rejected and not_started unless toggled
+    let filtered = nonHired.filter(a => {
       if (a.status === 'rejected' && !showRejected) return false;
       if (a.status === 'not_started' && !showNotStarted) return false;
       return true;
     });
     
-    // Apply search
+    // Apply search to non-hired
     if (searchQuery.trim()) {
       const query = searchQuery.toLowerCase();
       filtered = filtered.filter(a => 
@@ -204,11 +209,12 @@ export function ApplicantsPage() {
     
     // Sort all by created_at desc (most recent first)
     filtered.sort((a, b) => new Date(b.created_at).getTime() - new Date(a.created_at).getTime());
+    hired.sort((a, b) => new Date(b.created_at).getTime() - new Date(a.created_at).getTime());
     
-    // Recent = past 7 days
+    // Recent = past 7 days (non-hired only)
     const recent = filtered.filter(a => new Date(a.created_at) >= oneWeekAgo);
     
-    // Group by position
+    // Group non-hired by position
     const pools: Record<string, Applicant[]> = {};
     const uncategorized: Applicant[] = [];
     
@@ -222,21 +228,34 @@ export function ApplicantsPage() {
       }
     });
     
+    // Group hired by position
+    const hiredPools: Record<string, Applicant[]> = {};
+    hired.forEach(a => {
+      const pos = a.position?.toLowerCase() || 'uncategorized';
+      if (!hiredPools[pos]) hiredPools[pos] = [];
+      hiredPools[pos].push(a);
+    });
+    
     // Count rejected and not_started for toggle buttons
-    const rejCount = applicants.filter(a => a.status === 'rejected').length;
-    const notStartedCount = applicants.filter(a => a.status === 'not_started').length;
+    const rejCount = nonHired.filter(a => a.status === 'rejected').length;
+    const notStartedCt = nonHired.filter(a => a.status === 'not_started').length;
     
     return {
       recentApplicants: recent,
       positionPools: pools,
       uncategorizedApplicants: uncategorized,
+      hiredByPosition: hiredPools,
       rejectedCount: rejCount,
-      notStartedCount,
+      notStartedCount: notStartedCt,
     };
   }, [applicants, showRejected, showNotStarted, searchQuery]);
 
+  const totalHired = useMemo(() => {
+    return Object.values(hiredByPosition).reduce((sum, arr) => sum + arr.length, 0);
+  }, [hiredByPosition]);
+
   const togglePool = (poolId: string) => {
-    setCollapsedPools(prev => {
+    setExpandedPools(prev => {
       const next = new Set(prev);
       if (next.has(poolId)) {
         next.delete(poolId);
@@ -609,11 +628,12 @@ export function ApplicantsPage() {
       submitted: 'bg-amber-100 text-amber-700',
       under_review: 'bg-purple-100 text-purple-700',
       approved: 'bg-green-100 text-green-700',
+      hired: 'bg-success text-white',
       rejected: 'bg-red-100 text-red-700',
     };
     const labels: Record<string, string> = {
       not_started: 'Not Started', in_progress: 'In Progress', submitted: 'Submitted',
-      under_review: 'Reviewing', approved: 'Approved', rejected: 'Rejected',
+      under_review: 'Reviewing', approved: 'Approved', hired: 'Hired', rejected: 'Rejected',
     };
     return (
       <span className={`inline-flex items-center px-2 py-0.5 rounded text-xs font-medium ${styles[status] || 'bg-gray-100 text-gray'}`}>
@@ -646,7 +666,7 @@ export function ApplicantsPage() {
   const canDelete = selectedApplicant && selectedApplicant.status !== 'hired';
 
   // Applicant Row Component
-  const ApplicantRow = ({ applicant, compact = false }: { applicant: Applicant; compact?: boolean }) => {
+  const ApplicantRow = ({ applicant, showStatus = true }: { applicant: Applicant; showStatus?: boolean }) => {
     const config = getPositionConfig(applicant.position);
     return (
       <div
@@ -666,12 +686,16 @@ export function ApplicantsPage() {
           <p className="text-xs text-gray truncate">{applicant.email}</p>
         </div>
         
-        {/* Status and time */}
-        {!compact && (
+        {/* Status and location */}
+        {showStatus && (
           <div className="hidden sm:flex items-center gap-3">
             <span className="text-xs text-gray">{applicant.location_name || '—'}</span>
             {getStatusBadge(applicant.status)}
           </div>
+        )}
+        
+        {!showStatus && (
+          <span className="hidden sm:block text-xs text-gray">{applicant.location_name || '—'}</span>
         )}
         
         <span className="text-xs text-gray-400 flex-shrink-0">{formatTimeAgo(applicant.created_at)}</span>
@@ -689,17 +713,17 @@ export function ApplicantsPage() {
     title, 
     icon, 
     color, 
-    applicants, 
-    defaultExpanded = false 
+    applicants,
+    showStatus = true,
   }: { 
     id: string;
     title: string; 
     icon: string; 
     color: string;
     applicants: Applicant[];
-    defaultExpanded?: boolean;
+    showStatus?: boolean;
   }) => {
-    const isCollapsed = collapsedPools.has(id);
+    const isExpanded = expandedPools.has(id);
     const count = applicants.length;
     
     if (count === 0) return null;
@@ -716,7 +740,7 @@ export function ApplicantsPage() {
             <span className={`px-2 py-0.5 rounded-full text-xs font-bold text-white ${color}`}>{count}</span>
           </div>
           <svg 
-            className={`w-5 h-5 text-gray transition-transform ${isCollapsed ? '' : 'rotate-180'}`} 
+            className={`w-5 h-5 text-gray transition-transform ${isExpanded ? 'rotate-180' : ''}`} 
             fill="none" 
             viewBox="0 0 24 24" 
             stroke="currentColor"
@@ -725,10 +749,10 @@ export function ApplicantsPage() {
           </svg>
         </button>
         
-        {!isCollapsed && (
+        {isExpanded && (
           <div className="border-t border-border">
             {applicants.map(a => (
-              <ApplicantRow key={a.id} applicant={a} />
+              <ApplicantRow key={a.id} applicant={a} showStatus={showStatus} />
             ))}
           </div>
         )}
@@ -865,6 +889,72 @@ export function ApplicantsPage() {
           />
         )}
       </div>
+
+      {/* Hired Applicants Section */}
+      {totalHired > 0 && (
+        <div className="space-y-4">
+          <h2 className="text-sm font-semibold text-gray uppercase tracking-wide px-1">Hired Applicants</h2>
+          
+          <div className="bg-gradient-to-r from-success/5 to-transparent rounded-xl border border-success/20 overflow-hidden">
+            <button
+              onClick={() => setHiredExpanded(!hiredExpanded)}
+              className="w-full flex items-center justify-between px-5 py-4 hover:bg-success/5 transition-colors"
+            >
+              <div className="flex items-center gap-3">
+                <span className="text-xl">✅</span>
+                <span className="font-semibold text-navy">Hired Applicants</span>
+                <span className="px-2 py-0.5 rounded-full text-xs font-bold text-white bg-success">{totalHired}</span>
+              </div>
+              <svg 
+                className={`w-5 h-5 text-gray transition-transform ${hiredExpanded ? 'rotate-180' : ''}`} 
+                fill="none" 
+                viewBox="0 0 24 24" 
+                stroke="currentColor"
+              >
+                <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M19 9l-7 7-7-7" />
+              </svg>
+            </button>
+            
+            {hiredExpanded && (
+              <div className="border-t border-success/20 bg-white">
+                {/* Group hired by position */}
+                {POSITION_ORDER.map(pos => {
+                  const config = POSITION_CONFIG[pos];
+                  const hiredInPosition = hiredByPosition[pos] || [];
+                  if (hiredInPosition.length === 0) return null;
+                  
+                  return (
+                    <div key={pos} className="border-b border-gray-100 last:border-b-0">
+                      <div className="px-5 py-2 bg-gray-50 flex items-center gap-2">
+                        <span className="text-sm">{config.icon}</span>
+                        <span className="text-xs font-semibold text-navy">{config.label}</span>
+                        <span className="text-xs text-gray">({hiredInPosition.length})</span>
+                      </div>
+                      {hiredInPosition.map(a => (
+                        <ApplicantRow key={a.id} applicant={a} showStatus={false} />
+                      ))}
+                    </div>
+                  );
+                })}
+                
+                {/* Uncategorized hired */}
+                {(hiredByPosition['uncategorized'] || []).length > 0 && (
+                  <div className="border-b border-gray-100 last:border-b-0">
+                    <div className="px-5 py-2 bg-gray-50 flex items-center gap-2">
+                      <span className="text-sm">📋</span>
+                      <span className="text-xs font-semibold text-navy">Uncategorized</span>
+                      <span className="text-xs text-gray">({hiredByPosition['uncategorized'].length})</span>
+                    </div>
+                    {hiredByPosition['uncategorized'].map(a => (
+                      <ApplicantRow key={a.id} applicant={a} showStatus={false} />
+                    ))}
+                  </div>
+                )}
+              </div>
+            )}
+          </div>
+        </div>
+      )}
 
       {/* Empty State */}
       {applicants.length === 0 && (
