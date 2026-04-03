@@ -28,7 +28,6 @@ interface EmployeeDetail extends Employee {
 }
 
 interface EmployeePreferences {
-  // Step 1 - Application Basics
   position_applied?: string;
   employment_type?: string;
   desired_hourly_rate?: string;
@@ -36,14 +35,10 @@ interface EmployeePreferences {
   speaks_other_languages?: string;
   other_languages?: string;
   how_heard?: string;
-  
-  // Step 2 - Personal Info
   city?: string;
   state?: string;
   address_line1?: string;
   zip?: string;
-  
-  // Step 8 - Work Preferences
   available_days?: string[];
   shift_preferences?: string[];
   hours_per_week?: string;
@@ -51,8 +46,6 @@ interface EmployeePreferences {
   max_travel_miles?: string;
   comfortable_with_pets?: string;
   comfortable_with_smokers?: string;
-  
-  // Step 15 - Credentials
   credential_type?: string;
 }
 
@@ -89,7 +82,6 @@ interface AssignmentHistoryEntry {
   end_reason?: string;
 }
 
-// Union type for both assignment types that can be ended
 interface EndableAssignment {
   id: string;
   client_name: string;
@@ -137,9 +129,46 @@ interface AssignmentHistoryResponse {
   assignments: AssignmentHistoryEntry[];
 }
 
+// Position configuration - same as ApplicantsPage
+const POSITION_CONFIG: Record<string, { label: string; color: string; icon: string }> = {
+  cna: { label: 'CNA', color: 'bg-purple-500', icon: '🩺' },
+  hha: { label: 'HHA', color: 'bg-teal-500', icon: '🏠' },
+  pca: { label: 'PCA', color: 'bg-blue-500', icon: '👤' },
+  lpn: { label: 'LPN', color: 'bg-amber-500', icon: '💉' },
+  rn: { label: 'RN', color: 'bg-rose-500', icon: '⚕️' },
+};
+
+const POSITION_ORDER = ['cna', 'hha', 'pca', 'lpn', 'rn'];
+
+const getPositionConfig = (position?: string) => {
+  if (!position) return null;
+  return POSITION_CONFIG[position.toLowerCase()] || null;
+};
+
+const getPositionLabel = (position?: string) => {
+  if (!position) return '—';
+  const config = getPositionConfig(position);
+  return config?.label || position.toUpperCase();
+};
+
 const formatDate = (dateString: string) => {
   const date = new Date(dateString);
   return date.toLocaleDateString('en-US', { month: 'short', day: 'numeric', year: 'numeric' });
+};
+
+const formatTimeAgo = (dateStr: string) => {
+  const date = new Date(dateStr);
+  const now = new Date();
+  const diffMs = now.getTime() - date.getTime();
+  const diffMins = Math.floor(diffMs / 60000);
+  const diffHours = Math.floor(diffMs / 3600000);
+  const diffDays = Math.floor(diffMs / 86400000);
+  
+  if (diffMins < 60) return `${diffMins}m ago`;
+  if (diffHours < 24) return `${diffHours}h ago`;
+  if (diffDays === 1) return 'Yesterday';
+  if (diffDays < 7) return `${diffDays}d ago`;
+  return date.toLocaleDateString();
 };
 
 const END_REASONS = [
@@ -152,8 +181,6 @@ const END_REASONS = [
   { value: 'temporary_assignment_ended', label: 'Temporary Assignment Ended' },
   { value: 'other', label: 'Other' },
 ];
-
-type SortField = 'name' | 'job_title' | 'status' | 'hire_date';
 
 // Helper functions for formatting preferences
 const formatAvailability = (days?: string[]) => {
@@ -194,20 +221,18 @@ const formatTransportation = (hasTransport?: string, maxMiles?: string) => {
   return hasTransport === 'no' ? 'No' : '—';
 };
 
-const getPositionLabel = (position?: string) => {
-  if (!position) return '—';
-  const labels: Record<string, string> = { pca: 'PCA', hha: 'HHA', cna: 'CNA', lpn: 'LPN', rn: 'RN' };
-  return labels[position.toLowerCase()] || position.toUpperCase();
-};
-
 export function EmployeesPage() {
   const [employees, setEmployees] = useState<Employee[]>([]);
   const [loading, setLoading] = useState(true);
   const [error, setError] = useState<string | null>(null);
-  const [search, setSearch] = useState('');
-  const [statusFilter, setStatusFilter] = useState<string>('all');
-  const [sortField, setSortField] = useState<SortField>('name');
-  const [sortDir, setSortDir] = useState<'asc' | 'desc'>('asc');
+  const [searchQuery, setSearchQuery] = useState('');
+
+  // Pool collapse state
+  const [expandedPools, setExpandedPools] = useState<Set<string>>(new Set());
+  const [recentExpanded, setRecentExpanded] = useState(false);
+  const [inactiveExpanded, setInactiveExpanded] = useState(false);
+  const [terminatedExpanded, setTerminatedExpanded] = useState(false);
+  const [unassignedExpanded, setUnassignedExpanded] = useState(false);
 
   const [selectedEmployee, setSelectedEmployee] = useState<EmployeeDetail | null>(null);
   const [panelOpen, setPanelOpen] = useState(false);
@@ -293,6 +318,97 @@ export function EmployeesPage() {
     }
   };
 
+  const loadClients = async () => {
+    setLoadingClients(true);
+    try {
+      const params = new URLSearchParams();
+      params.set('page', clientPage.toString());
+      params.set('page_size', clientPageSize.toString());
+      if (clientSearchDebounced.trim()) {
+        params.set('search', clientSearchDebounced.trim());
+      }
+      const data = await api.get<ClientListResponse>(`/clients?${params}`);
+      setClients(data.clients || []);
+      setClientTotal(data.total || 0);
+    } catch (err) {
+      setError(err instanceof Error ? err.message : 'Failed to load clients');
+    } finally {
+      setLoadingClients(false);
+    }
+  };
+
+  // Filter and organize employees
+  const { recentHires, positionPools, unassignedEmployees, inactiveEmployees, terminatedEmployees } = useMemo(() => {
+    const now = new Date();
+    const oneWeekAgo = new Date(now.getTime() - 7 * 24 * 60 * 60 * 1000);
+    
+    // Separate by status
+    const active = employees.filter(e => e.status === 'active');
+    const inactive = employees.filter(e => e.status === 'inactive');
+    const terminated = employees.filter(e => e.status === 'terminated');
+    
+    // Apply search
+    let filtered = active;
+    if (searchQuery.trim()) {
+      const query = searchQuery.toLowerCase();
+      filtered = filtered.filter(e => 
+        e.first_name?.toLowerCase().includes(query) ||
+        e.last_name?.toLowerCase().includes(query) ||
+        e.email?.toLowerCase().includes(query) ||
+        e.location_name?.toLowerCase().includes(query) ||
+        e.employee_number?.toLowerCase().includes(query)
+      );
+    }
+    
+    // Sort by hire_date desc (most recent first)
+    filtered.sort((a, b) => {
+      const dateA = a.hire_date ? new Date(a.hire_date).getTime() : 0;
+      const dateB = b.hire_date ? new Date(b.hire_date).getTime() : 0;
+      return dateB - dateA;
+    });
+    
+    // Recent = hired in past 7 days
+    const recent = filtered.filter(e => e.hire_date && new Date(e.hire_date) >= oneWeekAgo);
+    
+    // Group active by position
+    const pools: Record<string, Employee[]> = {};
+    const unassigned: Employee[] = [];
+    
+    filtered.forEach(e => {
+      const pos = e.position?.toLowerCase();
+      if (pos && POSITION_CONFIG[pos]) {
+        if (!pools[pos]) pools[pos] = [];
+        pools[pos].push(e);
+      } else {
+        unassigned.push(e);
+      }
+    });
+    
+    return {
+      recentHires: recent,
+      positionPools: pools,
+      unassignedEmployees: unassigned,
+      inactiveEmployees: inactive,
+      terminatedEmployees: terminated,
+    };
+  }, [employees, searchQuery]);
+
+  const totalActive = useMemo(() => {
+    return employees.filter(e => e.status === 'active').length;
+  }, [employees]);
+
+  const togglePool = (poolId: string) => {
+    setExpandedPools(prev => {
+      const next = new Set(prev);
+      if (next.has(poolId)) {
+        next.delete(poolId);
+      } else {
+        next.add(poolId);
+      }
+      return next;
+    });
+  };
+
   const selectEmployee = useCallback(async (employee: Employee) => {
     setSelectedEmployee(employee as EmployeeDetail);
     setPanelOpen(true);
@@ -301,12 +417,10 @@ export function EmployeesPage() {
     setPreferences(null);
 
     try {
-      // Load assignments
       const assignRes = await api.get<ClientAssignment[]>(`/employees/${employee.id}/assignments`);
       setAssignments(assignRes || []);
       setSelectedEmployee(prev => prev ? { ...prev, assignments: assignRes || [] } : null);
       
-      // Load preferences from original application
       setLoadingPreferences(true);
       try {
         const prefRes = await api.get<{ preferences: EmployeePreferences; has_application: boolean }>(`/employees/${employee.id}/preferences`);
@@ -334,25 +448,6 @@ export function EmployeesPage() {
       console.error('Failed to load assignment history:', err);
     } finally {
       setLoadingAssignments(false);
-    }
-  };
-
-  const loadClients = async () => {
-    setLoadingClients(true);
-    try {
-      const params = new URLSearchParams();
-      params.set('page', clientPage.toString());
-      params.set('page_size', clientPageSize.toString());
-      if (clientSearchDebounced.trim()) {
-        params.set('search', clientSearchDebounced.trim());
-      }
-      const data = await api.get<ClientListResponse>(`/clients?${params}`);
-      setClients(data.clients || []);
-      setClientTotal(data.total || 0);
-    } catch (err) {
-      setError(err instanceof Error ? err.message : 'Failed to load clients');
-    } finally {
-      setLoadingClients(false);
     }
   };
 
@@ -395,7 +490,6 @@ export function EmployeesPage() {
 
     try {
       setAssigning(true);
-      // If reassigning, first end the current assignment
       if (isReassignment && reassigningFrom) {
         await api.post(`/assignments/${reassigningFrom.id}/end`, {
           end_reason: reassignReason,
@@ -403,7 +497,6 @@ export function EmployeesPage() {
         });
       }
 
-      // Create new assignment
       await api.post(`/employees/${selectedEmployee.id}/assignments`, {
         client_id: selectedClientId,
         start_date: assignmentStartDate || null,
@@ -413,7 +506,6 @@ export function EmployeesPage() {
       });
 
       setShowAssignModal(false);
-      // Reload assignments
       selectEmployee(selectedEmployee);
       loadEmployees();
     } catch (err) {
@@ -441,7 +533,6 @@ export function EmployeesPage() {
       });
       setShowEndModal(false);
       setEndingAssignment(null);
-      // Reload history
       if (selectedEmployee) {
         loadAssignmentHistory(selectedEmployee.id);
         selectEmployee(selectedEmployee);
@@ -454,7 +545,6 @@ export function EmployeesPage() {
     }
   }
 
-  // Get IDs of already assigned clients (excluding the one being reassigned)
   const assignedClientIds = useMemo(() => {
     return new Set(
       assignments
@@ -462,45 +552,6 @@ export function EmployeesPage() {
         .map(a => a.client_id)
     );
   }, [assignments, isReassignment, reassigningFrom]);
-
-  // Filter and sort employees
-  const filteredEmployees = useMemo(() => {
-    let result = [...employees];
-
-    if (search.trim()) {
-      const q = search.toLowerCase();
-      result = result.filter(e =>
-        `${e.first_name} ${e.last_name}`.toLowerCase().includes(q) ||
-        e.email.toLowerCase().includes(q) ||
-        (e.employee_number && e.employee_number.toLowerCase().includes(q))
-      );
-    }
-
-    if (statusFilter !== 'all') {
-      result = result.filter(e => e.status === statusFilter);
-    }
-
-    result.sort((a, b) => {
-      let cmp = 0;
-      switch (sortField) {
-        case 'name':
-          cmp = `${a.first_name} ${a.last_name}`.localeCompare(`${b.first_name} ${b.last_name}`);
-          break;
-        case 'job_title':
-          cmp = (a.position || '').localeCompare(b.position || '');
-          break;
-        case 'status':
-          cmp = a.status.localeCompare(b.status);
-          break;
-        case 'hire_date':
-          cmp = (a.hire_date || '').localeCompare(b.hire_date || '');
-          break;
-      }
-      return sortDir === 'asc' ? cmp : -cmp;
-    });
-
-    return result;
-  }, [employees, search, statusFilter, sortField, sortDir]);
 
   const activeAssignments = useMemo(() => {
     return assignments.filter(a => a.is_active);
@@ -513,9 +564,106 @@ export function EmployeesPage() {
       terminated: 'bg-error/10 text-error',
     };
     return (
-      <span className={`inline-flex items-center px-2.5 py-0.5 rounded-full text-xs font-medium ${styles[status] || 'bg-gray-100 text-gray'}`}>
+      <span className={`inline-flex items-center px-2 py-0.5 rounded text-xs font-medium ${styles[status] || 'bg-gray-100 text-gray'}`}>
         {status.charAt(0).toUpperCase() + status.slice(1)}
       </span>
+    );
+  };
+
+  // Employee Row Component - matches ApplicantsPage style
+  const EmployeeRow = ({ employee, showStatus = true }: { employee: Employee; showStatus?: boolean }) => {
+    const config = getPositionConfig(employee.position);
+    return (
+      <div
+        onClick={() => selectEmployee(employee)}
+        className="flex items-center gap-3 px-4 py-3 hover:bg-gray-50 cursor-pointer transition-colors border-b border-gray-100 last:border-b-0"
+      >
+        {/* Position badge */}
+        <div className={`flex-shrink-0 w-10 h-10 rounded-lg flex items-center justify-center text-xs font-bold text-white ${config?.color || 'bg-gray-400'}`}>
+          {config?.label || '—'}
+        </div>
+        
+        {/* Name and email */}
+        <div className="flex-1 min-w-0">
+          <p className="text-sm font-semibold text-navy truncate">
+            {employee.first_name} {employee.last_name}
+          </p>
+          <p className="text-xs text-gray truncate">{employee.email}</p>
+        </div>
+        
+        {/* Status and location */}
+        {showStatus && (
+          <div className="hidden sm:flex items-center gap-3">
+            <span className="text-xs text-gray">{employee.location_name || '—'}</span>
+            {getStatusBadge(employee.status)}
+          </div>
+        )}
+        
+        {!showStatus && (
+          <span className="hidden sm:block text-xs text-gray">{employee.location_name || '—'}</span>
+        )}
+        
+        <span className="text-xs text-gray-400 flex-shrink-0">
+          {employee.hire_date ? formatTimeAgo(employee.hire_date) : '—'}
+        </span>
+        
+        <svg className="w-4 h-4 text-gray-300 flex-shrink-0" fill="none" viewBox="0 0 24 24" stroke="currentColor">
+          <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M9 5l7 7-7 7" />
+        </svg>
+      </div>
+    );
+  };
+
+  // Pool Section Component - matches ApplicantsPage style
+  const PoolSection = ({ 
+    id, 
+    title, 
+    icon, 
+    color, 
+    employees: poolEmployees,
+    showStatus = true,
+  }: { 
+    id: string;
+    title: string; 
+    icon: string; 
+    color: string;
+    employees: Employee[];
+    showStatus?: boolean;
+  }) => {
+    const isExpanded = expandedPools.has(id);
+    const count = poolEmployees.length;
+    
+    if (count === 0) return null;
+    
+    return (
+      <div className="bg-white rounded-xl border border-border overflow-hidden">
+        <button
+          onClick={() => togglePool(id)}
+          className="w-full flex items-center justify-between px-5 py-4 hover:bg-gray-50 transition-colors"
+        >
+          <div className="flex items-center gap-3">
+            <span className="text-xl">{icon}</span>
+            <span className="font-semibold text-navy">{title}</span>
+            <span className={`px-2 py-0.5 rounded-full text-xs font-bold text-white ${color}`}>{count}</span>
+          </div>
+          <svg 
+            className={`w-5 h-5 text-gray transition-transform ${isExpanded ? 'rotate-180' : ''}`} 
+            fill="none" 
+            viewBox="0 0 24 24" 
+            stroke="currentColor"
+          >
+            <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M19 9l-7 7-7-7" />
+          </svg>
+        </button>
+        
+        {isExpanded && (
+          <div className="border-t border-border">
+            {poolEmployees.map(e => (
+              <EmployeeRow key={e.id} employee={e} showStatus={showStatus} />
+            ))}
+          </div>
+        )}
+      </div>
     );
   };
 
@@ -536,104 +684,189 @@ export function EmployeesPage() {
       <div className="flex items-center justify-between">
         <div>
           <h1 className="font-display text-2xl font-bold text-navy">Employees</h1>
-          <p className="text-sm text-gray mt-1">Manage your team members</p>
+          <p className="text-sm text-gray mt-1">
+            {employees.length} total • {totalActive} active • {recentHires.length} new this week
+          </p>
         </div>
       </div>
 
       {error && <Alert variant="error" dismissible onDismiss={() => setError(null)}>{error}</Alert>}
 
-      {/* Filters */}
+      {/* Search */}
       <div className="flex flex-wrap items-center gap-3">
         <div className="flex-1 min-w-[200px] max-w-md">
-          <Input
-            placeholder="Search by name, email, or ID..."
-            value={search}
-            onChange={(e) => setSearch(e.target.value)}
-          />
+          <div className="relative">
+            <svg className="absolute left-3 top-1/2 -translate-y-1/2 w-4 h-4 text-gray" fill="none" viewBox="0 0 24 24" stroke="currentColor">
+              <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M21 21l-6-6m2-5a7 7 0 11-14 0 7 7 0 0114 0z" />
+            </svg>
+            <input
+              type="text"
+              placeholder="Search by name, email, ID, or location..."
+              value={searchQuery}
+              onChange={(e) => setSearchQuery(e.target.value)}
+              className="w-full pl-10 pr-4 py-2 border border-border rounded-lg text-sm focus:border-maroon focus:ring-1 focus:ring-maroon/20 outline-none"
+            />
+          </div>
         </div>
+      </div>
 
-        <div className="flex items-center gap-2 bg-white border border-border rounded-lg px-3 py-2">
-          <span className="text-xs text-gray font-medium">Status:</span>
-          <select
-            value={statusFilter}
-            onChange={(e) => setStatusFilter(e.target.value)}
-            className="text-sm text-navy bg-transparent border-none focus:outline-none cursor-pointer"
-          >
-            <option value="all">All</option>
-            <option value="active">Active</option>
-            <option value="inactive">Inactive</option>
-            <option value="terminated">Terminated</option>
-          </select>
-        </div>
-
-        <div className="flex items-center gap-2 bg-white border border-border rounded-lg px-3 py-2">
-          <span className="text-xs text-gray font-medium">Sort:</span>
-          <select
-            value={sortField}
-            onChange={(e) => setSortField(e.target.value as SortField)}
-            className="text-sm text-navy bg-transparent border-none focus:outline-none cursor-pointer"
-          >
-            <option value="name">Name</option>
-            <option value="job_title">Position</option>
-            <option value="status">Status</option>
-            <option value="hire_date">Hire Date</option>
-          </select>
+      {/* Recently Hired */}
+      {recentHires.length > 0 && (
+        <div className="bg-gradient-to-r from-success/5 to-transparent rounded-xl border border-success/20 overflow-hidden">
           <button
-            onClick={() => setSortDir(d => d === 'asc' ? 'desc' : 'asc')}
-            className="text-gray hover:text-navy"
+            onClick={() => setRecentExpanded(!recentExpanded)}
+            className="w-full flex items-center justify-between px-5 py-4 hover:bg-success/5 transition-colors"
           >
-            {sortDir === 'asc' ? '↑' : '↓'}
+            <div className="flex items-center gap-3">
+              <span className="text-xl">🆕</span>
+              <span className="font-semibold text-navy">Recently Hired</span>
+              <span className="px-2 py-0.5 rounded-full text-xs font-bold text-white bg-success">{recentHires.length}</span>
+            </div>
+            <svg 
+              className={`w-5 h-5 text-gray transition-transform ${recentExpanded ? 'rotate-180' : ''}`} 
+              fill="none" 
+              viewBox="0 0 24 24" 
+              stroke="currentColor"
+            >
+              <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M19 9l-7 7-7-7" />
+            </svg>
           </button>
+          
+          {recentExpanded && (
+            <div className="border-t border-success/20 bg-white">
+              {recentHires.map(e => (
+                <EmployeeRow key={e.id} employee={e} showStatus={false} />
+              ))}
+            </div>
+          )}
         </div>
+      )}
+
+      {/* Position Pools */}
+      <div className="space-y-4">
+        <h2 className="text-sm font-semibold text-gray uppercase tracking-wide px-1">By Position</h2>
+        
+        {POSITION_ORDER.map(pos => {
+          const config = POSITION_CONFIG[pos];
+          const poolEmployees = positionPools[pos] || [];
+          return (
+            <PoolSection
+              key={pos}
+              id={pos}
+              title={config.label}
+              icon={config.icon}
+              color={config.color}
+              employees={poolEmployees}
+              showStatus={false}
+            />
+          );
+        })}
+        
+        {/* Uncategorized / No Position */}
+        {unassignedEmployees.length > 0 && (
+          <div className="bg-white rounded-xl border border-border overflow-hidden">
+            <button
+              onClick={() => setUnassignedExpanded(!unassignedExpanded)}
+              className="w-full flex items-center justify-between px-5 py-4 hover:bg-gray-50 transition-colors"
+            >
+              <div className="flex items-center gap-3">
+                <span className="text-xl">📋</span>
+                <span className="font-semibold text-navy">No Position Assigned</span>
+                <span className="px-2 py-0.5 rounded-full text-xs font-bold text-white bg-gray-400">{unassignedEmployees.length}</span>
+              </div>
+              <svg 
+                className={`w-5 h-5 text-gray transition-transform ${unassignedExpanded ? 'rotate-180' : ''}`} 
+                fill="none" 
+                viewBox="0 0 24 24" 
+                stroke="currentColor"
+              >
+                <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M19 9l-7 7-7-7" />
+              </svg>
+            </button>
+            
+            {unassignedExpanded && (
+              <div className="border-t border-border">
+                {unassignedEmployees.map(e => (
+                  <EmployeeRow key={e.id} employee={e} showStatus={false} />
+                ))}
+              </div>
+            )}
+          </div>
+        )}
       </div>
 
-      {/* Employee Table */}
-      <div className="bg-white rounded-xl border border-border overflow-hidden">
-        <table className="w-full">
-          <thead className="bg-gray-50 border-b border-border">
-            <tr>
-              <th className="text-left text-xs font-semibold text-gray uppercase tracking-wider px-6 py-3">Employee</th>
-              <th className="text-left text-xs font-semibold text-gray uppercase tracking-wider px-6 py-3">Position</th>
-              <th className="text-left text-xs font-semibold text-gray uppercase tracking-wider px-6 py-3">Status</th>
-              <th className="text-left text-xs font-semibold text-gray uppercase tracking-wider px-6 py-3">Hire Date</th>
-            </tr>
-          </thead>
-          <tbody className="divide-y divide-border">
-            {filteredEmployees.length === 0 ? (
-              <tr>
-                <td colSpan={4} className="px-6 py-12 text-center text-gray">
-                  {employees.length === 0 ? 'No employees yet' : 'No employees match the current filters'}
-                </td>
-              </tr>
-            ) : (
-              filteredEmployees.map((employee) => (
-                <tr
-                  key={employee.id}
-                  onClick={() => selectEmployee(employee)}
-                  className="hover:bg-gray-50 cursor-pointer transition-colors"
-                >
-                  <td className="px-6 py-4">
-                    <div className="flex items-center gap-3">
-                      <div className="flex h-10 w-10 flex-shrink-0 items-center justify-center rounded-full bg-navy text-white text-sm font-medium">
-                        {employee.first_name?.[0]}{employee.last_name?.[0]}
-                      </div>
-                      <div>
-                        <p className="text-sm font-semibold text-navy">{employee.first_name} {employee.last_name}</p>
-                        <p className="text-xs text-gray">{employee.email}</p>
-                      </div>
-                    </div>
-                  </td>
-                  <td className="px-6 py-4 text-sm text-slate">{employee.position || '—'}</td>
-                  <td className="px-6 py-4">{getStatusBadge(employee.status)}</td>
-                  <td className="px-6 py-4 text-sm text-gray">
-                    {employee.hire_date ? formatDate(employee.hire_date) : '—'}
-                  </td>
-                </tr>
-              ))
-            )}
-          </tbody>
-        </table>
-      </div>
+      {/* Inactive Employees */}
+      {inactiveEmployees.length > 0 && (
+        <div className="bg-white rounded-xl border border-warning/30 overflow-hidden">
+          <button
+            onClick={() => setInactiveExpanded(!inactiveExpanded)}
+            className="w-full flex items-center justify-between px-5 py-4 hover:bg-warning/5 transition-colors"
+          >
+            <div className="flex items-center gap-3">
+              <span className="text-xl">⏸️</span>
+              <span className="font-semibold text-navy">Inactive</span>
+              <span className="px-2 py-0.5 rounded-full text-xs font-bold text-white bg-warning">{inactiveEmployees.length}</span>
+            </div>
+            <svg 
+              className={`w-5 h-5 text-gray transition-transform ${inactiveExpanded ? 'rotate-180' : ''}`} 
+              fill="none" 
+              viewBox="0 0 24 24" 
+              stroke="currentColor"
+            >
+              <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M19 9l-7 7-7-7" />
+            </svg>
+          </button>
+          
+          {inactiveExpanded && (
+            <div className="border-t border-warning/30 bg-white">
+              {inactiveEmployees.map(e => (
+                <EmployeeRow key={e.id} employee={e} />
+              ))}
+            </div>
+          )}
+        </div>
+      )}
+
+      {/* Terminated Employees */}
+      {terminatedEmployees.length > 0 && (
+        <div className="bg-white rounded-xl border border-error/30 overflow-hidden">
+          <button
+            onClick={() => setTerminatedExpanded(!terminatedExpanded)}
+            className="w-full flex items-center justify-between px-5 py-4 hover:bg-error/5 transition-colors"
+          >
+            <div className="flex items-center gap-3">
+              <span className="text-xl">🚫</span>
+              <span className="font-semibold text-navy">Terminated</span>
+              <span className="px-2 py-0.5 rounded-full text-xs font-bold text-white bg-error">{terminatedEmployees.length}</span>
+            </div>
+            <svg 
+              className={`w-5 h-5 text-gray transition-transform ${terminatedExpanded ? 'rotate-180' : ''}`} 
+              fill="none" 
+              viewBox="0 0 24 24" 
+              stroke="currentColor"
+            >
+              <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M19 9l-7 7-7-7" />
+            </svg>
+          </button>
+          
+          {terminatedExpanded && (
+            <div className="border-t border-error/30 bg-white">
+              {terminatedEmployees.map(e => (
+                <EmployeeRow key={e.id} employee={e} />
+              ))}
+            </div>
+          )}
+        </div>
+      )}
+
+      {/* Empty State */}
+      {employees.length === 0 && (
+        <div className="text-center py-12">
+          <div className="text-4xl mb-3">👥</div>
+          <p className="text-gray">No employees yet</p>
+          <p className="text-sm text-gray mt-1">Hire applicants to see them here</p>
+        </div>
+      )}
 
       {/* Side Panel */}
       {selectedEmployee && (
@@ -651,9 +884,9 @@ export function EmployeesPage() {
                   </h2>
                   <p className="text-sm text-white/70">{selectedEmployee.position || 'No position'}</p>
                 </div>
-                {preferences?.position_applied && (
+                {(preferences?.position_applied || selectedEmployee.position) && (
                   <span className="text-sm font-bold text-white bg-white/20 px-2 py-0.5 rounded">
-                    {getPositionLabel(preferences.position_applied)}
+                    {getPositionLabel(preferences?.position_applied || selectedEmployee.position)}
                   </span>
                 )}
               </div>
@@ -670,12 +903,9 @@ export function EmployeesPage() {
                 </div>
               ) : (
                 <>
-                  {/* Work Preferences - Similar to Applicants Panel */}
+                  {/* Work Preferences */}
                   {preferences && (
                     <div className="bg-white rounded-lg shadow-sm overflow-hidden mb-5">
-                      <div className="px-4 py-2 bg-gray-50 border-b border-gray-100">
-                        <span className="text-xs font-semibold text-gray uppercase tracking-wide">Work Preferences</span>
-                      </div>
                       {[
                         { label: 'City', value: preferences.city || '—' },
                         { label: 'Position', value: getPositionLabel(preferences.position_applied) },
@@ -703,7 +933,7 @@ export function EmployeesPage() {
                     </div>
                   )}
 
-                  {/* Basic Info */}
+                  {/* Contact Info */}
                   <div className="bg-white rounded-lg shadow-sm overflow-hidden">
                     <div className="px-4 py-2 bg-gray-50 border-b border-gray-100">
                       <span className="text-xs font-semibold text-gray uppercase tracking-wide">Contact Info</span>
@@ -861,7 +1091,6 @@ export function EmployeesPage() {
         }
       >
         <div className="space-y-4">
-          {/* Show current client being replaced */}
           {isReassignment && reassigningFrom && (
             <div className="bg-yellow-50 border border-yellow-200 rounded-lg p-3">
               <p className="text-xs font-semibold text-yellow-800 uppercase mb-1">Replacing Current Client</p>
@@ -872,7 +1101,6 @@ export function EmployeesPage() {
             </div>
           )}
 
-          {/* Reason for reassignment */}
           {isReassignment && (
             <div>
               <label className="mb-1.5 block text-sm font-medium text-slate">Reason for Change *</label>
