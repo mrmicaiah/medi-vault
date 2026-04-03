@@ -17,7 +17,7 @@ interface Applicant {
   email: string;
   location_id?: string;
   location_name: string;
-  position?: string;  // Now comes from API
+  position?: string;
 }
 
 interface Location {
@@ -34,7 +34,6 @@ interface AgencyWithLocations {
 }
 
 interface ApplicantDetail {
-  // Step 1: Application Basics
   position_applied?: string;
   employment_type?: string;
   desired_hourly_rate?: string;
@@ -42,8 +41,6 @@ interface ApplicantDetail {
   speaks_other_languages?: string;
   other_languages?: string;
   how_heard?: string;
-  
-  // Step 2: Personal Information
   first_name?: string;
   last_name?: string;
   email?: string;
@@ -54,13 +51,9 @@ interface ApplicantDetail {
   state?: string;
   zip?: string;
   date_of_birth?: string;
-  
-  // Step 3: Emergency Contact
   emergency_name?: string;
   emergency_relationship?: string;
   emergency_phone?: string;
-  
-  // Step 8: Work Preferences
   available_days?: string[];
   shift_preferences?: string[];
   hours_per_week?: string;
@@ -68,11 +61,7 @@ interface ApplicantDetail {
   max_travel_miles?: string;
   comfortable_with_pets?: string;
   comfortable_with_smokers?: string;
-  
-  // Step 15: Credentials
   credential_type?: string;
-  
-  // Document upload statuses
   work_auth_uploaded?: boolean;
   id_front_uploaded?: boolean;
   id_back_uploaded?: boolean;
@@ -80,29 +69,27 @@ interface ApplicantDetail {
   credentials_uploaded?: boolean;
   cpr_uploaded?: boolean;
   tb_uploaded?: boolean;
-  
-  // SSN
   ssn_last_four?: string;
 }
 
 const detailCache = new Map<string, ApplicantDetail>();
 
-// Position colors
-const POSITION_COLORS: Record<string, { bg: string; text: string }> = {
-  pca: { bg: 'bg-blue-500', text: 'text-white' },
-  hha: { bg: 'bg-teal-500', text: 'text-white' },
-  cna: { bg: 'bg-purple-500', text: 'text-white' },
-  lpn: { bg: 'bg-amber-500', text: 'text-white' },
-  rn: { bg: 'bg-rose-500', text: 'text-white' },
-  default: { bg: 'bg-gray-400', text: 'text-white' },
+// Position configuration
+const POSITION_CONFIG: Record<string, { label: string; color: string; icon: string }> = {
+  cna: { label: 'CNA', color: 'bg-purple-500', icon: '🩺' },
+  hha: { label: 'HHA', color: 'bg-teal-500', icon: '🏠' },
+  pca: { label: 'PCA', color: 'bg-blue-500', icon: '👤' },
+  lpn: { label: 'LPN', color: 'bg-amber-500', icon: '💉' },
+  rn: { label: 'RN', color: 'bg-rose-500', icon: '⚕️' },
 };
 
-const getPositionColor = (position?: string) => {
-  if (!position) return POSITION_COLORS.default;
-  return POSITION_COLORS[position.toLowerCase()] || POSITION_COLORS.default;
+const POSITION_ORDER = ['cna', 'hha', 'pca', 'lpn', 'rn'];
+
+const getPositionConfig = (position?: string) => {
+  if (!position) return null;
+  return POSITION_CONFIG[position.toLowerCase()] || null;
 };
 
-// Document step mapping
 const DOC_STEPS: Record<string, number> = {
   work_auth: 11,
   id_front: 12,
@@ -125,11 +112,16 @@ export function ApplicantsPage() {
   const [loadingDetail, setLoadingDetail] = useState(false);
   const [panelOpen, setPanelOpen] = useState(false);
   
-  // Filters
-  const [positionFilter, setPositionFilter] = useState<string>('all');
-  const [sortBy, setSortBy] = useState<'recent' | 'oldest'>('recent');
+  // Pool collapse state
+  const [collapsedPools, setCollapsedPools] = useState<Set<string>>(new Set());
+  const [recentExpanded, setRecentExpanded] = useState(true);
+  
+  // Toggles for hidden statuses
   const [showRejected, setShowRejected] = useState(false);
   const [showNotStarted, setShowNotStarted] = useState(false);
+  
+  // Search
+  const [searchQuery, setSearchQuery] = useState('');
   
   const [editMode, setEditMode] = useState(false);
   const [editForm, setEditForm] = useState<Record<string, string>>({});
@@ -147,18 +139,15 @@ export function ApplicantsPage() {
   const [uploading, setUploading] = useState(false);
   const [uploadError, setUploadError] = useState<string | null>(null);
   
-  // Document preview state
   const [previewDoc, setPreviewDoc] = useState<{ url: string; name: string; type: string } | null>(null);
   const [loadingDoc, setLoadingDoc] = useState<string | null>(null);
 
-  // Location transfer state
   const [locations, setLocations] = useState<Location[]>([]);
   const [showTransferModal, setShowTransferModal] = useState(false);
   const [transferToLocation, setTransferToLocation] = useState('');
   const [transferReason, setTransferReason] = useState('');
   const [transferring, setTransferring] = useState(false);
 
-  // Delete state
   const [showDeleteConfirm, setShowDeleteConfirm] = useState(false);
   const [deleting, setDeleting] = useState(false);
 
@@ -190,17 +179,82 @@ export function ApplicantsPage() {
     }
   };
 
+  // Filter and organize applicants
+  const { recentApplicants, positionPools, uncategorizedApplicants, rejectedCount, notStartedCount } = useMemo(() => {
+    const now = new Date();
+    const oneWeekAgo = new Date(now.getTime() - 7 * 24 * 60 * 60 * 1000);
+    
+    // Base filter: exclude rejected and not_started unless toggled
+    let filtered = applicants.filter(a => {
+      if (a.status === 'rejected' && !showRejected) return false;
+      if (a.status === 'not_started' && !showNotStarted) return false;
+      return true;
+    });
+    
+    // Apply search
+    if (searchQuery.trim()) {
+      const query = searchQuery.toLowerCase();
+      filtered = filtered.filter(a => 
+        a.first_name?.toLowerCase().includes(query) ||
+        a.last_name?.toLowerCase().includes(query) ||
+        a.email?.toLowerCase().includes(query) ||
+        a.location_name?.toLowerCase().includes(query)
+      );
+    }
+    
+    // Sort all by created_at desc (most recent first)
+    filtered.sort((a, b) => new Date(b.created_at).getTime() - new Date(a.created_at).getTime());
+    
+    // Recent = past 7 days
+    const recent = filtered.filter(a => new Date(a.created_at) >= oneWeekAgo);
+    
+    // Group by position
+    const pools: Record<string, Applicant[]> = {};
+    const uncategorized: Applicant[] = [];
+    
+    filtered.forEach(a => {
+      const pos = a.position?.toLowerCase();
+      if (pos && POSITION_CONFIG[pos]) {
+        if (!pools[pos]) pools[pos] = [];
+        pools[pos].push(a);
+      } else {
+        uncategorized.push(a);
+      }
+    });
+    
+    // Count rejected and not_started for toggle buttons
+    const rejCount = applicants.filter(a => a.status === 'rejected').length;
+    const notStartedCount = applicants.filter(a => a.status === 'not_started').length;
+    
+    return {
+      recentApplicants: recent,
+      positionPools: pools,
+      uncategorizedApplicants: uncategorized,
+      rejectedCount: rejCount,
+      notStartedCount,
+    };
+  }, [applicants, showRejected, showNotStarted, searchQuery]);
+
+  const togglePool = (poolId: string) => {
+    setCollapsedPools(prev => {
+      const next = new Set(prev);
+      if (next.has(poolId)) {
+        next.delete(poolId);
+      } else {
+        next.add(poolId);
+      }
+      return next;
+    });
+  };
+
   const handleTransferApplicant = async () => {
     if (!selectedApplicant || !transferToLocation) return;
-    
     try {
       setTransferring(true);
       await api.post(`/transfers/applicant/${selectedApplicant.id}`, {
         to_location_id: transferToLocation,
         reason: transferReason || undefined,
       });
-      
-      // Update local state
       const newLocation = locations.find(l => l.id === transferToLocation);
       setApplicants(prev => prev.map(a => 
         a.id === selectedApplicant.id 
@@ -208,13 +262,10 @@ export function ApplicantsPage() {
           : a
       ));
       setSelectedApplicant(prev => prev ? { ...prev, location_id: transferToLocation, location_name: newLocation?.name || '' } : null);
-      
       setShowTransferModal(false);
       setTransferToLocation('');
       setTransferReason('');
       setError(null);
-      
-      // Reload to get fresh data
       loadApplicants();
     } catch (err) {
       setError(err instanceof Error ? err.message : 'Failed to transfer applicant');
@@ -225,19 +276,13 @@ export function ApplicantsPage() {
 
   const handleDeleteApplicant = async () => {
     if (!selectedApplicant) return;
-    
     try {
       setDeleting(true);
       await api.delete(`/admin/applicants/${selectedApplicant.id}`);
-      
-      // Remove from local state
       setApplicants(prev => prev.filter(a => a.id !== selectedApplicant.id));
       detailCache.delete(selectedApplicant.id);
-      
-      // Close panel
       setShowDeleteConfirm(false);
       closePanel();
-      
       setError(null);
     } catch (err) {
       setError(err instanceof Error ? err.message : 'Failed to delete application');
@@ -246,48 +291,6 @@ export function ApplicantsPage() {
       setDeleting(false);
     }
   };
-
-  const availablePositions = useMemo(() => {
-    const positions = new Set<string>();
-    ['PCA', 'HHA', 'CNA', 'LPN', 'RN'].forEach(p => positions.add(p));
-    return Array.from(positions);
-  }, []);
-
-  const filteredApplicants = useMemo(() => {
-    let result = [...applicants];
-    
-    if (!showRejected) {
-      result = result.filter(a => a.status !== 'rejected');
-    }
-    
-    if (!showNotStarted) {
-      result = result.filter(a => a.status !== 'not_started');
-    }
-    
-    if (positionFilter !== 'all') {
-      result = result.filter(a => {
-        // Use position directly from API response
-        const pos = a.position || '';
-        return pos.toLowerCase() === positionFilter.toLowerCase();
-      });
-    }
-    
-    result.sort((a, b) => {
-      const dateA = new Date(a.created_at).getTime();
-      const dateB = new Date(b.created_at).getTime();
-      return sortBy === 'recent' ? dateB - dateA : dateA - dateB;
-    });
-    
-    return result;
-  }, [applicants, positionFilter, sortBy, showRejected, showNotStarted]);
-
-  const rejectedCount = useMemo(() => {
-    return applicants.filter(a => a.status === 'rejected').length;
-  }, [applicants]);
-
-  const notStartedCount = useMemo(() => {
-    return applicants.filter(a => a.status === 'not_started').length;
-  }, [applicants]);
 
   const selectApplicant = async (applicant: Applicant) => {
     setSelectedApplicant(applicant);
@@ -332,7 +335,6 @@ export function ApplicantsPage() {
       const step15 = stepsMap.get(15) || {};
       const step16 = stepsMap.get(16) || {};
       const step17 = stepsMap.get(17) || {};
-      
       const profile = res.profile || {};
       
       const detail: ApplicantDetail = {
@@ -343,7 +345,6 @@ export function ApplicantsPage() {
         speaks_other_languages: step1.speaks_other_languages as string,
         other_languages: step1.other_languages as string,
         how_heard: step1.how_heard as string,
-        
         first_name: (step2.first_name as string) || (profile.first_name as string),
         last_name: (step2.last_name as string) || (profile.last_name as string),
         email: (step2.email as string) || (profile.email as string),
@@ -354,11 +355,9 @@ export function ApplicantsPage() {
         state: step2.state as string,
         zip: step2.zip as string,
         date_of_birth: step2.date_of_birth as string,
-        
         emergency_name: [step3.ec_first_name, step3.ec_last_name].filter(Boolean).join(' ') as string,
         emergency_relationship: step3.ec_relationship as string,
         emergency_phone: step3.ec_phone as string,
-        
         available_days: step8.available_days as string[],
         shift_preferences: step8.shift_preferences as string[],
         hours_per_week: step8.hours_per_week as string,
@@ -366,9 +365,7 @@ export function ApplicantsPage() {
         max_travel_miles: step8.max_travel_miles as string,
         comfortable_with_pets: step8.comfortable_with_pets as string,
         comfortable_with_smokers: step8.comfortable_with_smokers as string,
-        
         credential_type: step15.credential_type as string,
-        
         work_auth_uploaded: !!(step11.file_name || step11.file_url || step11.storage_path),
         id_front_uploaded: !!(step12.file_name || step12.file_url || step12.storage_path),
         id_back_uploaded: !!(step13.file_name || step13.file_url || step13.storage_path),
@@ -376,7 +373,6 @@ export function ApplicantsPage() {
         credentials_uploaded: !!(step15.file_name || step15.file_url || step15.storage_path),
         cpr_uploaded: !!(step16.file_name || step16.file_url || step16.storage_path),
         tb_uploaded: !!(step17.file_name || step17.file_url || step17.storage_path),
-        
         ssn_last_four: res.ssn_last_four,
       };
       
@@ -539,12 +535,10 @@ export function ApplicantsPage() {
     }
   };
 
-  // View document handler
   const handleViewDoc = async (docType: string, label: string) => {
     if (!selectedApplicant) return;
     const stepNumber = DOC_STEPS[docType];
     if (!stepNumber) return;
-    
     setLoadingDoc(docType);
     try {
       const res = await api.get<{ signed_url: string; file_name?: string }>(`/admin/applicants/${selectedApplicant.id}/documents/${stepNumber}/url`);
@@ -564,8 +558,23 @@ export function ApplicantsPage() {
 
   const getPositionLabel = (position?: string) => {
     if (!position) return '';
-    const labels: Record<string, string> = { pca: 'PCA', hha: 'HHA', cna: 'CNA', lpn: 'LPN', rn: 'RN' };
-    return labels[position.toLowerCase()] || position.toUpperCase();
+    const config = getPositionConfig(position);
+    return config?.label || position.toUpperCase();
+  };
+
+  const formatTimeAgo = (dateStr: string) => {
+    const date = new Date(dateStr);
+    const now = new Date();
+    const diffMs = now.getTime() - date.getTime();
+    const diffMins = Math.floor(diffMs / 60000);
+    const diffHours = Math.floor(diffMs / 3600000);
+    const diffDays = Math.floor(diffMs / 86400000);
+    
+    if (diffMins < 60) return `${diffMins}m ago`;
+    if (diffHours < 24) return `${diffHours}h ago`;
+    if (diffDays === 1) return 'Yesterday';
+    if (diffDays < 7) return `${diffDays}d ago`;
+    return date.toLocaleDateString();
   };
 
   const formatAvailability = (days?: string[]) => {
@@ -577,77 +586,52 @@ export function ApplicantsPage() {
 
   const formatHours = (hours?: string) => {
     const map: Record<string, string> = { 
-      'part_time': 'Part Time', 
-      'full_time': 'Full Time', 
-      'fill_in': 'Fill In',
-      'live_in': 'Live-In',
-      '10-20': '10–20 hrs', 
-      '20-30': '20–30 hrs', 
-      '30-40': '30–40 hrs', 
-      '40+': '40+ hrs' 
+      'part_time': 'Part Time', 'full_time': 'Full Time', 'fill_in': 'Fill In', 'live_in': 'Live-In',
+      '10-20': '10–20 hrs', '20-30': '20–30 hrs', '30-40': '30–40 hrs', '40+': '40+ hrs' 
     };
     return map[hours || ''] || hours || '—';
   };
 
   const formatSmokerPref = (pref?: string) => {
-    const map: Record<string, string> = { 
-      yes: 'OK with', 
-      no: 'Not OK', 
-      prefer_no_smoking: 'Prefer No',
-      no_preference: 'No pref' 
-    };
+    const map: Record<string, string> = { yes: 'OK with', no: 'Not OK', prefer_no_smoking: 'Prefer No', no_preference: 'No pref' };
     return map[pref || ''] || pref || '—';
   };
 
   const formatTransportation = (hasTransport?: string, maxMiles?: string) => {
-    if (hasTransport === 'yes') {
-      return maxMiles ? `Yes (${maxMiles} mi)` : 'Yes';
-    }
+    if (hasTransport === 'yes') return maxMiles ? `Yes (${maxMiles} mi)` : 'Yes';
     return hasTransport === 'no' ? 'No' : '—';
   };
 
   const getStatusBadge = (status: string) => {
     const styles: Record<string, string> = {
       not_started: 'bg-gray-100 text-gray',
-      in_progress: 'bg-info/10 text-info',
-      submitted: 'bg-warning/10 text-warning',
-      under_review: 'bg-maroon/10 text-maroon',
-      approved: 'bg-success/10 text-success',
-      rejected: 'bg-error/10 text-error',
+      in_progress: 'bg-blue-100 text-blue-700',
+      submitted: 'bg-amber-100 text-amber-700',
+      under_review: 'bg-purple-100 text-purple-700',
+      approved: 'bg-green-100 text-green-700',
+      rejected: 'bg-red-100 text-red-700',
     };
     const labels: Record<string, string> = {
-      not_started: 'Not Started',
-      in_progress: 'In Progress',
-      submitted: 'Submitted',
-      under_review: 'Under Review',
-      approved: 'Approved',
-      rejected: 'Rejected',
+      not_started: 'Not Started', in_progress: 'In Progress', submitted: 'Submitted',
+      under_review: 'Reviewing', approved: 'Approved', rejected: 'Rejected',
     };
     return (
-      <span className={`inline-flex items-center px-2.5 py-0.5 rounded-full text-xs font-medium ${styles[status] || 'bg-gray-100 text-gray'}`}>
+      <span className={`inline-flex items-center px-2 py-0.5 rounded text-xs font-medium ${styles[status] || 'bg-gray-100 text-gray'}`}>
         {labels[status] || status}
       </span>
     );
   };
 
-  // Clickable document indicator
   const DocLight = ({ uploaded, label, docType }: { uploaded: boolean; label: string; docType: string }) => {
     const isLoading = loadingDoc === docType;
-    
     return (
       <button
         onClick={() => uploaded && handleViewDoc(docType, label)}
         disabled={!uploaded || isLoading}
-        className={`flex items-center gap-1.5 px-2 py-1 rounded-md transition-colors ${
-          uploaded 
-            ? 'hover:bg-success/10 cursor-pointer' 
-            : 'cursor-default opacity-60'
-        }`}
+        className={`flex items-center gap-1.5 px-2 py-1 rounded-md transition-colors ${uploaded ? 'hover:bg-success/10 cursor-pointer' : 'cursor-default opacity-60'}`}
         title={uploaded ? `View ${label}` : `${label} not uploaded`}
       >
-        <div className={`w-3 h-3 rounded-full flex-shrink-0 ${
-          isLoading ? 'bg-warning animate-pulse' : uploaded ? 'bg-success' : 'bg-error'
-        }`} />
+        <div className={`w-3 h-3 rounded-full flex-shrink-0 ${isLoading ? 'bg-warning animate-pulse' : uploaded ? 'bg-success' : 'bg-error'}`} />
         <span className="text-xs text-gray">{label}</span>
         {uploaded && !isLoading && (
           <svg className="w-3 h-3 text-gray-400" fill="none" viewBox="0 0 24 24" stroke="currentColor">
@@ -659,8 +643,98 @@ export function ApplicantsPage() {
     );
   };
 
-  // Check if applicant can be deleted (not hired)
   const canDelete = selectedApplicant && selectedApplicant.status !== 'hired';
+
+  // Applicant Row Component
+  const ApplicantRow = ({ applicant, compact = false }: { applicant: Applicant; compact?: boolean }) => {
+    const config = getPositionConfig(applicant.position);
+    return (
+      <div
+        onClick={() => selectApplicant(applicant)}
+        className="flex items-center gap-3 px-4 py-3 hover:bg-gray-50 cursor-pointer transition-colors border-b border-gray-100 last:border-b-0"
+      >
+        {/* Position badge */}
+        <div className={`flex-shrink-0 w-10 h-10 rounded-lg flex items-center justify-center text-xs font-bold text-white ${config?.color || 'bg-gray-400'}`}>
+          {config?.label || '—'}
+        </div>
+        
+        {/* Name and email */}
+        <div className="flex-1 min-w-0">
+          <p className="text-sm font-semibold text-navy truncate">
+            {applicant.first_name} {applicant.last_name}
+          </p>
+          <p className="text-xs text-gray truncate">{applicant.email}</p>
+        </div>
+        
+        {/* Status and time */}
+        {!compact && (
+          <div className="hidden sm:flex items-center gap-3">
+            <span className="text-xs text-gray">{applicant.location_name || '—'}</span>
+            {getStatusBadge(applicant.status)}
+          </div>
+        )}
+        
+        <span className="text-xs text-gray-400 flex-shrink-0">{formatTimeAgo(applicant.created_at)}</span>
+        
+        <svg className="w-4 h-4 text-gray-300 flex-shrink-0" fill="none" viewBox="0 0 24 24" stroke="currentColor">
+          <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M9 5l7 7-7 7" />
+        </svg>
+      </div>
+    );
+  };
+
+  // Pool Section Component
+  const PoolSection = ({ 
+    id, 
+    title, 
+    icon, 
+    color, 
+    applicants, 
+    defaultExpanded = false 
+  }: { 
+    id: string;
+    title: string; 
+    icon: string; 
+    color: string;
+    applicants: Applicant[];
+    defaultExpanded?: boolean;
+  }) => {
+    const isCollapsed = collapsedPools.has(id);
+    const count = applicants.length;
+    
+    if (count === 0) return null;
+    
+    return (
+      <div className="bg-white rounded-xl border border-border overflow-hidden">
+        <button
+          onClick={() => togglePool(id)}
+          className="w-full flex items-center justify-between px-5 py-4 hover:bg-gray-50 transition-colors"
+        >
+          <div className="flex items-center gap-3">
+            <span className="text-xl">{icon}</span>
+            <span className="font-semibold text-navy">{title}</span>
+            <span className={`px-2 py-0.5 rounded-full text-xs font-bold text-white ${color}`}>{count}</span>
+          </div>
+          <svg 
+            className={`w-5 h-5 text-gray transition-transform ${isCollapsed ? '' : 'rotate-180'}`} 
+            fill="none" 
+            viewBox="0 0 24 24" 
+            stroke="currentColor"
+          >
+            <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M19 9l-7 7-7-7" />
+          </svg>
+        </button>
+        
+        {!isCollapsed && (
+          <div className="border-t border-border">
+            {applicants.map(a => (
+              <ApplicantRow key={a.id} applicant={a} />
+            ))}
+          </div>
+        )}
+      </div>
+    );
+  };
 
   if (loading) {
     return (
@@ -679,47 +753,36 @@ export function ApplicantsPage() {
       <div className="flex items-center justify-between">
         <div>
           <h1 className="font-display text-2xl font-bold text-navy">Applicants</h1>
-          <p className="text-sm text-gray mt-1">Review and manage applications</p>
+          <p className="text-sm text-gray mt-1">
+            {applicants.length} total • {recentApplicants.length} new this week
+          </p>
         </div>
       </div>
 
       {error && <Alert variant="error" dismissible onDismiss={() => setError(null)}>{error}</Alert>}
 
-      {/* Filters */}
+      {/* Search and Toggles */}
       <div className="flex flex-wrap items-center gap-3">
-        <div className="flex items-center gap-2 bg-white border border-border rounded-lg px-3 py-2">
-          <span className="text-xs text-gray font-medium">Sort:</span>
-          <select 
-            value={sortBy} 
-            onChange={(e) => setSortBy(e.target.value as 'recent' | 'oldest')}
-            className="text-sm text-navy bg-transparent border-none focus:outline-none cursor-pointer"
-          >
-            <option value="recent">Most Recent</option>
-            <option value="oldest">Oldest First</option>
-          </select>
-        </div>
-
-        <div className="flex items-center gap-2 bg-white border border-border rounded-lg px-3 py-2">
-          <span className="text-xs text-gray font-medium">Position:</span>
-          <select 
-            value={positionFilter} 
-            onChange={(e) => setPositionFilter(e.target.value)}
-            className="text-sm text-navy bg-transparent border-none focus:outline-none cursor-pointer"
-          >
-            <option value="all">All Positions</option>
-            {availablePositions.map(pos => (
-              <option key={pos} value={pos.toLowerCase()}>{pos}</option>
-            ))}
-          </select>
+        <div className="flex-1 min-w-[200px] max-w-md">
+          <div className="relative">
+            <svg className="absolute left-3 top-1/2 -translate-y-1/2 w-4 h-4 text-gray" fill="none" viewBox="0 0 24 24" stroke="currentColor">
+              <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M21 21l-6-6m2-5a7 7 0 11-14 0 7 7 0 0114 0z" />
+            </svg>
+            <input
+              type="text"
+              placeholder="Search by name, email, or location..."
+              value={searchQuery}
+              onChange={(e) => setSearchQuery(e.target.value)}
+              className="w-full pl-10 pr-4 py-2 border border-border rounded-lg text-sm focus:border-maroon focus:ring-1 focus:ring-maroon/20 outline-none"
+            />
+          </div>
         </div>
 
         {notStartedCount > 0 && (
           <button
             onClick={() => setShowNotStarted(!showNotStarted)}
             className={`flex items-center gap-2 px-3 py-2 rounded-lg border text-sm transition-colors ${
-              showNotStarted 
-                ? 'bg-gray-100 border-gray-300 text-gray' 
-                : 'bg-white border-border text-gray hover:border-gray-300'
+              showNotStarted ? 'bg-gray-100 border-gray-300 text-gray' : 'bg-white border-border text-gray hover:border-gray-300'
             }`}
           >
             <span>{showNotStarted ? 'Hide' : 'Show'} Not Started</span>
@@ -731,9 +794,7 @@ export function ApplicantsPage() {
           <button
             onClick={() => setShowRejected(!showRejected)}
             className={`flex items-center gap-2 px-3 py-2 rounded-lg border text-sm transition-colors ${
-              showRejected 
-                ? 'bg-error/10 border-error/30 text-error' 
-                : 'bg-white border-border text-gray hover:border-gray-300'
+              showRejected ? 'bg-error/10 border-error/30 text-error' : 'bg-white border-border text-gray hover:border-gray-300'
             }`}
           >
             <span>{showRejected ? 'Hide' : 'Show'} Rejected</span>
@@ -742,54 +803,76 @@ export function ApplicantsPage() {
         )}
       </div>
 
-      {/* Applicants Table */}
-      <div className="bg-white rounded-xl border border-border overflow-hidden">
-        <table className="w-full">
-          <thead className="bg-gray-50 border-b border-border">
-            <tr>
-              <th className="text-left text-xs font-semibold text-gray uppercase tracking-wider px-6 py-3">Applicant</th>
-              <th className="text-left text-xs font-semibold text-gray uppercase tracking-wider px-6 py-3">Location</th>
-              <th className="text-left text-xs font-semibold text-gray uppercase tracking-wider px-6 py-3">Status</th>
-              <th className="text-left text-xs font-semibold text-gray uppercase tracking-wider px-6 py-3">Applied</th>
-            </tr>
-          </thead>
-          <tbody className="divide-y divide-border">
-            {filteredApplicants.length === 0 ? (
-              <tr><td colSpan={4} className="px-6 py-12 text-center text-gray">
-                {applicants.length === 0 ? 'No applicants yet' : 'No applicants match the current filters'}
-              </td></tr>
-            ) : (
-              filteredApplicants.map((applicant) => {
-                const position = applicant.position || '';
-                const positionColor = getPositionColor(position);
-                
-                return (
-                  <tr 
-                    key={applicant.id} 
-                    onClick={() => selectApplicant(applicant)} 
-                    className="hover:bg-gray-50 cursor-pointer transition-colors"
-                  >
-                    <td className="px-6 py-4">
-                      <div className="flex items-center gap-3">
-                        <div className={`flex h-10 w-10 flex-shrink-0 items-center justify-center rounded-lg text-xs font-bold ${positionColor.bg} ${positionColor.text}`}>
-                          {position ? getPositionLabel(position) : '—'}
-                        </div>
-                        <div>
-                          <p className="text-sm font-semibold text-navy">{applicant.first_name} {applicant.last_name}</p>
-                          <p className="text-xs text-gray">{applicant.email}</p>
-                        </div>
-                      </div>
-                    </td>
-                    <td className="px-6 py-4 text-sm text-slate">{applicant.location_name || '—'}</td>
-                    <td className="px-6 py-4">{getStatusBadge(applicant.status)}</td>
-                    <td className="px-6 py-4 text-sm text-gray">{new Date(applicant.created_at).toLocaleDateString()}</td>
-                  </tr>
-                );
-              })
-            )}
-          </tbody>
-        </table>
+      {/* Recent Applications */}
+      {recentApplicants.length > 0 && (
+        <div className="bg-gradient-to-r from-maroon/5 to-transparent rounded-xl border border-maroon/20 overflow-hidden">
+          <button
+            onClick={() => setRecentExpanded(!recentExpanded)}
+            className="w-full flex items-center justify-between px-5 py-4 hover:bg-maroon/5 transition-colors"
+          >
+            <div className="flex items-center gap-3">
+              <span className="text-xl">🆕</span>
+              <span className="font-semibold text-navy">New This Week</span>
+              <span className="px-2 py-0.5 rounded-full text-xs font-bold text-white bg-maroon">{recentApplicants.length}</span>
+            </div>
+            <svg 
+              className={`w-5 h-5 text-gray transition-transform ${recentExpanded ? 'rotate-180' : ''}`} 
+              fill="none" 
+              viewBox="0 0 24 24" 
+              stroke="currentColor"
+            >
+              <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M19 9l-7 7-7-7" />
+            </svg>
+          </button>
+          
+          {recentExpanded && (
+            <div className="border-t border-maroon/20 bg-white">
+              {recentApplicants.map(a => (
+                <ApplicantRow key={a.id} applicant={a} />
+              ))}
+            </div>
+          )}
+        </div>
+      )}
+
+      {/* Position Pools */}
+      <div className="space-y-4">
+        <h2 className="text-sm font-semibold text-gray uppercase tracking-wide px-1">Talent Pools</h2>
+        
+        {POSITION_ORDER.map(pos => {
+          const config = POSITION_CONFIG[pos];
+          const poolApplicants = positionPools[pos] || [];
+          return (
+            <PoolSection
+              key={pos}
+              id={pos}
+              title={`${config.label} Pool`}
+              icon={config.icon}
+              color={config.color}
+              applicants={poolApplicants}
+            />
+          );
+        })}
+        
+        {/* Uncategorized */}
+        {uncategorizedApplicants.length > 0 && (
+          <PoolSection
+            id="uncategorized"
+            title="Uncategorized"
+            icon="📋"
+            color="bg-gray-400"
+            applicants={uncategorizedApplicants}
+          />
+        )}
       </div>
+
+      {/* Empty State */}
+      {applicants.length === 0 && (
+        <div className="text-center py-12">
+          <div className="text-4xl mb-3">📭</div>
+          <p className="text-gray">No applicants yet</p>
+        </div>
+      )}
 
       {/* Side Panel */}
       {selectedApplicant && (
@@ -807,11 +890,6 @@ export function ApplicantsPage() {
                 {!editMode && (applicantDetail?.position_applied || selectedApplicant.position) && (
                   <span className="text-sm font-bold text-white bg-white/20 px-2 py-0.5 rounded">
                     {getPositionLabel(applicantDetail?.position_applied || selectedApplicant.position)}
-                  </span>
-                )}
-                {!editMode && !applicantDetail?.position_applied && !selectedApplicant.position && applicantDetail?.credential_type && applicantDetail.credential_type !== 'none' && (
-                  <span className="text-sm font-bold text-white bg-white/20 px-2 py-0.5 rounded">
-                    {applicantDetail.credential_type.toUpperCase()}
                   </span>
                 )}
               </div>
@@ -925,18 +1003,12 @@ export function ApplicantsPage() {
                     </div>
                   </div>
 
-                  {/* Location Section */}
                   <div className="bg-white rounded-lg shadow-sm p-4 space-y-3">
                     <h3 className="text-xs font-semibold text-gray uppercase tracking-wide">Location</h3>
                     <div className="flex items-center justify-between">
                       <span className="text-sm text-slate">{selectedApplicant.location_name || 'Not assigned'}</span>
                       {locations.length > 1 && (
-                        <button 
-                          onClick={() => setShowTransferModal(true)} 
-                          className="text-xs text-maroon hover:underline"
-                        >
-                          Transfer
-                        </button>
+                        <button onClick={() => setShowTransferModal(true)} className="text-xs text-maroon hover:underline">Transfer</button>
                       )}
                     </div>
                   </div>
@@ -971,7 +1043,6 @@ export function ApplicantsPage() {
                     <button onClick={() => goToHire(selectedApplicant.id)} className="py-3 bg-success text-navy text-sm font-semibold rounded-lg hover:bg-success/90 transition-colors">Onboard</button>
                   </div>
 
-                  {/* Documents Section - Now Clickable */}
                   <div className="bg-white rounded-lg shadow-sm p-4 mt-5">
                     <div className="flex items-center justify-between mb-3">
                       <span className="text-[11px] font-semibold text-gray uppercase tracking-wide">Documents</span>
@@ -989,41 +1060,20 @@ export function ApplicantsPage() {
                       <DocLight uploaded={applicantDetail?.tb_uploaded || false} label="TB" docType="tb" />
                     </div>
                     
-                    {/* Document Preview */}
                     {previewDoc && (
                       <div className="mt-4 border-t border-gray-100 pt-4">
                         <div className="flex items-center justify-between mb-2">
                           <span className="text-xs font-medium text-navy">{previewDoc.name}</span>
                           <div className="flex gap-2">
-                            <a 
-                              href={previewDoc.url} 
-                              target="_blank" 
-                              rel="noopener noreferrer"
-                              className="text-xs text-maroon hover:underline"
-                            >
-                              Open ↗
-                            </a>
-                            <button 
-                              onClick={() => setPreviewDoc(null)}
-                              className="text-xs text-gray hover:text-navy"
-                            >
-                              Close
-                            </button>
+                            <a href={previewDoc.url} target="_blank" rel="noopener noreferrer" className="text-xs text-maroon hover:underline">Open ↗</a>
+                            <button onClick={() => setPreviewDoc(null)} className="text-xs text-gray hover:text-navy">Close</button>
                           </div>
                         </div>
                         <div className="bg-gray-100 rounded-lg overflow-hidden" style={{ height: '200px' }}>
                           {previewDoc.url.toLowerCase().match(/\.(jpg|jpeg|png|gif|webp)/) || previewDoc.name.toLowerCase().match(/\.(jpg|jpeg|png|gif|webp)/) ? (
-                            <img 
-                              src={previewDoc.url} 
-                              alt={previewDoc.name}
-                              className="w-full h-full object-contain"
-                            />
+                            <img src={previewDoc.url} alt={previewDoc.name} className="w-full h-full object-contain" />
                           ) : (
-                            <iframe
-                              src={previewDoc.url}
-                              className="w-full h-full"
-                              title={previewDoc.name}
-                            />
+                            <iframe src={previewDoc.url} className="w-full h-full" title={previewDoc.name} />
                           )}
                         </div>
                       </div>
@@ -1032,12 +1082,8 @@ export function ApplicantsPage() {
 
                   <button onClick={handleUploadClick} className="w-full mt-5 py-3 bg-white border border-border text-navy text-sm font-medium rounded-lg hover:bg-gray-50 transition-colors">Upload Document</button>
 
-                  {/* Delete Application Button - Only shows if not hired */}
                   {canDelete && (
-                    <button 
-                      onClick={() => setShowDeleteConfirm(true)} 
-                      className="w-full mt-3 py-3 bg-white border border-error/30 text-error text-sm font-medium rounded-lg hover:bg-error/5 transition-colors"
-                    >
+                    <button onClick={() => setShowDeleteConfirm(true)} className="w-full mt-3 py-3 bg-white border border-error/30 text-error text-sm font-medium rounded-lg hover:bg-error/5 transition-colors">
                       Delete Application
                     </button>
                   )}
@@ -1083,47 +1129,30 @@ export function ApplicantsPage() {
         </>
       )}
 
-      {/* Transfer Location Modal */}
+      {/* Transfer Modal */}
       {showTransferModal && selectedApplicant && (
         <>
           <div className="fixed inset-0 bg-black/40 z-[60]" onClick={() => setShowTransferModal(false)} />
           <div className="fixed top-1/2 left-1/2 -translate-x-1/2 -translate-y-1/2 w-full max-w-md bg-white rounded-xl shadow-2xl z-[70] p-6">
             <h3 className="text-lg font-semibold text-navy mb-4">Transfer Applicant</h3>
-            <p className="text-sm text-gray mb-4">
-              Transfer {selectedApplicant.first_name} {selectedApplicant.last_name} to another location
-            </p>
+            <p className="text-sm text-gray mb-4">Transfer {selectedApplicant.first_name} {selectedApplicant.last_name} to another location</p>
             {error && <Alert variant="error" className="mb-4">{error}</Alert>}
             <div className="mb-4">
               <label className="block text-sm font-medium text-slate mb-1">Current Location</label>
-              <div className="px-3 py-2 bg-gray-50 rounded-lg text-sm text-gray">
-                {selectedApplicant.location_name || 'Not assigned'}
-              </div>
+              <div className="px-3 py-2 bg-gray-50 rounded-lg text-sm text-gray">{selectedApplicant.location_name || 'Not assigned'}</div>
             </div>
             <div className="mb-4">
               <label className="block text-sm font-medium text-slate mb-1">Transfer To</label>
-              <select 
-                value={transferToLocation} 
-                onChange={(e) => setTransferToLocation(e.target.value)} 
-                className="w-full rounded-lg border border-border px-3 py-2 text-sm focus:border-maroon focus:outline-none focus:ring-2 focus:ring-maroon/20"
-              >
+              <select value={transferToLocation} onChange={(e) => setTransferToLocation(e.target.value)} className="w-full rounded-lg border border-border px-3 py-2 text-sm focus:border-maroon focus:outline-none focus:ring-2 focus:ring-maroon/20">
                 <option value="">Select location...</option>
-                {locations
-                  .filter(l => l.id !== selectedApplicant.location_id)
-                  .map(l => (
-                    <option key={l.id} value={l.id}>{l.name}</option>
-                  ))
-                }
+                {locations.filter(l => l.id !== selectedApplicant.location_id).map(l => (
+                  <option key={l.id} value={l.id}>{l.name}</option>
+                ))}
               </select>
             </div>
             <div className="mb-4">
               <label className="block text-sm font-medium text-slate mb-1">Reason (optional)</label>
-              <input 
-                type="text" 
-                value={transferReason} 
-                onChange={(e) => setTransferReason(e.target.value)} 
-                placeholder="e.g., Closer to applicant's home"
-                className="w-full rounded-lg border border-border px-3 py-2 text-sm focus:border-maroon focus:outline-none focus:ring-2 focus:ring-maroon/20" 
-              />
+              <input type="text" value={transferReason} onChange={(e) => setTransferReason(e.target.value)} placeholder="e.g., Closer to applicant's home" className="w-full rounded-lg border border-border px-3 py-2 text-sm focus:border-maroon focus:outline-none focus:ring-2 focus:ring-maroon/20" />
             </div>
             <div className="flex gap-3">
               <Button variant="secondary" className="flex-1" onClick={() => { setShowTransferModal(false); setTransferToLocation(''); setTransferReason(''); }}>Cancel</Button>
@@ -1133,7 +1162,7 @@ export function ApplicantsPage() {
         </>
       )}
 
-      {/* Delete Confirmation Modal */}
+      {/* Delete Modal */}
       {showDeleteConfirm && selectedApplicant && (
         <>
           <div className="fixed inset-0 bg-black/40 z-[60]" onClick={() => setShowDeleteConfirm(false)} />
@@ -1146,25 +1175,11 @@ export function ApplicantsPage() {
               </div>
               <h3 className="text-lg font-semibold text-navy">Delete Application</h3>
             </div>
-            <p className="text-sm text-gray mb-2">
-              Are you sure you want to delete the application for <strong>{selectedApplicant.first_name} {selectedApplicant.last_name}</strong>?
-            </p>
-            <p className="text-sm text-gray mb-6">
-              This will move the application to the trash. A superadmin can restore it if needed.
-            </p>
+            <p className="text-sm text-gray mb-2">Are you sure you want to delete the application for <strong>{selectedApplicant.first_name} {selectedApplicant.last_name}</strong>?</p>
+            <p className="text-sm text-gray mb-6">This will move the application to the trash. A superadmin can restore it if needed.</p>
             <div className="flex gap-3">
-              <Button 
-                variant="secondary" 
-                className="flex-1" 
-                onClick={() => setShowDeleteConfirm(false)}
-              >
-                Cancel
-              </Button>
-              <button 
-                onClick={handleDeleteApplicant}
-                disabled={deleting}
-                className="flex-1 py-2.5 bg-error text-white text-sm font-semibold rounded-lg hover:bg-error/90 transition-colors disabled:opacity-50"
-              >
+              <Button variant="secondary" className="flex-1" onClick={() => setShowDeleteConfirm(false)}>Cancel</Button>
+              <button onClick={handleDeleteApplicant} disabled={deleting} className="flex-1 py-2.5 bg-error text-white text-sm font-semibold rounded-lg hover:bg-error/90 transition-colors disabled:opacity-50">
                 {deleting ? 'Deleting...' : 'Delete Application'}
               </button>
             </div>
