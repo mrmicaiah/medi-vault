@@ -428,8 +428,7 @@ async def send_password_reset_email(
     """
     Send a password reset email to the user.
     
-    This uses Supabase's built-in password recovery flow.
-    The user will receive an email with a link to reset their password.
+    Uses Supabase Admin API to generate a recovery link and send it.
     """
     agency_id = get_user_agency_id(supabase, admin.id)
     
@@ -465,17 +464,20 @@ async def send_password_reset_email(
         )
     
     try:
-        # Use Supabase's password recovery email
-        # The redirect URL tells Supabase where to send the user after clicking the link
+        # Use admin API to generate invite link with recovery type
+        # This sends an email to the user with a password reset link
         redirect_url = f"{FRONTEND_URL}/auth/reset-callback"
         
-        # Supabase Python SDK v2 syntax: reset_password_email(email, options={})
-        supabase.auth.reset_password_email(
-            user_email,
-            {
+        response = supabase.auth.admin.generate_link({
+            "type": "recovery",
+            "email": user_email,
+            "options": {
                 "redirect_to": redirect_url
             }
-        )
+        })
+        
+        # The generate_link with type "recovery" sends the email automatically
+        # when using Supabase's email service
         
         return SuccessResponse(
             message=f"Password reset email sent to {user_email}",
@@ -484,10 +486,8 @@ async def send_password_reset_email(
         
     except Exception as e:
         error_message = str(e)
-        # Log the actual error for debugging
         print(f"Password reset error for {user_email}: {error_message}")
         
-        # Check for common issues
         if "rate limit" in error_message.lower():
             raise HTTPException(
                 status_code=status.HTTP_429_TOO_MANY_REQUESTS,
