@@ -1,4 +1,4 @@
-from fastapi import APIRouter, Depends, HTTPException, Header
+from fastapi import APIRouter, Depends, HTTPException, Header, Query
 from fastapi.responses import Response, HTMLResponse
 from supabase import Client
 from datetime import datetime, timedelta
@@ -141,22 +141,22 @@ def get_location_names(supabase: Client, location_ids: List[str]) -> Dict[str, s
         return {}
 
 
-def get_staff_location_filter(user: dict) -> Optional[str]:
+def get_staff_location_filter(user: dict, requested_location: Optional[str] = None) -> Optional[str]:
     """
     Get the location_id to filter queries by.
     
-    - Superadmin: Returns None (no filter, sees everything)
-    - Admin: Returns None (admins see all locations in their agency)
-    - Manager: Returns their assigned location_id
+    - Superadmin: Returns requested_location if provided, else None (sees everything)
+    - Admin: Returns requested_location if provided, else None (sees all in agency)
+    - Manager: Always returns their assigned location_id (ignores requested_location)
     """
     role = user.get("role", "")
     profile = user.get("profile", {})
     
-    # Superadmins and admins see everything in their agency
+    # Superadmins and Admins can filter by any location or see all
     if role in ("superadmin", "admin"):
-        return None
+        return requested_location  # None means all, or specific location if requested
     
-    # Managers see only their location
+    # Managers always see only their location
     location_id = profile.get("location_id")
     return location_id
 
@@ -182,97 +182,10 @@ def get_applicant_position(supabase: Client, application_id: str) -> tuple[str, 
     return "", "Home Care Worker"
 
 
-@router.get("/locations")
-@router.get("/locations/")
-async def get_locations(
-    supabase: Client = Depends(get_supabase),
-    user: dict = Depends(get_staff_user)
-):
-    """
-    Get all locations for the current user's agency.
-    Used for assigning applicants to locations.
-    """
-    try:
-        profile = user.get("profile", {})
-        agency_id = profile.get("agency_id")
-        
-        if not agency_id:
-            return {"locations": []}
-        
-        res = supabase.table("locations").select(
-            "id, name, address, city, state, zip"
-        ).eq("agency_id", agency_id).order("name").execute()
-        
-        return {"locations": res.data or []}
-    except Exception as e:
-        logger.error(f"Locations fetch error: {e}")
-        raise HTTPException(status_code=500, detail=str(e))
-
-
-@router.put("/applicants/{application_id}/location")
-async def assign_applicant_location(
-    application_id: str,
-    location_data: dict,
-    supabase: Client = Depends(get_supabase),
-    user: dict = Depends(get_staff_user)
-):
-    """
-    Assign an applicant to a location.
-    Only admins and superadmins can reassign locations.
-    """
-    # Only admins can assign locations
-    if user["role"] not in ("admin", "superadmin"):
-        raise HTTPException(status_code=403, detail="Admin access required to assign locations")
-    
-    try:
-        location_id = location_data.get("location_id")
-        
-        # Validate that the application exists
-        app_res = supabase.table("applications").select("id, agency_id").eq("id", application_id).single().execute()
-        if not app_res.data:
-            raise HTTPException(status_code=404, detail="Application not found")
-        
-        # If location_id is provided, validate it belongs to the agency
-        if location_id:
-            profile = user.get("profile", {})
-            agency_id = profile.get("agency_id")
-            
-            loc_res = supabase.table("locations").select("id, name, agency_id").eq("id", location_id).single().execute()
-            if not loc_res.data:
-                raise HTTPException(status_code=404, detail="Location not found")
-            
-            if loc_res.data.get("agency_id") != agency_id:
-                raise HTTPException(status_code=403, detail="Location does not belong to your agency")
-            
-            location_name = loc_res.data.get("name", "")
-        else:
-            location_name = None
-        
-        # Update the application
-        update_data = {
-            "location_id": location_id,
-            "updated_at": datetime.utcnow().isoformat()
-        }
-        
-        supabase.table("applications").update(update_data).eq("id", application_id).execute()
-        
-        logger.info(f"Application {application_id} assigned to location {location_id} by {user['user_id']}")
-        
-        return {
-            "success": True,
-            "location_id": location_id,
-            "location_name": location_name
-        }
-    except HTTPException:
-        raise
-    except Exception as e:
-        logger.error(f"Location assignment error: {e}")
-        raise HTTPException(status_code=500, detail=str(e))
-
-
 @router.get("/dashboard")
 @router.get("/dashboard/")
 async def get_dashboard_stats(
+    location_id: Optional[str] = Query(None, description="Filter by location ID"),
     supabase: Client = Depends(get_supabase),
     user: dict = Depends(get_staff_user)
 ):
@@ -281,7 +194,7 @@ async def get_dashboard_stats(
         thirty_days_ago = (now - timedelta(days=30)).isoformat()
         
         # Get location filter for this staff member
-        location_filter = get_staff_location_filter(user)
+        location_filter = get_staff_location_filter(user, location_id)
         
         stats = {
             "total_applicants": 0,
@@ -297,7 +210,7 @@ async def get_dashboard_stats(
         approved_query = supabase.table("applications").select("id", count="exact").eq("status", "approved").gte("updated_at", thirty_days_ago)
         recent_query = supabase.table("applications").select("id, status, updated_at, profiles!applications_user_id_fkey(first_name, last_name)").order("updated_at", desc=True).limit(5)
         
-        # Apply location filter if not superadmin/admin
+        # Apply location filter if set
         if location_filter:
             apps_query = apps_query.eq("location_id", location_filter)
             pending_query = pending_query.eq("location_id", location_filter)
@@ -339,18 +252,19 @@ async def get_dashboard_stats(
 @router.get("/pipeline")
 @router.get("/pipeline/")
 async def get_pipeline(
+    location_id: Optional[str] = Query(None, description="Filter by location ID"),
     supabase: Client = Depends(get_supabase),
     user: dict = Depends(get_staff_user)
 ):
     try:
         # Get location filter for this staff member
-        location_filter = get_staff_location_filter(user)
+        location_filter = get_staff_location_filter(user, location_id)
         
         query = supabase.table("applications").select(
             "id, user_id, status, created_at, submitted_at, updated_at, current_step, location_id, profiles!applications_user_id_fkey(first_name, last_name, email), locations(name)"
         ).order("created_at", desc=True)
         
-        # Apply location filter if not superadmin/admin
+        # Apply location filter if set
         if location_filter:
             query = query.eq("location_id", location_filter)
         
@@ -616,11 +530,12 @@ async def update_applicant_ssn(
 @router.get("/employees")
 @router.get("/employees/")
 async def get_employees(
+    location_id: Optional[str] = Query(None, description="Filter by location ID"),
     supabase: Client = Depends(get_supabase),
     user: dict = Depends(get_staff_user)
 ):
     try:
-        location_filter = get_staff_location_filter(user)
+        location_filter = get_staff_location_filter(user, location_id)
         
         # Query employees WITHOUT the locations join (no FK constraint)
         query = supabase.table("employees").select(
@@ -1416,6 +1331,7 @@ async def get_training_leads(
 @router.get("/unassigned-employees")
 @router.get("/unassigned-employees/")
 async def get_unassigned_employees(
+    location_id: Optional[str] = Query(None, description="Filter by location ID"),
     supabase: Client = Depends(get_supabase),
     user: dict = Depends(get_staff_user)
 ):
@@ -1424,7 +1340,7 @@ async def get_unassigned_employees(
     These are employees ready to be assigned to clients.
     """
     try:
-        location_filter = get_staff_location_filter(user)
+        location_filter = get_staff_location_filter(user, location_id)
         
         # Query WITHOUT locations join (no FK constraint in DB)
         emp_query = supabase.table("employees").select(
