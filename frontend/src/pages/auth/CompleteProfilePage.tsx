@@ -22,6 +22,7 @@ export function CompleteProfilePage() {
   const [submitting, setSubmitting] = useState(false);
   const [error, setError] = useState<string | null>(null);
   const [userEmail, setUserEmail] = useState<string | null>(null);
+  const [userId, setUserId] = useState<string | null>(null);
   const [profile, setProfile] = useState<{ role: string; agency_id: string } | null>(null);
   
   const [form, setForm] = useState({
@@ -68,14 +69,15 @@ export function CompleteProfilePage() {
       await loadUserData(session.user.id, session.user.email);
     };
 
-    const loadUserData = async (userId: string, email: string | undefined) => {
+    const loadUserData = async (id: string, email: string | undefined) => {
+      setUserId(id);
       setUserEmail(email || null);
       
       // Get profile to check role
       const { data: profileData } = await supabase
         .from('profiles')
         .select('role, agency_id, first_name, last_name')
-        .eq('id', userId)
+        .eq('id', id)
         .single();
       
       if (profileData) {
@@ -83,12 +85,12 @@ export function CompleteProfilePage() {
         
         // If they already have a name set, they may have already completed this
         if (profileData.first_name && profileData.last_name) {
-          // Already completed, redirect based on role
+          // Already completed - do a hard redirect to force auth context refresh
           const staffRoles = ['admin', 'superadmin', 'manager'];
           if (staffRoles.includes(profileData.role)) {
-            navigate('/admin', { replace: true });
+            window.location.href = '/admin';
           } else {
-            navigate('/applicant', { replace: true });
+            window.location.href = '/applicant';
           }
           return;
         }
@@ -153,18 +155,31 @@ export function CompleteProfilePage() {
         throw profileError;
       }
 
-      // Redirect based on role
+      // Mark invitation as used (if not already)
+      if (userEmail) {
+        await supabase
+          .from('invitations')
+          .update({
+            used: true,
+            used_at: new Date().toISOString(),
+            used_by: session.user.id,
+          })
+          .eq('email', userEmail)
+          .eq('used', false);
+      }
+
+      // Hard redirect to force auth context to fully reload
+      // This ensures the profile data is fresh when the dashboard loads
       const staffRoles = ['admin', 'superadmin', 'manager'];
       if (profile && staffRoles.includes(profile.role)) {
-        navigate('/admin', { replace: true });
+        window.location.href = '/admin';
       } else {
-        navigate('/applicant', { replace: true });
+        window.location.href = '/applicant';
       }
 
     } catch (err) {
       console.error('[CompleteProfile] Error:', err);
       setError(err instanceof Error ? err.message : 'Failed to complete setup');
-    } finally {
       setSubmitting(false);
     }
   };
