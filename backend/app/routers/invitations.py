@@ -3,6 +3,7 @@
 import secrets
 from datetime import datetime, timedelta, timezone
 from typing import List, Optional
+import os
 
 from fastapi import APIRouter, Depends, HTTPException, status
 from pydantic import BaseModel, EmailStr
@@ -13,6 +14,8 @@ from app.models.user import UserProfile, UserRole
 from app.schemas.common import SuccessResponse
 
 router = APIRouter(prefix="/invitations", tags=["Invitations"])
+
+FRONTEND_URL = os.getenv("FRONTEND_URL", "https://medisvault.com")
 
 
 class InvitationCreate(BaseModel):
@@ -110,8 +113,8 @@ async def create_invitation(
     """
     Create a new staff invitation for the admin's agency.
     
-    Generates a unique token and creates an invitation record.
-    The invite URL can be shared with the recipient.
+    Uses Supabase's invite_user_by_email to send the invitation email
+    through the configured SMTP settings.
     """
     # Validate role
     if request.role not in ["admin", "manager"]:
@@ -144,7 +147,6 @@ async def create_invitation(
         .execute()
     )
     agency_name = agency_result.data.get("name", "Unknown") if agency_result.data else "Unknown"
-    agency_slug = agency_result.data.get("slug", "") if agency_result.data else ""
     
     # Check if email already has an account
     existing = (
@@ -190,43 +192,76 @@ async def create_invitation(
             )
         location_name = loc_result.data.get("name")
     
-    # Generate secure token
+    # Generate secure token for our tracking
     token = secrets.token_urlsafe(32)
     now = datetime.now(timezone.utc)
-    expires_at = now + timedelta(days=7)  # Invitation valid for 7 days
+    expires_at = now + timedelta(days=7)
     
-    # Create invitation
-    inv_data = {
-        "email": request.email,
-        "role": request.role,
-        "agency_id": agency_id,
-        "location_id": request.location_id,
-        "token": token,
-        "invited_by": admin.id,
-        "expires_at": expires_at.isoformat(),
-        "used": False,
-        "created_at": now.isoformat(),
-    }
-    
-    result = supabase.table("invitations").insert(inv_data).execute()
-    inv = result.data[0]
-    
-    # Build invite URL
-    invite_url = f"https://medisvault.com/invite/{token}"
-    
-    return InvitationResponse(
-        id=inv["id"],
-        email=inv["email"],
-        role=inv["role"],
-        agency_id=inv["agency_id"],
-        agency_name=agency_name,
-        location_id=inv.get("location_id"),
-        location_name=location_name,
-        expires_at=inv["expires_at"],
-        used=inv["used"],
-        created_at=inv["created_at"],
-        invite_url=invite_url,
-    )
+    try:
+        # Use Supabase's invite_user_by_email - this sends the email via SMTP!
+        redirect_url = f"{FRONTEND_URL}/auth/callback"
+        
+        auth_response = supabase.auth.admin.invite_user_by_email(
+            request.email,
+            {
+                "redirect_to": redirect_url,
+                "data": {
+                    "role": request.role,
+                    "agency_id": agency_id,
+                    "location_id": request.location_id,
+                    "invited_by": admin.id,
+                }
+            }
+        )
+        
+        # Get the user ID from the invite response
+        invited_user_id = auth_response.user.id if auth_response.user else None
+        
+        # Create invitation record for tracking
+        inv_data = {
+            "email": request.email,
+            "role": request.role,
+            "agency_id": agency_id,
+            "location_id": request.location_id,
+            "token": token,
+            "invited_by": admin.id,
+            "expires_at": expires_at.isoformat(),
+            "used": False,
+            "created_at": now.isoformat(),
+            "auth_user_id": invited_user_id,
+        }
+        
+        result = supabase.table("invitations").insert(inv_data).execute()
+        inv = result.data[0]
+        
+        return InvitationResponse(
+            id=inv["id"],
+            email=inv["email"],
+            role=inv["role"],
+            agency_id=inv["agency_id"],
+            agency_name=agency_name,
+            location_id=inv.get("location_id"),
+            location_name=location_name,
+            expires_at=inv["expires_at"],
+            used=inv["used"],
+            created_at=inv["created_at"],
+            invite_url=None,  # Supabase sends the email directly
+        )
+        
+    except Exception as e:
+        error_msg = str(e)
+        print(f"Invitation error: {error_msg}")
+        
+        if "already been invited" in error_msg.lower() or "already registered" in error_msg.lower():
+            raise HTTPException(
+                status_code=status.HTTP_409_CONFLICT,
+                detail="This email has already been invited or registered",
+            )
+        
+        raise HTTPException(
+            status_code=status.HTTP_500_INTERNAL_SERVER_ERROR,
+            detail=f"Failed to send invitation: {error_msg}",
+        )
 
 
 @router.get("/{token}", response_model=InvitationResponse)
@@ -350,6 +385,7 @@ async def accept_invitation(
             "last_name": request.last_name,
             "role": inv["role"],
             "agency_id": inv["agency_id"],  # Link to agency!
+            "location_id": inv.get("location_id"),
             "created_at": now,
             "updated_at": now,
         }).execute()
@@ -391,7 +427,7 @@ async def revoke_invitation(
     # Check invitation exists, belongs to agency, and is not used
     inv_result = (
         supabase.table("invitations")
-        .select("id, used, agency_id")
+        .select("id, used, agency_id, auth_user_id")
         .eq("id", invitation_id)
         .single()
         .execute()
@@ -415,6 +451,14 @@ async def revoke_invitation(
             detail="Cannot revoke an already-used invitation",
         )
     
+    # If we have an auth_user_id, delete the invited user from auth
+    auth_user_id = inv_result.data.get("auth_user_id")
+    if auth_user_id:
+        try:
+            supabase.auth.admin.delete_user(auth_user_id)
+        except Exception:
+            pass  # User might not exist or already deleted
+    
     # Delete the invitation
     supabase.table("invitations").delete().eq("id", invitation_id).execute()
     
@@ -427,7 +471,7 @@ async def resend_invitation(
     admin: UserProfile = Depends(require_admin),
     supabase: Client = Depends(get_supabase),
 ):
-    """Resend an invitation email and extend expiration."""
+    """Resend an invitation email."""
     agency_id = get_user_agency_id(supabase, admin.id)
     
     # Get invitation
@@ -459,16 +503,36 @@ async def resend_invitation(
             detail="Cannot resend an already-used invitation",
         )
     
-    # Extend expiration
-    new_expires = (datetime.now(timezone.utc) + timedelta(days=7)).isoformat()
-    supabase.table("invitations").update({
-        "expires_at": new_expires,
-    }).eq("id", invitation_id).execute()
-    
-    # TODO: Send email
-    invite_url = f"https://medisvault.com/invite/{inv['token']}"
-    
-    return SuccessResponse(
-        message="Invitation resent",
-        data={"invite_url": invite_url},
-    )
+    try:
+        # Use Supabase to resend the invite email
+        redirect_url = f"{FRONTEND_URL}/auth/callback"
+        
+        # Re-invite the user - this will resend the email
+        supabase.auth.admin.invite_user_by_email(
+            inv["email"],
+            {
+                "redirect_to": redirect_url,
+                "data": {
+                    "role": inv["role"],
+                    "agency_id": inv["agency_id"],
+                    "location_id": inv.get("location_id"),
+                    "invited_by": admin.id,
+                }
+            }
+        )
+        
+        # Extend expiration
+        new_expires = (datetime.now(timezone.utc) + timedelta(days=7)).isoformat()
+        supabase.table("invitations").update({
+            "expires_at": new_expires,
+        }).eq("id", invitation_id).execute()
+        
+        return SuccessResponse(message="Invitation email resent")
+        
+    except Exception as e:
+        error_msg = str(e)
+        print(f"Resend invitation error: {error_msg}")
+        raise HTTPException(
+            status_code=status.HTTP_500_INTERNAL_SERVER_ERROR,
+            detail=f"Failed to resend invitation: {error_msg}",
+        )
