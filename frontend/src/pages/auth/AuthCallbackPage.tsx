@@ -5,7 +5,7 @@ import { supabase } from '../../lib/supabase';
 /**
  * AuthCallbackPage
  * 
- * This page handles various Supabase auth callbacks including:
+ * This page handles Supabase auth callbacks including:
  * - Invite link clicks (type=invite)
  * - Magic link logins
  * - OAuth callbacks
@@ -19,20 +19,27 @@ export function AuthCallbackPage() {
   const [status, setStatus] = useState('Processing...');
 
   useEffect(() => {
-    // Check for error in URL params
-    const params = new URLSearchParams(window.location.search);
-    const errorDescription = params.get('error_description');
-    const errorCode = params.get('error_code');
+    // Check for error in URL hash (Supabase puts errors here for invite/magic links)
+    const hashParams = new URLSearchParams(window.location.hash.substring(1));
+    const hashError = hashParams.get('error_description');
+    const hashErrorCode = hashParams.get('error_code');
+    
+    // Also check query params
+    const queryParams = new URLSearchParams(window.location.search);
+    const queryError = queryParams.get('error_description');
+    
+    const errorDescription = hashError || queryError;
     
     if (errorDescription) {
-      setError(errorDescription);
+      // Handle specific error codes
+      if (hashErrorCode === 'otp_expired') {
+        setError('This invitation link has expired. Please ask your administrator to send a new invitation.');
+      } else {
+        setError(errorDescription.replace(/\+/g, ' '));
+      }
       return;
     }
 
-    // For invite links, the user needs to set their password
-    // Check if this is an invite callback
-    const type = params.get('type');
-    
     setStatus('Verifying your account...');
 
     // Listen for auth state changes
@@ -42,11 +49,8 @@ export function AuthCallbackPage() {
         
         if (event === 'SIGNED_IN' && session) {
           // User is now signed in
-          // Check if they need to set a password (invite flow)
           const user = session.user;
           
-          // For invited users, they might need to set their password
-          // or we can check if their profile is complete
           try {
             const { data: profile } = await supabase
               .from('profiles')
@@ -64,31 +68,26 @@ export function AuthCallbackPage() {
               }
             } else {
               // No profile yet - this is a new invited user
-              // They may need to complete setup
-              // For now, redirect to set-password or admin
+              // They need to set their password first
               navigate('/auth/set-password', { replace: true });
             }
           } catch (err) {
             console.error('[AuthCallback] Error checking profile:', err);
-            // Default to root which will handle redirect
             navigate('/', { replace: true });
           }
         } else if (event === 'PASSWORD_RECOVERY') {
-          // This is a password reset, redirect to set password
           navigate('/auth/set-password', { replace: true });
         } else if (event === 'USER_UPDATED') {
-          // User was updated (e.g., after accepting invite)
           navigate('/', { replace: true });
         }
       }
     );
 
-    // Also check if we already have a session
+    // Check for existing session
     const checkExistingSession = async () => {
       const { data: { session } } = await supabase.auth.getSession();
       if (session) {
         console.log('[AuthCallback] Found existing session, redirecting...');
-        // Check profile and redirect
         try {
           const { data: profile } = await supabase
             .from('profiles')
@@ -130,7 +129,7 @@ export function AuthCallbackPage() {
         </p>
         <a
           href="/auth/login"
-          className="mt-6 inline-block text-sm font-medium text-maroon hover:text-maroon-light"
+          className="mt-6 inline-block rounded-lg bg-maroon px-4 py-2 text-sm font-medium text-white hover:bg-maroon-light"
         >
           Go to Login
         </a>
