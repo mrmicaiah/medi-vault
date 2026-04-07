@@ -146,8 +146,8 @@ export function UsersPage() {
         return;
       }
       
-      if (inviteForm.role === 'manager' && !inviteForm.location_id) {
-        setError('Please select a location for the manager');
+      if (!inviteForm.location_id) {
+        setError('Please select a location');
         return;
       }
       
@@ -295,7 +295,7 @@ export function UsersPage() {
           setInviteForm({
             email: '',
             role: 'manager',
-            location_id: locations.length > 0 ? locations[0].id : '',
+            location_id: '',
           });
           setShowInviteModal(true);
         }}>
@@ -437,7 +437,7 @@ export function UsersPage() {
                         </Badge>
                       </td>
                       <td className="px-4 py-3 text-sm text-gray">
-                        {user.location_name || (user.role === 'manager' ? <span className="text-warning">Unassigned</span> : '—')}
+                        {user.location_name || <span className="text-warning">Unassigned</span>}
                       </td>
                       <td className="px-4 py-3 text-sm text-gray">
                         {formatDate(user.created_at)}
@@ -531,24 +531,22 @@ export function UsersPage() {
             </select>
           </div>
 
-          {inviteForm.role === 'manager' && (
-            <div>
-              <label className="block text-sm font-medium text-slate mb-1">Assign to Location</label>
-              <select
-                value={inviteForm.location_id}
-                onChange={(e) => setInviteForm({ ...inviteForm, location_id: e.target.value })}
-                className="w-full rounded-lg border border-border px-3 py-2 text-sm"
-                required
-              >
-                <option value="">Select a location...</option>
-                {locations.map((loc) => (
-                  <option key={loc.id} value={loc.id}>
-                    {loc.name} ({loc.city}, {loc.state})
-                  </option>
-                ))}
-              </select>
-            </div>
-          )}
+          <div>
+            <label className="block text-sm font-medium text-slate mb-1">Assign to Location</label>
+            <select
+              value={inviteForm.location_id}
+              onChange={(e) => setInviteForm({ ...inviteForm, location_id: e.target.value })}
+              className="w-full rounded-lg border border-border px-3 py-2 text-sm"
+              required
+            >
+              <option value="">Select a location...</option>
+              {locations.map((loc) => (
+                <option key={loc.id} value={loc.id}>
+                  {loc.name} ({loc.city}, {loc.state})
+                </option>
+              ))}
+            </select>
+          </div>
         </div>
       </Modal>
 
@@ -582,23 +580,21 @@ export function UsersPage() {
             />
           </div>
           
-          {editingUser?.role === 'manager' && (
-            <div>
-              <label className="block text-sm font-medium text-slate mb-1">Assigned Location</label>
-              <select
-                value={editForm.location_id}
-                onChange={(e) => setEditForm({ ...editForm, location_id: e.target.value })}
-                className="w-full rounded-lg border border-border px-3 py-2 text-sm"
-              >
-                <option value="">No location assigned</option>
-                {locations.map((loc) => (
-                  <option key={loc.id} value={loc.id}>
-                    {loc.name} ({loc.city}, {loc.state})
-                  </option>
-                ))}
-              </select>
-            </div>
-          )}
+          <div>
+            <label className="block text-sm font-medium text-slate mb-1">Assigned Location</label>
+            <select
+              value={editForm.location_id}
+              onChange={(e) => setEditForm({ ...editForm, location_id: e.target.value })}
+              className="w-full rounded-lg border border-border px-3 py-2 text-sm"
+            >
+              <option value="">No location assigned</option>
+              {locations.map((loc) => (
+                <option key={loc.id} value={loc.id}>
+                  {loc.name} ({loc.city}, {loc.state})
+                </option>
+              ))}
+            </select>
+          </div>
 
           <div>
             <label className="block text-sm font-medium text-slate mb-1">Role</label>
