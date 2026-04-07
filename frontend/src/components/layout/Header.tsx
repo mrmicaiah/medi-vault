@@ -50,14 +50,11 @@ export function Header() {
               className="h-12 w-auto max-w-[200px] object-contain"
             />
           ) : (
-            <>
-              <div className="flex h-8 w-8 items-center justify-center rounded-lg bg-teal">
-                <span className="text-sm font-bold text-white">M</span>
-              </div>
-              <span className="font-display text-xl font-bold text-navy">
-                Medi<span className="text-teal">Vault</span>
-              </span>
-            </>
+            <img 
+              src="https://res.cloudinary.com/dxzw1zwez/image/upload/v1775588381/logo-horizontal_fqxwcl.svg" 
+              alt="MediSvault" 
+              className="h-10 w-auto"
+            />
           )}
         </div>
       </div>
