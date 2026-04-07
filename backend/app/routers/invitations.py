@@ -38,6 +38,13 @@ class InvitationResponse(BaseModel):
     invite_url: Optional[str] = None
 
 
+class InvitationByEmailResponse(BaseModel):
+    """Simplified response for looking up invitation by email."""
+    role: str
+    agency_id: str
+    location_id: Optional[str] = None
+
+
 class InvitationsListResponse(BaseModel):
     invitations: List[InvitationResponse]
     total: int
@@ -102,6 +109,42 @@ async def list_invitations(
         )
     
     return InvitationsListResponse(invitations=invitations, total=len(invitations))
+
+
+@router.get("/by-email/{email}", response_model=InvitationByEmailResponse)
+async def get_invitation_by_email(
+    email: str,
+    supabase: Client = Depends(get_supabase),
+):
+    """
+    Get invitation details by email address.
+    
+    This is used by the complete-profile page to get the role/agency
+    for the invited user. No auth required since this is called during
+    the invite acceptance flow.
+    """
+    result = (
+        supabase.table("invitations")
+        .select("role, agency_id, location_id")
+        .eq("email", email)
+        .order("created_at", desc=True)
+        .limit(1)
+        .execute()
+    )
+    
+    if not result.data:
+        raise HTTPException(
+            status_code=status.HTTP_404_NOT_FOUND,
+            detail="Invitation not found",
+        )
+    
+    inv = result.data[0]
+    
+    return InvitationByEmailResponse(
+        role=inv["role"],
+        agency_id=inv["agency_id"],
+        location_id=inv.get("location_id"),
+    )
 
 
 @router.post("", response_model=InvitationResponse)
