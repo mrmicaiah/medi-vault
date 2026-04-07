@@ -86,7 +86,7 @@ export function Sidebar() {
       )}
 
       <div className="border-t border-navy-light p-4">
-        <p className="text-xs text-gray-400">MediVault v1.0</p>
+        <p className="text-xs text-gray-400">MediSVault v1.0</p>
       </div>
     </aside>
   );
