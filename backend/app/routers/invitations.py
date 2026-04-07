@@ -211,9 +211,8 @@ async def create_invitation(
     result = supabase.table("invitations").insert(inv_data).execute()
     inv = result.data[0]
     
-    # Build invite URL - use agency slug in URL
-    # TODO: Use actual domain from config
-    invite_url = f"https://medivault.app/invite/{token}"
+    # Build invite URL
+    invite_url = f"https://medisvault.com/invite/{token}"
     
     return InvitationResponse(
         id=inv["id"],
@@ -467,7 +466,7 @@ async def resend_invitation(
     }).eq("id", invitation_id).execute()
     
     # TODO: Send email
-    invite_url = f"https://medivault.app/invite/{inv['token']}"
+    invite_url = f"https://medisvault.com/invite/{inv['token']}"
     
     return SuccessResponse(
         message="Invitation resent",
