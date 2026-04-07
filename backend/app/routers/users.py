@@ -428,7 +428,7 @@ async def send_password_reset_email(
     """
     Send a password reset email to the user.
     
-    Uses Supabase Admin API to generate a recovery link and send it.
+    Uses Supabase Admin API to generate a recovery link.
     """
     agency_id = get_user_agency_id(supabase, admin.id)
     
@@ -466,73 +466,33 @@ async def send_password_reset_email(
     try:
         redirect_url = f"{FRONTEND_URL}/auth/reset-callback"
         
-        # First verify the user exists in auth.users by trying to get them
-        try:
-            auth_user = supabase.auth.admin.get_user_by_id(user_id)
-            if not auth_user or not auth_user.user:
-                raise HTTPException(
-                    status_code=status.HTTP_404_NOT_FOUND,
-                    detail="User exists in profiles but not in auth system. They may need to be re-invited.",
-                )
-        except Exception as auth_err:
-            print(f"Error checking auth user: {auth_err}")
-            raise HTTPException(
-                status_code=status.HTTP_404_NOT_FOUND,
-                detail="User not found in authentication system. They may need to be re-invited.",
-            )
-        
-        # Use invite_user_by_email which generates a magic link for password setup
-        # This works more reliably than generate_link for password recovery
-        response = supabase.auth.admin.invite_user_by_email(
-            user_email,
-            {
-                "redirect_to": redirect_url,
-                "data": {
-                    "invited_by": admin.email if hasattr(admin, 'email') else "admin"
-                }
+        # Use generate_link to create a recovery email
+        # The correct syntax for supabase-py v2.x
+        response = supabase.auth.admin.generate_link({
+            "type": "recovery",
+            "email": user_email,
+            "options": {
+                "redirect_to": redirect_url
             }
-        )
+        })
+        
+        # generate_link returns properties including action_link
+        # Supabase will send the email automatically if SMTP is configured
         
         return SuccessResponse(
             message=f"Password reset email sent to {user_email}",
             data={"email": user_email}
         )
         
-    except HTTPException:
-        raise
     except Exception as e:
         error_message = str(e)
         print(f"Password reset error for {user_email}: {error_message}")
         
-        # Provide more specific error messages
         if "rate limit" in error_message.lower():
             raise HTTPException(
                 status_code=status.HTTP_429_TOO_MANY_REQUESTS,
                 detail="Too many reset requests. Please wait before trying again.",
             )
-        
-        if "already been invited" in error_message.lower() or "already confirmed" in error_message.lower():
-            # User already exists, try generate_link for recovery instead
-            try:
-                response = supabase.auth.admin.generate_link(
-                    {
-                        "type": "recovery",
-                        "email": user_email,
-                        "options": {
-                            "redirect_to": redirect_url
-                        }
-                    }
-                )
-                return SuccessResponse(
-                    message=f"Password reset email sent to {user_email}",
-                    data={"email": user_email}
-                )
-            except Exception as recovery_err:
-                print(f"Recovery link error: {recovery_err}")
-                raise HTTPException(
-                    status_code=status.HTTP_500_INTERNAL_SERVER_ERROR,
-                    detail=f"Failed to send reset email: {str(recovery_err)}",
-                )
         
         raise HTTPException(
             status_code=status.HTTP_500_INTERNAL_SERVER_ERROR,
