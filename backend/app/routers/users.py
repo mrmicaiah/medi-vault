@@ -15,7 +15,7 @@ from app.schemas.common import SuccessResponse
 router = APIRouter(prefix="/users", tags=["Users"])
 
 # Get frontend URL from environment
-FRONTEND_URL = os.getenv("FRONTEND_URL", "https://medi-vault.pages.dev")
+FRONTEND_URL = os.getenv("FRONTEND_URL", "https://medisvault.com")
 
 
 class UserResponse(BaseModel):
