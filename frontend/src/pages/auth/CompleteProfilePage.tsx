@@ -1,9 +1,9 @@
 import { useEffect, useState } from 'react';
-import { useNavigate } from 'react-router-dom';
 import { supabase } from '../../lib/supabase';
 import { Input } from '../../components/ui/Input';
 import { Button } from '../../components/ui/Button';
 import { Alert } from '../../components/ui/Alert';
+import { api } from '../../lib/api';
 
 /**
  * CompleteProfilePage
@@ -13,17 +13,21 @@ import { Alert } from '../../components/ui/Alert';
  * 1. Enter their first/last name
  * 2. Set their password
  * 
- * After completing this, their profile is updated and they're redirected
- * to the appropriate dashboard based on their role.
+ * The profile may or may not exist yet (trigger timing issues), so we
+ * look up the invitation to get role/agency info and use upsert to
+ * create or update the profile.
  */
 export function CompleteProfilePage() {
-  const navigate = useNavigate();
   const [loading, setLoading] = useState(true);
   const [submitting, setSubmitting] = useState(false);
   const [error, setError] = useState<string | null>(null);
   const [userEmail, setUserEmail] = useState<string | null>(null);
   const [userId, setUserId] = useState<string | null>(null);
-  const [profile, setProfile] = useState<{ role: string; agency_id: string } | null>(null);
+  const [invitationData, setInvitationData] = useState<{
+    role: string;
+    agency_id: string;
+    location_id: string | null;
+  } | null>(null);
   
   const [form, setForm] = useState({
     firstName: '',
@@ -48,59 +52,131 @@ export function CompleteProfilePage() {
       return;
     }
 
-    // Check for session
-    const checkSession = async () => {
+    const initializePage = async () => {
+      // Wait a moment for Supabase to process the token
+      await new Promise(resolve => setTimeout(resolve, 500));
+      
       const { data: { session } } = await supabase.auth.getSession();
       
       if (!session) {
-        // No session - maybe still processing, wait a moment
-        setTimeout(async () => {
-          const { data: { session: retrySession } } = await supabase.auth.getSession();
-          if (!retrySession) {
-            setError('No valid session found. Please request a new invitation link.');
-            setLoading(false);
-          } else {
-            await loadUserData(retrySession.user.id, retrySession.user.email);
-          }
-        }, 1500);
+        // Retry after a longer delay
+        await new Promise(resolve => setTimeout(resolve, 1500));
+        const { data: { session: retrySession } } = await supabase.auth.getSession();
+        
+        if (!retrySession) {
+          setError('No valid session found. Please request a new invitation link.');
+          setLoading(false);
+          return;
+        }
+        
+        await loadUserData(retrySession.user.id, retrySession.user.email || '');
+      } else {
+        await loadUserData(session.user.id, session.user.email || '');
+      }
+    };
+
+    const loadUserData = async (id: string, email: string) => {
+      console.log('[CompleteProfile] Loading user data for:', email);
+      setUserId(id);
+      setUserEmail(email);
+      
+      // First check if profile exists and is already complete
+      const { data: profileData, error: profileError } = await supabase
+        .from('profiles')
+        .select('role, agency_id, location_id, first_name, last_name')
+        .eq('id', id)
+        .maybeSingle();
+      
+      console.log('[CompleteProfile] Profile lookup:', profileData, profileError);
+      
+      if (profileData && profileData.first_name && profileData.last_name) {
+        // Already completed - redirect based on role
+        console.log('[CompleteProfile] Profile already complete, redirecting...');
+        const staffRoles = ['admin', 'superadmin', 'manager'];
+        if (staffRoles.includes(profileData.role)) {
+          window.location.href = '/admin';
+        } else {
+          window.location.href = '/applicant';
+        }
         return;
       }
       
-      await loadUserData(session.user.id, session.user.email);
-    };
-
-    const loadUserData = async (id: string, email: string | undefined) => {
-      setUserId(id);
-      setUserEmail(email || null);
+      // If profile exists but incomplete, use its data
+      if (profileData && profileData.role && profileData.agency_id) {
+        console.log('[CompleteProfile] Using existing profile data');
+        setInvitationData({
+          role: profileData.role,
+          agency_id: profileData.agency_id,
+          location_id: profileData.location_id,
+        });
+        setLoading(false);
+        return;
+      }
       
-      // Get profile to check role
-      const { data: profileData } = await supabase
-        .from('profiles')
-        .select('role, agency_id, first_name, last_name')
-        .eq('id', id)
-        .single();
-      
-      if (profileData) {
-        setProfile({ role: profileData.role, agency_id: profileData.agency_id });
+      // No profile or incomplete - look up invitation via API
+      // (API uses service role so RLS doesn't block it)
+      try {
+        console.log('[CompleteProfile] Looking up invitation via API');
+        const response = await fetch(`/api/invitations/by-email/${encodeURIComponent(email)}`);
         
-        // If they already have a name set, they may have already completed this
-        if (profileData.first_name && profileData.last_name) {
-          // Already completed - do a hard redirect to force auth context refresh
-          const staffRoles = ['admin', 'superadmin', 'manager'];
-          if (staffRoles.includes(profileData.role)) {
-            window.location.href = '/admin';
+        if (response.ok) {
+          const invData = await response.json();
+          console.log('[CompleteProfile] Found invitation:', invData);
+          setInvitationData({
+            role: invData.role,
+            agency_id: invData.agency_id,
+            location_id: invData.location_id,
+          });
+        } else {
+          // Try direct Supabase query as fallback
+          console.log('[CompleteProfile] API failed, trying direct query');
+          const { data: invData } = await supabase
+            .from('invitations')
+            .select('role, agency_id, location_id')
+            .eq('email', email)
+            .order('created_at', { ascending: false })
+            .limit(1)
+            .maybeSingle();
+          
+          if (invData) {
+            console.log('[CompleteProfile] Found invitation via Supabase:', invData);
+            setInvitationData({
+              role: invData.role,
+              agency_id: invData.agency_id,
+              location_id: invData.location_id,
+            });
           } else {
-            window.location.href = '/applicant';
+            console.error('[CompleteProfile] No invitation found');
+            setError('Could not find your invitation. Please contact your administrator.');
           }
-          return;
+        }
+      } catch (err) {
+        console.error('[CompleteProfile] Error looking up invitation:', err);
+        // Try direct Supabase query
+        const { data: invData } = await supabase
+          .from('invitations')
+          .select('role, agency_id, location_id')
+          .eq('email', email)
+          .order('created_at', { ascending: false })
+          .limit(1)
+          .maybeSingle();
+        
+        if (invData) {
+          setInvitationData({
+            role: invData.role,
+            agency_id: invData.agency_id,
+            location_id: invData.location_id,
+          });
+        } else {
+          setError('Could not find your invitation. Please contact your administrator.');
         }
       }
       
       setLoading(false);
     };
 
-    checkSession();
-  }, [navigate]);
+    initializePage();
+  }, []);
 
   const handleSubmit = async (e: React.FormEvent) => {
     e.preventDefault();
@@ -122,56 +198,72 @@ export function CompleteProfilePage() {
       return;
     }
 
+    if (!userId || !userEmail) {
+      setError('Session expired. Please request a new invitation.');
+      return;
+    }
+
+    if (!invitationData) {
+      setError('Could not find your invitation details. Please contact your administrator.');
+      return;
+    }
+
     setSubmitting(true);
 
     try {
-      // Get current session
-      const { data: { session } } = await supabase.auth.getSession();
-      if (!session) {
-        setError('Session expired. Please request a new invitation.');
-        return;
-      }
-
+      console.log('[CompleteProfile] Updating password...');
+      
       // Update password
       const { error: passwordError } = await supabase.auth.updateUser({
         password: form.password,
       });
 
       if (passwordError) {
+        console.error('[CompleteProfile] Password error:', passwordError);
         throw passwordError;
       }
 
-      // Update profile with name
+      console.log('[CompleteProfile] Creating/updating profile...');
+      
+      // Create or update profile using upsert
       const { error: profileError } = await supabase
         .from('profiles')
-        .update({
+        .upsert({
+          id: userId,
+          email: userEmail,
           first_name: form.firstName.trim(),
           last_name: form.lastName.trim(),
+          role: invitationData.role,
+          agency_id: invitationData.agency_id,
+          location_id: invitationData.location_id,
           updated_at: new Date().toISOString(),
-        })
-        .eq('id', session.user.id);
+        }, {
+          onConflict: 'id'
+        });
 
       if (profileError) {
+        console.error('[CompleteProfile] Profile error:', profileError);
         throw profileError;
       }
 
-      // Mark invitation as used (if not already)
-      if (userEmail) {
-        await supabase
-          .from('invitations')
-          .update({
-            used: true,
-            used_at: new Date().toISOString(),
-            used_by: session.user.id,
-          })
-          .eq('email', userEmail)
-          .eq('used', false);
-      }
+      console.log('[CompleteProfile] Marking invitation as used...');
+      
+      // Mark invitation as used
+      await supabase
+        .from('invitations')
+        .update({
+          used: true,
+          used_at: new Date().toISOString(),
+          used_by: userId,
+        })
+        .eq('email', userEmail)
+        .eq('used', false);
 
+      console.log('[CompleteProfile] Success! Redirecting...');
+      
       // Hard redirect to force auth context to fully reload
-      // This ensures the profile data is fresh when the dashboard loads
       const staffRoles = ['admin', 'superadmin', 'manager'];
-      if (profile && staffRoles.includes(profile.role)) {
+      if (staffRoles.includes(invitationData.role)) {
         window.location.href = '/admin';
       } else {
         window.location.href = '/applicant';
@@ -226,9 +318,9 @@ export function CompleteProfilePage() {
           <p className="text-sm text-gray">
             Setting up account for: <span className="font-medium text-slate">{userEmail}</span>
           </p>
-          {profile && (
+          {invitationData && (
             <p className="text-xs text-gray mt-1">
-              Role: <span className="font-medium capitalize">{profile.role}</span>
+              Role: <span className="font-medium capitalize">{invitationData.role}</span>
             </p>
           )}
         </div>
