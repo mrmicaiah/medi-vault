@@ -10,6 +10,7 @@ import { LoginPage } from '../pages/auth/LoginPage';
 import { SignupPage } from '../pages/auth/SignupPage';
 import { ResetPasswordPage } from '../pages/auth/ResetPasswordPage';
 import { ResetCallbackPage } from '../pages/auth/ResetCallbackPage';
+import { AuthCallbackPage } from '../pages/auth/AuthCallbackPage';
 import { SetPasswordPage } from '../pages/auth/SetPasswordPage';
 import { InvitePage } from '../pages/auth/InvitePage';
 
@@ -178,6 +179,7 @@ export function RouterConfig() {
         <Route path="/auth/signup" element={<SignupPage />} />
         <Route path="/auth/reset-password" element={<ResetPasswordPage />} />
         <Route path="/auth/reset-callback" element={<ResetCallbackPage />} />
+        <Route path="/auth/callback" element={<AuthCallbackPage />} />
         <Route path="/auth/set-password" element={<SetPasswordPage />} />
       </Route>
 
