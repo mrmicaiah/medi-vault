@@ -3,7 +3,7 @@ import { AuthProvider } from './contexts/AuthContext';
 import { AgencyProvider } from './contexts/AgencyContext';
 import { RouterConfig } from './router';
 
-// MediVault - Home Care Agency Management Platform
+// MediSVault - Home Care Agency Management Platform
 // v1.0.2
 
 function App() {
