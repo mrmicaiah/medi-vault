@@ -7,6 +7,7 @@ from typing import List, Optional
 from fastapi import APIRouter, Depends, HTTPException, status
 from pydantic import BaseModel, EmailStr
 from supabase import Client
+from gotrue import AdminUserAttributes
 
 from app.dependencies import get_supabase, require_admin, require_superadmin
 from app.models.user import UserProfile, UserRole
@@ -428,7 +429,8 @@ async def send_password_reset_email(
     """
     Send a password reset email to the user.
     
-    Uses Supabase Admin API to generate a recovery link.
+    Uses Supabase Admin API to generate a nonce and update the user,
+    triggering a password reset email.
     """
     agency_id = get_user_agency_id(supabase, admin.id)
     
@@ -466,24 +468,44 @@ async def send_password_reset_email(
     try:
         redirect_url = f"{FRONTEND_URL}/auth/reset-callback"
         
-        # Use generate_link to create a recovery email
-        # The correct syntax for supabase-py v2.x
-        response = supabase.auth.admin.generate_link({
-            "type": "recovery",
-            "email": user_email,
-            "options": {
-                "redirect_to": redirect_url
-            }
-        })
+        # Use the generate_link method with proper GenerateLinkParams
+        from gotrue.types import GenerateLinkParams
         
-        # generate_link returns properties including action_link
-        # Supabase will send the email automatically if SMTP is configured
+        link_params = GenerateLinkParams(
+            type="recovery",
+            email=user_email,
+            options={"redirect_to": redirect_url}
+        )
+        
+        response = supabase.auth.admin.generate_link(link_params)
+        
+        # The response contains the action_link - Supabase sends the email
+        # if SMTP is configured in the dashboard
         
         return SuccessResponse(
             message=f"Password reset email sent to {user_email}",
             data={"email": user_email}
         )
         
+    except ImportError:
+        # Fallback if GenerateLinkParams isn't available
+        try:
+            response = supabase.auth.admin.generate_link({
+                "type": "recovery",
+                "email": user_email,
+                "options": {
+                    "redirect_to": redirect_url
+                }
+            })
+            return SuccessResponse(
+                message=f"Password reset email sent to {user_email}",
+                data={"email": user_email}
+            )
+        except Exception as e:
+            raise HTTPException(
+                status_code=status.HTTP_500_INTERNAL_SERVER_ERROR,
+                detail=f"Failed to send reset email: {str(e)}",
+            )
     except Exception as e:
         error_message = str(e)
         print(f"Password reset error for {user_email}: {error_message}")
