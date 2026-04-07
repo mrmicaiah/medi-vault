@@ -220,7 +220,8 @@ async def create_invitation(
     try:
         # STEP 2: Now call Supabase's invite_user_by_email
         # This sends the email via SMTP and creates the auth user
-        redirect_url = f"{FRONTEND_URL}/auth/callback"
+        # Redirect to complete-profile page where user sets name + password
+        redirect_url = f"{FRONTEND_URL}/auth/complete-profile"
         
         supabase.auth.admin.invite_user_by_email(
             request.email,
@@ -501,7 +502,7 @@ async def resend_invitation(
     
     try:
         # Use Supabase to resend the invite email
-        redirect_url = f"{FRONTEND_URL}/auth/callback"
+        redirect_url = f"{FRONTEND_URL}/auth/complete-profile"
         
         # Re-invite the user - this will resend the email
         supabase.auth.admin.invite_user_by_email(
