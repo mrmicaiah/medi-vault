@@ -432,7 +432,7 @@ async def send_password_reset_email(
     """
     agency_id = get_user_agency_id(supabase, admin.id)
     
-    # Check user exists
+    # Check user exists in profiles
     user_result = (
         supabase.table("profiles")
         .select("id, email, role, agency_id")
@@ -464,20 +464,22 @@ async def send_password_reset_email(
         )
     
     try:
-        # Use admin API to generate invite link with recovery type
-        # This sends an email to the user with a password reset link
         redirect_url = f"{FRONTEND_URL}/auth/reset-callback"
         
-        response = supabase.auth.admin.generate_link({
-            "type": "recovery",
-            "email": user_email,
-            "options": {
-                "redirect_to": redirect_url
+        # Use admin API generate_link - this creates a recovery link
+        # For supabase-py v2, the correct call format
+        response = supabase.auth.admin.generate_link(
+            {
+                "type": "recovery",
+                "email": user_email,
+                "options": {
+                    "redirect_to": redirect_url
+                }
             }
-        })
+        )
         
-        # The generate_link with type "recovery" sends the email automatically
-        # when using Supabase's email service
+        # The link is generated - Supabase sends the email automatically
+        # when SMTP is configured in the dashboard
         
         return SuccessResponse(
             message=f"Password reset email sent to {user_email}",
@@ -488,10 +490,17 @@ async def send_password_reset_email(
         error_message = str(e)
         print(f"Password reset error for {user_email}: {error_message}")
         
+        # Provide more specific error messages
         if "rate limit" in error_message.lower():
             raise HTTPException(
                 status_code=status.HTTP_429_TOO_MANY_REQUESTS,
                 detail="Too many reset requests. Please wait before trying again.",
+            )
+        
+        if "user not found" in error_message.lower() or "database error" in error_message.lower():
+            raise HTTPException(
+                status_code=status.HTTP_500_INTERNAL_SERVER_ERROR,
+                detail=f"Database error finding user: {error_message}",
             )
         
         raise HTTPException(
