@@ -86,7 +86,14 @@ export function Sidebar() {
       )}
 
       <div className="border-t border-navy-light p-4">
-        <p className="text-xs text-gray-400">MediSVault v1.0</p>
+        <div className="flex items-center gap-2">
+          <img 
+            src="https://res.cloudinary.com/dxzw1zwez/image/upload/v1775588382/icon_lnxasy.svg" 
+            alt="MediSvault" 
+            className="h-6 w-auto"
+          />
+          <p className="text-xs text-gray-400">MediSVault v1.0</p>
+        </div>
       </div>
     </aside>
   );
