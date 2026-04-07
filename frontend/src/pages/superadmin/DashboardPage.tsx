@@ -470,7 +470,7 @@ export function SuperadminDashboardPage() {
       {/* Footer */}
       <div className="border-t border-gray-800 mt-12">
         <div className="max-w-7xl mx-auto px-6 py-4 flex items-center justify-between">
-          <span className="text-xs text-gray-600 font-mono">MEDIVAULT SUPERADMIN v1.0</span>
+          <span className="text-xs text-gray-600 font-mono">MEDISVAULT SUPERADMIN v1.0</span>
           <span className="text-xs text-gray-600 font-mono">SESSION ACTIVE</span>
         </div>
       </div>
