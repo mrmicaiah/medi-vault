@@ -113,8 +113,10 @@ async def create_invitation(
     """
     Create a new staff invitation for the admin's agency.
     
-    Uses Supabase's invite_user_by_email to send the invitation email
-    through the configured SMTP settings.
+    IMPORTANT: Creates the invitation record FIRST, then calls Supabase's
+    invite_user_by_email. This is because Supabase creates the auth user
+    immediately, which triggers the handle_new_user function that looks
+    for the invitation to set the correct role/agency.
     """
     # Validate role
     if request.role not in ["admin", "manager"]:
@@ -197,8 +199,27 @@ async def create_invitation(
     now = datetime.now(timezone.utc)
     expires_at = now + timedelta(days=7)
     
+    # STEP 1: Create invitation record FIRST (before calling Supabase invite)
+    # This is critical because invite_user_by_email creates the user immediately,
+    # which triggers handle_new_user that looks for this invitation record.
+    inv_data = {
+        "email": request.email,
+        "role": request.role,
+        "agency_id": agency_id,
+        "location_id": request.location_id,
+        "token": token,
+        "invited_by": admin.id,
+        "expires_at": expires_at.isoformat(),
+        "used": False,
+        "created_at": now.isoformat(),
+    }
+    
+    result = supabase.table("invitations").insert(inv_data).execute()
+    inv = result.data[0]
+    
     try:
-        # Use Supabase's invite_user_by_email - this sends the email via SMTP!
+        # STEP 2: Now call Supabase's invite_user_by_email
+        # This sends the email via SMTP and creates the auth user
         redirect_url = f"{FRONTEND_URL}/auth/callback"
         
         supabase.auth.admin.invite_user_by_email(
@@ -213,22 +234,6 @@ async def create_invitation(
                 }
             }
         )
-        
-        # Create invitation record for tracking (without auth_user_id)
-        inv_data = {
-            "email": request.email,
-            "role": request.role,
-            "agency_id": agency_id,
-            "location_id": request.location_id,
-            "token": token,
-            "invited_by": admin.id,
-            "expires_at": expires_at.isoformat(),
-            "used": False,
-            "created_at": now.isoformat(),
-        }
-        
-        result = supabase.table("invitations").insert(inv_data).execute()
-        inv = result.data[0]
         
         return InvitationResponse(
             id=inv["id"],
@@ -245,6 +250,9 @@ async def create_invitation(
         )
         
     except Exception as e:
+        # If Supabase invite fails, clean up the invitation record we created
+        supabase.table("invitations").delete().eq("id", inv["id"]).execute()
+        
         error_msg = str(e)
         print(f"Invitation error: {error_msg}")
         
