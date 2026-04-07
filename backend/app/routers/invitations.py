@@ -201,7 +201,7 @@ async def create_invitation(
         # Use Supabase's invite_user_by_email - this sends the email via SMTP!
         redirect_url = f"{FRONTEND_URL}/auth/callback"
         
-        auth_response = supabase.auth.admin.invite_user_by_email(
+        supabase.auth.admin.invite_user_by_email(
             request.email,
             {
                 "redirect_to": redirect_url,
@@ -214,10 +214,7 @@ async def create_invitation(
             }
         )
         
-        # Get the user ID from the invite response
-        invited_user_id = auth_response.user.id if auth_response.user else None
-        
-        # Create invitation record for tracking
+        # Create invitation record for tracking (without auth_user_id)
         inv_data = {
             "email": request.email,
             "role": request.role,
@@ -228,7 +225,6 @@ async def create_invitation(
             "expires_at": expires_at.isoformat(),
             "used": False,
             "created_at": now.isoformat(),
-            "auth_user_id": invited_user_id,
         }
         
         result = supabase.table("invitations").insert(inv_data).execute()
@@ -384,7 +380,7 @@ async def accept_invitation(
             "first_name": request.first_name,
             "last_name": request.last_name,
             "role": inv["role"],
-            "agency_id": inv["agency_id"],  # Link to agency!
+            "agency_id": inv["agency_id"],
             "location_id": inv.get("location_id"),
             "created_at": now,
             "updated_at": now,
@@ -427,7 +423,7 @@ async def revoke_invitation(
     # Check invitation exists, belongs to agency, and is not used
     inv_result = (
         supabase.table("invitations")
-        .select("id, used, agency_id, auth_user_id")
+        .select("id, used, agency_id")
         .eq("id", invitation_id)
         .single()
         .execute()
@@ -450,14 +446,6 @@ async def revoke_invitation(
             status_code=status.HTTP_400_BAD_REQUEST,
             detail="Cannot revoke an already-used invitation",
         )
-    
-    # If we have an auth_user_id, delete the invited user from auth
-    auth_user_id = inv_result.data.get("auth_user_id")
-    if auth_user_id:
-        try:
-            supabase.auth.admin.delete_user(auth_user_id)
-        except Exception:
-            pass  # User might not exist or already deleted
     
     # Delete the invitation
     supabase.table("invitations").delete().eq("id", invitation_id).execute()
