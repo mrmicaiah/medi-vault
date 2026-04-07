@@ -146,16 +146,17 @@ def get_staff_location_filter(user: dict) -> Optional[str]:
     Get the location_id to filter queries by.
     
     - Superadmin: Returns None (no filter, sees everything)
-    - Admin/Manager: Returns their assigned location_id
+    - Admin: Returns None (admins see all locations in their agency)
+    - Manager: Returns their assigned location_id
     """
     role = user.get("role", "")
     profile = user.get("profile", {})
     
-    # Superadmins see everything
-    if role == "superadmin":
+    # Superadmins and admins see everything in their agency
+    if role in ("superadmin", "admin"):
         return None
     
-    # Admins and managers see only their location
+    # Managers see only their location
     location_id = profile.get("location_id")
     return location_id
 
@@ -179,6 +180,94 @@ def get_applicant_position(supabase: Client, application_id: str) -> tuple[str, 
         logger.warning(f"Could not fetch position for application {application_id}: {e}")
     
     return "", "Home Care Worker"
+
+
+@router.get("/locations")
+@router.get("/locations/")
+async def get_locations(
+    supabase: Client = Depends(get_supabase),
+    user: dict = Depends(get_staff_user)
+):
+    """
+    Get all locations for the current user's agency.
+    Used for assigning applicants to locations.
+    """
+    try:
+        profile = user.get("profile", {})
+        agency_id = profile.get("agency_id")
+        
+        if not agency_id:
+            return {"locations": []}
+        
+        res = supabase.table("locations").select(
+            "id, name, address, city, state, zip"
+        ).eq("agency_id", agency_id).order("name").execute()
+        
+        return {"locations": res.data or []}
+    except Exception as e:
+        logger.error(f"Locations fetch error: {e}")
+        raise HTTPException(status_code=500, detail=str(e))
+
+
+@router.put("/applicants/{application_id}/location")
+async def assign_applicant_location(
+    application_id: str,
+    location_data: dict,
+    supabase: Client = Depends(get_supabase),
+    user: dict = Depends(get_staff_user)
+):
+    """
+    Assign an applicant to a location.
+    Only admins and superadmins can reassign locations.
+    """
+    # Only admins can assign locations
+    if user["role"] not in ("admin", "superadmin"):
+        raise HTTPException(status_code=403, detail="Admin access required to assign locations")
+    
+    try:
+        location_id = location_data.get("location_id")
+        
+        # Validate that the application exists
+        app_res = supabase.table("applications").select("id, agency_id").eq("id", application_id).single().execute()
+        if not app_res.data:
+            raise HTTPException(status_code=404, detail="Application not found")
+        
+        # If location_id is provided, validate it belongs to the agency
+        if location_id:
+            profile = user.get("profile", {})
+            agency_id = profile.get("agency_id")
+            
+            loc_res = supabase.table("locations").select("id, name, agency_id").eq("id", location_id).single().execute()
+            if not loc_res.data:
+                raise HTTPException(status_code=404, detail="Location not found")
+            
+            if loc_res.data.get("agency_id") != agency_id:
+                raise HTTPException(status_code=403, detail="Location does not belong to your agency")
+            
+            location_name = loc_res.data.get("name", "")
+        else:
+            location_name = None
+        
+        # Update the application
+        update_data = {
+            "location_id": location_id,
+            "updated_at": datetime.utcnow().isoformat()
+        }
+        
+        supabase.table("applications").update(update_data).eq("id", application_id).execute()
+        
+        logger.info(f"Application {application_id} assigned to location {location_id} by {user['user_id']}")
+        
+        return {
+            "success": True,
+            "location_id": location_id,
+            "location_name": location_name
+        }
+    except HTTPException:
+        raise
+    except Exception as e:
+        logger.error(f"Location assignment error: {e}")
+        raise HTTPException(status_code=500, detail=str(e))
 
 
 @router.get("/dashboard")
@@ -208,7 +297,7 @@ async def get_dashboard_stats(
         approved_query = supabase.table("applications").select("id", count="exact").eq("status", "approved").gte("updated_at", thirty_days_ago)
         recent_query = supabase.table("applications").select("id, status, updated_at, profiles!applications_user_id_fkey(first_name, last_name)").order("updated_at", desc=True).limit(5)
         
-        # Apply location filter if not superadmin
+        # Apply location filter if not superadmin/admin
         if location_filter:
             apps_query = apps_query.eq("location_id", location_filter)
             pending_query = pending_query.eq("location_id", location_filter)
@@ -261,7 +350,7 @@ async def get_pipeline(
             "id, user_id, status, created_at, submitted_at, updated_at, current_step, location_id, profiles!applications_user_id_fkey(first_name, last_name, email), locations(name)"
         ).order("created_at", desc=True)
         
-        # Apply location filter if not superadmin
+        # Apply location filter if not superadmin/admin
         if location_filter:
             query = query.eq("location_id", location_filter)
         
