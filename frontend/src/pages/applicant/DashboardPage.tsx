@@ -30,6 +30,14 @@ interface ApplicationStep {
   data: Record<string, unknown> | null;
 }
 
+interface ApplicantMessage {
+  id: string;
+  message: string;
+  posted_by_name: string;
+  created_at: string;
+  updated_at: string;
+}
+
 const DOCUMENT_STEPS: Record<number, { name: string; category: string; required: boolean }> = {
   11: { name: 'Work Authorization', category: 'Identification', required: true },
   12: { name: 'Photo ID (Front)', category: 'Identification', required: true },
@@ -125,6 +133,7 @@ export function ApplicantDashboardPage() {
   const [error, setError] = useState<string | null>(null);
   const [application, setApplication] = useState<Application | null>(null);
   const [steps, setSteps] = useState<ApplicationStep[]>([]);
+  const [managerMessage, setManagerMessage] = useState<ApplicantMessage | null>(null);
   
   // Single-document upload modal state
   const [uploadModal, setUploadModal] = useState<{
@@ -168,6 +177,16 @@ export function ApplicantDashboardPage() {
       
       setApplication(res.application);
       setSteps(res.steps);
+      
+      // Load manager message for this application
+      if (res.application?.id) {
+        try {
+          const msgRes = await api.get<{ message: ApplicantMessage | null }>(`/applicant-messages/${res.application.id}`);
+          setManagerMessage(msgRes.message);
+        } catch (msgErr) {
+          console.log('No message found or error loading message');
+        }
+      }
     } catch (err) {
       if (err instanceof Error && err.message.includes('404')) {
         setApplication(null);
@@ -396,6 +415,28 @@ export function ApplicantDashboardPage() {
         <Alert variant="error" dismissible>
           {error}
         </Alert>
+      )}
+
+      {/* Manager Message Banner */}
+      {managerMessage && (
+        <div className="bg-gradient-to-r from-maroon/10 to-maroon/5 rounded-xl border border-maroon/20 p-4">
+          <div className="flex items-start gap-3">
+            <div className="w-10 h-10 rounded-full bg-maroon/20 flex items-center justify-center flex-shrink-0">
+              <svg className="w-5 h-5 text-maroon" fill="none" viewBox="0 0 24 24" stroke="currentColor">
+                <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M7 8h10M7 12h4m1 8l-4-4H5a2 2 0 01-2-2V6a2 2 0 012-2h14a2 2 0 012 2v8a2 2 0 01-2 2h-3l-4 4z" />
+              </svg>
+            </div>
+            <div>
+              <p className="text-sm font-semibold text-maroon">Message from {managerMessage.posted_by_name}</p>
+              <p className="text-sm text-slate mt-1">{managerMessage.message}</p>
+              <p className="text-xs text-gray mt-2">
+                {new Date(managerMessage.updated_at || managerMessage.created_at).toLocaleDateString('en-US', { 
+                  weekday: 'short', month: 'short', day: 'numeric', hour: 'numeric', minute: '2-digit' 
+                })}
+              </p>
+            </div>
+          </div>
+        </div>
       )}
 
       {isSubmitted && !isApproved && (
