@@ -182,20 +182,29 @@ def get_decrypted_ssn(supabase: Client, user_id: str) -> Optional[str]:
     Returns None if not found or decryption fails.
     """
     try:
+        logger.info(f"Fetching SSN for user_id: {user_id}")
+        
         # Use .execute() without .single() to avoid errors on 0 rows
         ssn_res = supabase.table("sensitive_data").select("ssn_encrypted").eq("user_id", user_id).execute()
         
+        logger.info(f"SSN query result: {len(ssn_res.data) if ssn_res.data else 0} rows")
+        
         if ssn_res.data and len(ssn_res.data) > 0:
             ssn_encrypted = ssn_res.data[0].get("ssn_encrypted")
+            logger.info(f"Found encrypted SSN: {bool(ssn_encrypted)}")
+            
             if ssn_encrypted:
-                ssn = encryption_service.decrypt(ssn_encrypted)
-                logger.info(f"Successfully decrypted SSN for user {user_id}")
+                # Use the correct method name: decrypt_ssn
+                ssn = encryption_service.decrypt_ssn(ssn_encrypted)
+                logger.info(f"Successfully decrypted SSN for user {user_id}, last 4: {ssn[-4:]}")
                 return ssn
         
         logger.info(f"No SSN found in sensitive_data for user {user_id}")
         return None
     except Exception as e:
-        logger.warning(f"Could not decrypt SSN for user {user_id}: {e}")
+        logger.error(f"Could not decrypt SSN for user {user_id}: {e}")
+        import traceback
+        logger.error(traceback.format_exc())
         return None
 
 
@@ -506,8 +515,9 @@ async def update_applicant_ssn(
             raise HTTPException(status_code=404, detail="Application not found")
         
         user_id = app_res.data.get("user_id")
-        ssn_encrypted = encryption_service.encrypt(ssn)
-        ssn_last_four = ssn[-4:]
+        
+        # Use the correct method: encrypt_ssn returns (encrypted, last_four)
+        ssn_encrypted, ssn_last_four = encryption_service.encrypt_ssn(ssn)
         
         existing = supabase.table("sensitive_data").select("id").eq("user_id", user_id).execute()
         
@@ -933,6 +943,8 @@ async def generate_i9_pdf(
         application = app_res.data
         user_id = application.get("user_id")
         
+        logger.info(f"Generating I-9 for application {application_id}, user_id: {user_id}")
+        
         steps_res = supabase.table("application_steps").select("step_number, data, is_completed").eq("application_id", application_id).order("step_number").execute()
         
         steps = {}
@@ -942,8 +954,9 @@ async def generate_i9_pdf(
                 "completed": step.get("is_completed", False)
             }
         
-        # Get SSN using the safe retrieval function
+        # Get SSN - this bypasses normal security for the I-9 form
         ssn = get_decrypted_ssn(supabase, user_id)
+        logger.info(f"SSN retrieval result: {'Found' if ssn else 'Not found'}")
         
         # Build document info from uploaded steps for Section 2
         # Step 12 = ID Front (List B - Identity)
@@ -954,11 +967,12 @@ async def generate_i9_pdf(
         step12_data = steps.get(12, {}).get("data", {})
         if step12_data.get("storage_path") or step12_data.get("file_name"):
             uploaded_docs["list_b"] = {
-                "title": "Driver's License",  # Most common ID type
+                "title": "Driver's License",
                 "issuing_authority": steps.get(2, {}).get("data", {}).get("state", "Virginia"),
-                "number": "",  # Would need to be entered manually
+                "number": "",
                 "expiration": "",
             }
+            logger.info("Found ID document for List B")
         
         # SSN Card (List C)
         step14_data = steps.get(14, {}).get("data", {})
@@ -966,9 +980,10 @@ async def generate_i9_pdf(
             uploaded_docs["list_c"] = {
                 "title": "Social Security Card",
                 "issuing_authority": "SSA",
-                "number": "",  # Don't put full SSN here, just indicate card exists
-                "expiration": "",  # SSN cards don't expire
+                "number": "",
+                "expiration": "N/A",
             }
+            logger.info("Found SSN card for List C")
         
         application_data = {
             "id": application_id,
@@ -1007,6 +1022,8 @@ async def generate_i9_pdf(
         raise HTTPException(status_code=404, detail=str(e))
     except Exception as e:
         logger.error(f"I-9 PDF generation error: {e}")
+        import traceback
+        logger.error(traceback.format_exc())
         raise HTTPException(status_code=500, detail=str(e))
 
 
