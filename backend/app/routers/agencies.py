@@ -27,6 +27,9 @@ class LocationResponse(BaseModel):
     email: Optional[str] = None
     is_hiring: bool = True
     is_active: bool = True
+    # I-9 representative fields
+    i9_representative_name: Optional[str] = None
+    i9_representative_title: Optional[str] = None
 
 
 class LocationUpdate(BaseModel):
@@ -40,6 +43,9 @@ class LocationUpdate(BaseModel):
     email: Optional[str] = None
     is_hiring: Optional[bool] = None
     is_active: Optional[bool] = None
+    # I-9 representative fields
+    i9_representative_name: Optional[str] = None
+    i9_representative_title: Optional[str] = None
 
 
 class LocationCreate(BaseModel):
@@ -52,6 +58,9 @@ class LocationCreate(BaseModel):
     phone: Optional[str] = None
     email: Optional[str] = None
     is_hiring: bool = True
+    # I-9 representative fields
+    i9_representative_name: Optional[str] = None
+    i9_representative_title: Optional[str] = None
 
 
 class AgencyResponse(BaseModel):
@@ -95,6 +104,19 @@ def generate_slug(name: str) -> str:
     return slug.strip('-')
 
 
+def build_location_response(loc: dict) -> LocationResponse:
+    """Build a LocationResponse from a database row."""
+    return LocationResponse(
+        id=loc["id"], name=loc["name"], slug=loc["slug"],
+        address_line1=loc.get("address_line1"), address_line2=loc.get("address_line2"),
+        city=loc["city"], state=loc["state"], zip=loc.get("zip"),
+        phone=loc.get("phone"), email=loc.get("email"),
+        is_hiring=loc.get("is_hiring", True), is_active=loc.get("is_active", True),
+        i9_representative_name=loc.get("i9_representative_name"),
+        i9_representative_title=loc.get("i9_representative_title")
+    )
+
+
 @router.get("/by-slug/{slug}", response_model=AgencyWithLocationsResponse)
 async def get_agency_by_slug(slug: str, supabase: Client = Depends(get_supabase)):
     """Get agency details by slug (public endpoint for apply page)."""
@@ -106,15 +128,7 @@ async def get_agency_by_slug(slug: str, supabase: Client = Depends(get_supabase)
     agency = agency_result.data
     locations_result = supabase.table("locations").select("*").eq("agency_id", agency["id"]).eq("is_active", True).eq("is_hiring", True).order("name").execute()
     
-    locations = [
-        LocationResponse(
-            id=loc["id"], name=loc["name"], slug=loc["slug"],
-            address_line1=loc.get("address_line1"), address_line2=loc.get("address_line2"),
-            city=loc["city"], state=loc["state"], zip=loc.get("zip"),
-            phone=loc.get("phone"), email=loc.get("email"), is_hiring=loc.get("is_hiring", True)
-        )
-        for loc in locations_result.data or []
-    ]
+    locations = [build_location_response(loc) for loc in locations_result.data or []]
     
     return AgencyWithLocationsResponse(
         id=agency["id"], name=agency["name"], slug=agency["slug"],
@@ -133,15 +147,7 @@ async def get_agency_locations(agency_id: str, hiring_only: bool = True, supabas
         query = query.eq("is_hiring", True)
     result = query.execute()
     
-    return [
-        LocationResponse(
-            id=loc["id"], name=loc["name"], slug=loc["slug"],
-            address_line1=loc.get("address_line1"), address_line2=loc.get("address_line2"),
-            city=loc["city"], state=loc["state"], zip=loc.get("zip"),
-            phone=loc.get("phone"), email=loc.get("email"), is_hiring=loc.get("is_hiring", True)
-        )
-        for loc in result.data or []
-    ]
+    return [build_location_response(loc) for loc in result.data or []]
 
 
 @router.get("/me", response_model=AgencyWithLocationsResponse)
@@ -160,15 +166,7 @@ async def get_my_agency(user: UserProfile = Depends(get_current_user), supabase:
     agency = agency_result.data
     locations_result = supabase.table("locations").select("*").eq("agency_id", agency_id).eq("is_active", True).order("name").execute()
     
-    locations = [
-        LocationResponse(
-            id=loc["id"], name=loc["name"], slug=loc["slug"],
-            address_line1=loc.get("address_line1"), address_line2=loc.get("address_line2"),
-            city=loc["city"], state=loc["state"], zip=loc.get("zip"),
-            phone=loc.get("phone"), email=loc.get("email"), is_hiring=loc.get("is_hiring", True)
-        )
-        for loc in locations_result.data or []
-    ]
+    locations = [build_location_response(loc) for loc in locations_result.data or []]
     
     return AgencyWithLocationsResponse(
         id=agency["id"], name=agency["name"], slug=agency["slug"],
@@ -259,17 +257,12 @@ async def create_location(location: LocationCreate, user: UserProfile = Depends(
         "address_line1": location.address_line1, "address_line2": location.address_line2,
         "city": location.city, "state": location.state, "zip": location.zip,
         "phone": location.phone, "email": location.email,
-        "is_hiring": location.is_hiring, "is_active": True
+        "is_hiring": location.is_hiring, "is_active": True,
+        "i9_representative_name": location.i9_representative_name,
+        "i9_representative_title": location.i9_representative_title
     }).execute()
     
-    loc = result.data[0]
-    return LocationResponse(
-        id=loc["id"], name=loc["name"], slug=loc["slug"],
-        address_line1=loc.get("address_line1"), address_line2=loc.get("address_line2"),
-        city=loc["city"], state=loc["state"], zip=loc.get("zip"),
-        phone=loc.get("phone"), email=loc.get("email"),
-        is_hiring=loc.get("is_hiring", True), is_active=loc.get("is_active", True)
-    )
+    return build_location_response(result.data[0])
 
 
 @router.put("/me/locations/{location_id}", response_model=LocationResponse)
@@ -286,15 +279,7 @@ async def update_location(location_id: str, updates: LocationUpdate, user: UserP
         raise HTTPException(status_code=status.HTTP_400_BAD_REQUEST, detail="No fields to update")
     
     result = supabase.table("locations").update(update_data).eq("id", location_id).execute()
-    loc = result.data[0]
-    
-    return LocationResponse(
-        id=loc["id"], name=loc["name"], slug=loc["slug"],
-        address_line1=loc.get("address_line1"), address_line2=loc.get("address_line2"),
-        city=loc["city"], state=loc["state"], zip=loc.get("zip"),
-        phone=loc.get("phone"), email=loc.get("email"),
-        is_hiring=loc.get("is_hiring", True), is_active=loc.get("is_active", True)
-    )
+    return build_location_response(result.data[0])
 
 
 @router.delete("/me/locations/{location_id}")
