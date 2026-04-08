@@ -97,8 +97,8 @@ const STEP_REQUIRED_FIELDS: Record<number, string[]> = {
   17: [],
   // Steps 18-21: More agreements (require both checkbox AND signature)
   18: ['agreed', 'signature'],
-  19: ['agreed', 'signature', 'attestation_confirmed'],
-  20: ['agreed', 'signature', 'disclosure_confirmed'],
+  19: ['agreed', 'signature'],
+  20: ['agreed', 'signature'],
   21: ['agreed', 'signature'],
   // Step 22: Final submission (requires all 3 checkboxes + signature)
   22: ['agreed_truthful', 'agreed_at_will', 'agreed_policies', 'signature'],
