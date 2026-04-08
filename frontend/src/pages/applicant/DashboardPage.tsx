@@ -38,6 +38,7 @@ interface ApplicantMessage {
   location_name?: string;
   created_at: string;
   updated_at: string;
+  read_at?: string | null;
 }
 
 const DOCUMENT_STEPS: Record<number, { name: string; category: string; required: boolean }> = {
@@ -136,6 +137,7 @@ export function ApplicantDashboardPage() {
   const [application, setApplication] = useState<Application | null>(null);
   const [steps, setSteps] = useState<ApplicationStep[]>([]);
   const [managerMessage, setManagerMessage] = useState<ApplicantMessage | null>(null);
+  const [markingRead, setMarkingRead] = useState(false);
   
   // Single-document upload modal state
   const [uploadModal, setUploadModal] = useState<{
@@ -184,7 +186,12 @@ export function ApplicantDashboardPage() {
       if (res.application?.id) {
         try {
           const msgRes = await api.get<{ message: ApplicantMessage | null }>(`/applicant-messages/${res.application.id}`);
-          setManagerMessage(msgRes.message);
+          // Only show message if it hasn't been read yet
+          if (msgRes.message && !msgRes.message.read_at) {
+            setManagerMessage(msgRes.message);
+          } else {
+            setManagerMessage(null);
+          }
         } catch (msgErr) {
           console.log('No message found or error loading message');
         }
@@ -197,6 +204,19 @@ export function ApplicantDashboardPage() {
       }
     } finally {
       setLoading(false);
+    }
+  };
+
+  const handleMarkAsRead = async () => {
+    if (!application || !managerMessage) return;
+    setMarkingRead(true);
+    try {
+      await api.post(`/applicant-messages/${application.id}/read`, {});
+      setManagerMessage(null); // Hide the message after marking as read
+    } catch (err) {
+      console.error('Error marking message as read:', err);
+    } finally {
+      setMarkingRead(false);
     }
   };
 
@@ -439,14 +459,23 @@ export function ApplicantDashboardPage() {
                 <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M7 8h10M7 12h4m1 8l-4-4H5a2 2 0 01-2-2V6a2 2 0 012-2h14a2 2 0 012 2v8a2 2 0 01-2 2h-3l-4 4z" />
               </svg>
             </div>
-            <div>
+            <div className="flex-1">
               <p className="text-sm font-semibold text-maroon">{formatMessageHeader(managerMessage)}</p>
               <p className="text-sm text-slate mt-1">{managerMessage.message}</p>
-              <p className="text-xs text-gray mt-2">
-                {new Date(managerMessage.updated_at || managerMessage.created_at).toLocaleDateString('en-US', { 
-                  weekday: 'short', month: 'short', day: 'numeric', hour: 'numeric', minute: '2-digit' 
-                })}
-              </p>
+              <div className="flex items-center justify-between mt-3">
+                <p className="text-xs text-gray">
+                  {new Date(managerMessage.updated_at || managerMessage.created_at).toLocaleDateString('en-US', { 
+                    weekday: 'short', month: 'short', day: 'numeric', hour: 'numeric', minute: '2-digit' 
+                  })}
+                </p>
+                <button
+                  onClick={handleMarkAsRead}
+                  disabled={markingRead}
+                  className="px-4 py-1.5 bg-maroon text-white text-sm font-medium rounded-lg hover:bg-maroon/90 transition-colors disabled:opacity-50"
+                >
+                  {markingRead ? 'Marking...' : 'Got it'}
+                </button>
+              </div>
             </div>
           </div>
         </div>
