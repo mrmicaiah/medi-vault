@@ -13,6 +13,7 @@ interface ApplicantMessage {
   posted_by_name: string;
   created_at: string;
   updated_at: string;
+  read_at?: string | null;
 }
 
 interface Applicant {
@@ -1146,9 +1147,25 @@ export function ApplicantsPage() {
                         <>
                           {applicantMessage ? (
                             <div className="bg-maroon/5 border border-maroon/20 rounded-lg p-3">
-                              <p className="text-sm text-slate">{applicantMessage.message}</p>
+                              <div className="flex items-start justify-between gap-2">
+                                <p className="text-sm text-slate flex-1">{applicantMessage.message}</p>
+                                {/* Read badge */}
+                                {applicantMessage.read_at && (
+                                  <span className="flex-shrink-0 inline-flex items-center gap-1 px-2 py-0.5 rounded-full text-xs font-medium bg-success/10 text-success">
+                                    <svg className="w-3 h-3" fill="none" viewBox="0 0 24 24" stroke="currentColor">
+                                      <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M5 13l4 4L19 7" />
+                                    </svg>
+                                    Read
+                                  </span>
+                                )}
+                              </div>
                               <p className="text-xs text-gray mt-2">
                                 Posted by {applicantMessage.posted_by_name} • {new Date(applicantMessage.updated_at || applicantMessage.created_at).toLocaleDateString('en-US', { month: 'short', day: 'numeric', hour: 'numeric', minute: '2-digit' })}
+                                {applicantMessage.read_at && (
+                                  <span className="ml-2 text-success">
+                                    • Read {new Date(applicantMessage.read_at).toLocaleDateString('en-US', { month: 'short', day: 'numeric', hour: 'numeric', minute: '2-digit' })}
+                                  </span>
+                                )}
                               </p>
                               <div className="flex gap-2 mt-3">
                                 <button
