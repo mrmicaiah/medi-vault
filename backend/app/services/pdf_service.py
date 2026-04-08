@@ -4,6 +4,7 @@ import io
 import os
 import logging
 import json
+import tempfile
 from pathlib import Path
 from datetime import datetime
 from typing import Optional, Dict, Any, List, Tuple
@@ -167,9 +168,7 @@ class PDFService:
         self,
         application_data: Dict[str, Any],
     ) -> bytes:
-        """
-        Generate the employment application PDF.
-        """
+        """Generate the employment application PDF."""
         steps = application_data.get("steps", {})
         
         step1_data = steps.get(1, {}).get("data", {})
@@ -255,154 +254,32 @@ class PDFService:
 
     def get_i9_field_names(self) -> List[str]:
         """Get all fillable field names from the I-9 PDF template."""
-        field_info = self._analyze_i9_fields()
-        return [f["field_id"] for f in field_info.get("fields", [])]
+        try:
+            import fillpdf
+            from fillpdf import fillpdfs
+            i9_path = str(self.assets_dir / "i-9.pdf")
+            fields = fillpdfs.get_form_fields(i9_path)
+            return list(fields.keys()) if fields else []
+        except Exception as e:
+            logger.error(f"Could not get I-9 field names: {e}")
+            return []
 
     def get_i9_field_info(self) -> Dict[str, Any]:
         """Get detailed information about all I-9 form fields."""
-        return self._analyze_i9_fields()
-
-    def _analyze_i9_fields(self) -> Dict[str, Any]:
-        """Analyze the I-9 PDF and extract field information."""
-        if self._i9_field_cache is not None:
-            return self._i9_field_cache
-
         try:
-            from pypdf import PdfReader
-        except ImportError:
-            raise RuntimeError("pypdf is required for I-9 analysis")
-
-        i9_path = self.assets_dir / "i-9.pdf"
-        if not i9_path.exists():
-            raise FileNotFoundError(f"I-9 template not found at {i9_path}")
-
-        reader = PdfReader(str(i9_path))
-        fields = reader.get_fields()
-        
-        result = {
-            "pdf_path": str(i9_path),
-            "page_count": len(reader.pages),
-            "is_fillable": bool(fields),
-            "fields": [],
-            "field_mapping": I9_FIELD_MAPPING,
-        }
-
-        if not fields:
-            logger.warning("I-9 PDF does not have fillable form fields")
-            self._i9_field_cache = result
-            return result
-
-        possible_radio_names = set()
-
-        for field_id, field in fields.items():
-            if field.get("/Kids"):
-                if field.get("/FT") == "/Btn":
-                    possible_radio_names.add(field_id)
-                continue
-
-            field_dict = self._make_field_dict(field, field_id)
-            if field_dict:
-                result["fields"].append(field_dict)
-
-        radio_fields = {}
-        for page_index, page in enumerate(reader.pages):
-            annotations = page.get('/Annots', [])
-            if not annotations:
-                continue
-            for ann in annotations:
-                try:
-                    ann_field_id = self._get_annotation_field_id(ann)
-                except Exception:
-                    continue
-
-                for fi in result["fields"]:
-                    if fi["field_id"] == ann_field_id:
-                        fi["page"] = page_index + 1
-                        try:
-                            fi["rect"] = [float(x) for x in ann.get('/Rect', [])]
-                        except (TypeError, ValueError):
-                            fi["rect"] = []
-                        break
-
-                if ann_field_id in possible_radio_names:
-                    try:
-                        on_values = [v for v in ann["/AP"]["/N"] if v != "/Off"]
-                    except (KeyError, TypeError):
-                        continue
-                    if len(on_values) == 1:
-                        if ann_field_id not in radio_fields:
-                            radio_fields[ann_field_id] = {
-                                "field_id": ann_field_id,
-                                "type": "radio_group",
-                                "page": page_index + 1,
-                                "radio_options": [],
-                            }
-                        try:
-                            rect = [float(x) for x in ann.get("/Rect", [])]
-                        except (TypeError, ValueError):
-                            rect = []
-                        radio_fields[ann_field_id]["radio_options"].append({
-                            "value": on_values[0],
-                            "rect": rect,
-                        })
-
-        result["fields"].extend(radio_fields.values())
-
-        def sort_key(f):
-            page = f.get("page", 0)
-            rect = f.get("rect", [0, 0, 0, 0])
-            if len(rect) >= 2:
-                return (page, -rect[1], rect[0])
-            return (page, 0, 0)
-        
-        result["fields"].sort(key=sort_key)
-
-        self._i9_field_cache = result
-        return result
-
-    def _make_field_dict(self, field, field_id: str) -> Optional[Dict]:
-        """Create a field dictionary from a PDF field object."""
-        field_dict = {"field_id": field_id}
-        ft = field.get('/FT')
-
-        if ft == "/Tx":
-            field_dict["type"] = "text"
-        elif ft == "/Btn":
-            field_dict["type"] = "checkbox"
-            states = field.get("/_States_", [])
-            if len(states) >= 2:
-                if "/Off" in states:
-                    field_dict["checked_value"] = states[0] if states[0] != "/Off" else states[1]
-                    field_dict["unchecked_value"] = "/Off"
-                else:
-                    field_dict["checked_value"] = states[0]
-                    field_dict["unchecked_value"] = states[1]
-        elif ft == "/Ch":
-            field_dict["type"] = "choice"
-            states = field.get("/_States_", [])
-            choice_options = []
-            for state in states:
-                if isinstance(state, (list, tuple)) and len(state) >= 2:
-                    choice_options.append({"value": state[0], "text": state[1]})
-                elif isinstance(state, str):
-                    choice_options.append({"value": state, "text": state})
-            field_dict["choice_options"] = choice_options
-        else:
-            field_dict["type"] = f"unknown ({ft})"
-            return None
-
-        return field_dict
-
-    def _get_annotation_field_id(self, annotation) -> Optional[str]:
-        """Get the full field ID from an annotation."""
-        components = []
-        current = annotation
-        while current:
-            field_name = current.get('/T')
-            if field_name:
-                components.append(str(field_name))
-            current = current.get('/Parent')
-        return ".".join(reversed(components)) if components else None
+            import fillpdf
+            from fillpdf import fillpdfs
+            i9_path = str(self.assets_dir / "i-9.pdf")
+            fields = fillpdfs.get_form_fields(i9_path)
+            return {
+                "pdf_path": i9_path,
+                "is_fillable": bool(fields),
+                "fields": fields if fields else {},
+                "field_mapping": I9_FIELD_MAPPING,
+            }
+        except Exception as e:
+            logger.error(f"Could not analyze I-9 fields: {e}")
+            return {"error": str(e)}
 
     def generate_i9_form(
         self,
@@ -413,56 +290,45 @@ class PDFService:
         """
         Generate I-9 form PDF by filling in the official template.
         
-        Uses direct field manipulation for better compatibility.
+        Uses fillpdf library for reliable form filling.
         """
         try:
-            from pypdf import PdfReader, PdfWriter
-            from pypdf.generic import NameObject, TextStringObject, ArrayObject
+            import fillpdf
+            from fillpdf import fillpdfs
         except ImportError:
-            raise RuntimeError("pypdf is required for I-9 generation")
+            raise RuntimeError("fillpdf is required for I-9 generation. Install with: pip install fillpdf")
 
         i9_path = self.assets_dir / "i-9.pdf"
         if not i9_path.exists():
             raise FileNotFoundError(f"I-9 template not found at {i9_path}")
 
-        reader = PdfReader(str(i9_path))
-        writer = PdfWriter()
-
-        # Clone the PDF
-        writer.clone_document_from_reader(reader)
-
-        # Check if form is fillable
-        if not reader.get_fields():
-            logger.warning("I-9 PDF is not fillable, returning original")
-            output = io.BytesIO()
-            writer.write(output)
-            return output.getvalue()
-
         # Extract applicant info from steps
         steps = application_data.get("steps", {})
         
         # Log for debugging
-        logger.info(f"I-9 generate_i9_form - steps keys: {list(steps.keys())}")
+        logger.info(f"I-9 generate_i9_form called")
+        logger.info(f"Steps keys: {list(steps.keys())}")
         
         # Try both int and string keys
         step2_data = steps.get(2, steps.get("2", {}))
-        if isinstance(step2_data, dict):
-            step2_data = step2_data.get("data", step2_data)
-        else:
-            step2_data = {}
+        if isinstance(step2_data, dict) and "data" in step2_data:
+            step2_data = step2_data.get("data", {})
             
         step1_data = steps.get(1, steps.get("1", {}))
-        if isinstance(step1_data, dict):
-            step1_data = step1_data.get("data", step1_data)
-        else:
-            step1_data = {}
+        if isinstance(step1_data, dict) and "data" in step1_data:
+            step1_data = step1_data.get("data", {})
         
-        logger.info(f"Step 2 data: {json.dumps(step2_data, default=str)[:500]}")
+        logger.info(f"Step 1 data type: {type(step1_data)}, keys: {list(step1_data.keys()) if isinstance(step1_data, dict) else 'N/A'}")
+        logger.info(f"Step 2 data type: {type(step2_data)}, keys: {list(step2_data.keys()) if isinstance(step2_data, dict) else 'N/A'}")
 
         # Use step 2 primarily, fall back to step 1
-        personal = {**step1_data, **step2_data}
+        personal = {}
+        if isinstance(step1_data, dict):
+            personal.update(step1_data)
+        if isinstance(step2_data, dict):
+            personal.update(step2_data)
         
-        logger.info(f"Personal info: first_name={personal.get('first_name')}, last_name={personal.get('last_name')}")
+        logger.info(f"Personal combined: first_name={personal.get('first_name')}, last_name={personal.get('last_name')}, email={personal.get('email')}")
 
         # Format date of birth as MM/DD/YYYY
         dob = personal.get("date_of_birth", "")
@@ -480,6 +346,7 @@ class PDFService:
             ssn_clean = ssn.replace("-", "").replace(" ", "")
             if len(ssn_clean) == 9:
                 ssn_formatted = f"{ssn_clean[:3]}-{ssn_clean[3:5]}-{ssn_clean[5:]}"
+            logger.info(f"SSN formatted (masked): ***-**-{ssn_clean[-4:] if len(ssn_clean) >= 4 else '****'}")
 
         # Get middle initial
         middle_name = personal.get("middle_name", "")
@@ -488,12 +355,12 @@ class PDFService:
         # Today's date
         today = datetime.now().strftime("%m/%d/%Y")
 
-        # Build field values
-        values_to_fill = {}
+        # Build field values using the EXACT field names from the PDF
+        field_data = {}
         
         def set_field(semantic_name: str, value: str):
             if value and semantic_name in I9_FIELD_MAPPING:
-                values_to_fill[I9_FIELD_MAPPING[semantic_name]] = str(value)
+                field_data[I9_FIELD_MAPPING[semantic_name]] = str(value)
 
         # Section 1 - Employee Information
         set_field("last_name", personal.get("last_name", ""))
@@ -514,85 +381,51 @@ class PDFService:
         # Citizenship - default to citizen
         citizenship = personal.get("citizenship_status", "citizen")
         if citizenship == "citizen" or not citizenship:
-            values_to_fill["CB_1"] = "/On"
+            field_data["CB_1"] = "Yes"  # fillpdf uses "Yes" for checkboxes
         elif citizenship == "noncitizen_national":
-            values_to_fill["CB_2"] = "/On"
+            field_data["CB_2"] = "Yes"
         elif citizenship == "lpr":
-            values_to_fill["CB_3"] = "/On"
+            field_data["CB_3"] = "Yes"
             set_field("lpr_uscis_number", personal.get("uscis_number", ""))
         elif citizenship == "alien_authorized":
-            values_to_fill["CB_4"] = "/On"
+            field_data["CB_4"] = "Yes"
 
-        logger.info(f"Filling {len(values_to_fill)} fields: {list(values_to_fill.keys())}")
+        logger.info(f"Filling {len(field_data)} fields")
+        logger.info(f"Field names being filled: {list(field_data.keys())}")
 
-        # Fill the form using update_page_form_field_values
-        if values_to_fill:
-            try:
-                # Get page 0
-                page = writer.pages[0]
-                
-                # Update form fields
-                writer.update_page_form_field_values(
-                    page,
-                    values_to_fill,
-                    auto_regenerate=False
-                )
-                
-                logger.info(f"Successfully filled I-9 form for: {personal.get('first_name', '')} {personal.get('last_name', '')}")
-                
-            except Exception as e:
-                logger.error(f"Failed to fill form fields: {e}")
-                # Try alternative method - direct field update
-                try:
-                    self._fill_fields_directly(writer, values_to_fill)
-                except Exception as e2:
-                    logger.error(f"Alternative fill method also failed: {e2}")
+        # Create temporary files for fillpdf
+        with tempfile.NamedTemporaryFile(suffix=".pdf", delete=False) as output_file:
+            output_path = output_file.name
 
-        # Ensure appearances are regenerated
         try:
-            if "/AcroForm" in writer._root_object:
-                writer._root_object["/AcroForm"].update({
-                    NameObject("/NeedAppearances"): NameObject("/true")
-                })
+            # Fill the PDF using fillpdf
+            fillpdfs.write_fillable_pdf(
+                str(i9_path),
+                output_path,
+                field_data,
+                flatten=False  # Keep form fillable
+            )
+            
+            logger.info(f"Successfully filled I-9 for: {personal.get('first_name', '')} {personal.get('last_name', '')}")
+            
+            # Read the output file
+            with open(output_path, "rb") as f:
+                pdf_bytes = f.read()
+            
+            return pdf_bytes
+            
         except Exception as e:
-            logger.debug(f"Could not set NeedAppearances: {e}")
-
-        # Write to bytes
-        output = io.BytesIO()
-        writer.write(output)
-        output.seek(0)
-        return output.getvalue()
-
-    def _fill_fields_directly(self, writer, values_to_fill: Dict[str, str]):
-        """Alternative method to fill fields by directly modifying annotations."""
-        from pypdf.generic import NameObject, TextStringObject, ArrayObject
-        
-        for page in writer.pages:
-            if "/Annots" not in page:
-                continue
-                
-            annotations = page["/Annots"]
-            for annot in annotations:
-                try:
-                    annot_obj = annot.get_object()
-                    field_name = annot_obj.get("/T")
-                    
-                    if field_name and str(field_name) in values_to_fill:
-                        value = values_to_fill[str(field_name)]
-                        
-                        # Set the value
-                        annot_obj.update({
-                            NameObject("/V"): TextStringObject(value)
-                        })
-                        
-                        # Clear any existing appearance stream to force regeneration
-                        if "/AP" in annot_obj:
-                            del annot_obj["/AP"]
-                            
-                        logger.debug(f"Filled field {field_name} = {value}")
-                        
-                except Exception as e:
-                    logger.debug(f"Could not process annotation: {e}")
+            logger.error(f"fillpdf failed: {e}")
+            # Fall back to returning original PDF
+            logger.warning("Falling back to original PDF without filling")
+            with open(i9_path, "rb") as f:
+                return f.read()
+        finally:
+            # Clean up temp file
+            try:
+                os.unlink(output_path)
+            except Exception:
+                pass
 
     def clear_i9_cache(self):
         """Clear the cached I-9 field analysis."""
