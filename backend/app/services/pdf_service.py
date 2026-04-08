@@ -289,7 +289,7 @@ class PDFService:
         Uses pypdf with proper AcroForm handling.
         """
         from pypdf import PdfReader, PdfWriter
-        from pypdf.generic import NameObject, TextStringObject, BooleanObject, DictionaryObject, ArrayObject
+        from pypdf.generic import NameObject, TextStringObject, BooleanObject
 
         i9_path = self.assets_dir / "i-9.pdf"
         if not i9_path.exists():
@@ -379,17 +379,51 @@ class PDFService:
         set_field("phone", personal.get("phone", ""))
         set_field("employee_signature_date", today)
 
-        # Citizenship - default to citizen
+        # Citizenship - check citizenship_status from step 1
         citizenship = personal.get("citizenship_status", "citizen")
-        if citizenship == "citizen" or not citizenship:
+        if citizenship == "citizen" or citizenship == "us_citizen" or not citizenship:
             field_data["CB_1"] = "/On"
         elif citizenship == "noncitizen_national":
             field_data["CB_2"] = "/On"
-        elif citizenship == "lpr":
+        elif citizenship == "lpr" or citizenship == "permanent_resident":
             field_data["CB_3"] = "/On"
             set_field("lpr_uscis_number", personal.get("uscis_number", ""))
-        elif citizenship == "alien_authorized":
+        elif citizenship == "alien_authorized" or citizenship == "work_visa":
             field_data["CB_4"] = "/On"
+
+        # Section 2 - Employer fills out (if employer_data provided)
+        if employer_data:
+            set_field("first_day_employment", employer_data.get("first_day", today))
+            set_field("employer_organization", employer_data.get("organization", "Eveready Home Care"))
+            
+            # Combine employer address
+            emp_addr = employer_data.get("address", "2700 S. Quincy Street Suite #220")
+            emp_city = employer_data.get("city", "Arlington")
+            emp_state = employer_data.get("state", "VA")
+            emp_zip = employer_data.get("zip", "22206")
+            full_address = f"{emp_addr}, {emp_city}, {emp_state} {emp_zip}"
+            set_field("employer_address", full_address)
+            
+            # Document info from uploaded steps
+            docs = employer_data.get("documents", {})
+            
+            # List B - Identity document (Driver's License)
+            if docs.get("list_b"):
+                doc = docs["list_b"]
+                set_field("list_b_doc_title", doc.get("title", "Driver's License"))
+                set_field("list_b_issuing", doc.get("issuing_authority", ""))
+                set_field("list_b_doc_number", doc.get("number", ""))
+                set_field("list_b_expiration", doc.get("expiration", ""))
+                logger.info(f"Filled List B: {doc.get('title', 'Driver\\'s License')}")
+            
+            # List C - Employment authorization (Social Security Card)
+            if docs.get("list_c"):
+                doc = docs["list_c"]
+                set_field("list_c_doc_title", doc.get("title", "Social Security Card"))
+                set_field("list_c_issuing", doc.get("issuing_authority", "SSA"))
+                set_field("list_c_doc_number", doc.get("number", ""))
+                set_field("list_c_expiration", doc.get("expiration", "N/A"))
+                logger.info(f"Filled List C: {doc.get('title', 'Social Security Card')}")
 
         logger.info(f"Filling {len(field_data)} fields: {list(field_data.keys())}")
 
