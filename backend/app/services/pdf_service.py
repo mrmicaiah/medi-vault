@@ -305,7 +305,7 @@ class PDFService:
         # Extract applicant info from steps
         steps = application_data.get("steps", {})
         
-        logger.info(f"I-9 generate_i9_form called")
+        logger.info("I-9 generate_i9_form called")
         logger.info(f"Steps keys: {list(steps.keys())}")
         
         # Get step data
@@ -327,7 +327,10 @@ class PDFService:
         if isinstance(step2_data, dict):
             personal.update(step2_data)
         
-        logger.info(f"Personal data: first_name={personal.get('first_name')}, last_name={personal.get('last_name')}, email={personal.get('email')}")
+        first_name = personal.get('first_name', '')
+        last_name = personal.get('last_name', '')
+        email = personal.get('email', '')
+        logger.info(f"Personal data: first_name={first_name}, last_name={last_name}, email={email}")
 
         # Format date of birth as MM/DD/YYYY
         dob = personal.get("date_of_birth", "")
@@ -410,20 +413,22 @@ class PDFService:
             # List B - Identity document (Driver's License)
             if docs.get("list_b"):
                 doc = docs["list_b"]
-                set_field("list_b_doc_title", doc.get("title", "Driver's License"))
+                doc_title = doc.get("title", "Driver's License")
+                set_field("list_b_doc_title", doc_title)
                 set_field("list_b_issuing", doc.get("issuing_authority", ""))
                 set_field("list_b_doc_number", doc.get("number", ""))
                 set_field("list_b_expiration", doc.get("expiration", ""))
-                logger.info(f"Filled List B: {doc.get('title', 'Driver\\'s License')}")
+                logger.info(f"Filled List B: {doc_title}")
             
             # List C - Employment authorization (Social Security Card)
             if docs.get("list_c"):
                 doc = docs["list_c"]
-                set_field("list_c_doc_title", doc.get("title", "Social Security Card"))
+                doc_title = doc.get("title", "Social Security Card")
+                set_field("list_c_doc_title", doc_title)
                 set_field("list_c_issuing", doc.get("issuing_authority", "SSA"))
                 set_field("list_c_doc_number", doc.get("number", ""))
                 set_field("list_c_expiration", doc.get("expiration", "N/A"))
-                logger.info(f"Filled List C: {doc.get('title', 'Social Security Card')}")
+                logger.info(f"Filled List C: {doc_title}")
 
         logger.info(f"Filling {len(field_data)} fields: {list(field_data.keys())}")
 
