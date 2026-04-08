@@ -270,21 +270,29 @@ class PDFService:
         radio_fields = {}
         for page_index, page in enumerate(reader.pages):
             annotations = page.get('/Annots', [])
+            if not annotations:
+                continue
             for ann in annotations:
-                ann_field_id = self._get_annotation_field_id(ann)
+                try:
+                    ann_field_id = self._get_annotation_field_id(ann)
+                except Exception:
+                    continue
 
                 # Find matching field and add page info
                 for fi in result["fields"]:
                     if fi["field_id"] == ann_field_id:
                         fi["page"] = page_index + 1
-                        fi["rect"] = [float(x) for x in ann.get('/Rect', [])]
+                        try:
+                            fi["rect"] = [float(x) for x in ann.get('/Rect', [])]
+                        except (TypeError, ValueError):
+                            fi["rect"] = []
                         break
 
                 # Handle radio buttons
                 if ann_field_id in possible_radio_names:
                     try:
                         on_values = [v for v in ann["/AP"]["/N"] if v != "/Off"]
-                    except KeyError:
+                    except (KeyError, TypeError):
                         continue
                     if len(on_values) == 1:
                         if ann_field_id not in radio_fields:
@@ -294,20 +302,27 @@ class PDFService:
                                 "page": page_index + 1,
                                 "radio_options": [],
                             }
+                        try:
+                            rect = [float(x) for x in ann.get("/Rect", [])]
+                        except (TypeError, ValueError):
+                            rect = []
                         radio_fields[ann_field_id]["radio_options"].append({
                             "value": on_values[0],
-                            "rect": [float(x) for x in ann.get("/Rect", [])],
+                            "rect": rect,
                         })
 
         # Add radio fields
         result["fields"].extend(radio_fields.values())
 
         # Sort by page and position
-        result["fields"].sort(key=lambda f: (
-            f.get("page", 0),
-            -f.get("rect", [0, 0, 0, 0])[1] if f.get("rect") else 0,
-            f.get("rect", [0, 0, 0, 0])[0] if f.get("rect") else 0
-        ))
+        def sort_key(f):
+            page = f.get("page", 0)
+            rect = f.get("rect", [0, 0, 0, 0])
+            if len(rect) >= 2:
+                return (page, -rect[1], rect[0])
+            return (page, 0, 0)
+        
+        result["fields"].sort(key=sort_key)
 
         # Auto-generate field mapping
         result["field_mapping"] = self._auto_map_i9_fields(result["fields"])
@@ -325,7 +340,7 @@ class PDFService:
         elif ft == "/Btn":
             field_dict["type"] = "checkbox"
             states = field.get("/_States_", [])
-            if len(states) == 2:
+            if len(states) >= 2:
                 if "/Off" in states:
                     field_dict["checked_value"] = states[0] if states[0] != "/Off" else states[1]
                     field_dict["unchecked_value"] = "/Off"
@@ -335,10 +350,14 @@ class PDFService:
         elif ft == "/Ch":
             field_dict["type"] = "choice"
             states = field.get("/_States_", [])
-            field_dict["choice_options"] = [
-                {"value": state[0], "text": state[1]}
-                for state in states
-            ]
+            # Handle different formats of choice options
+            choice_options = []
+            for state in states:
+                if isinstance(state, (list, tuple)) and len(state) >= 2:
+                    choice_options.append({"value": state[0], "text": state[1]})
+                elif isinstance(state, str):
+                    choice_options.append({"value": state, "text": state})
+            field_dict["choice_options"] = choice_options
         else:
             field_dict["type"] = f"unknown ({ft})"
             return None
@@ -348,11 +367,12 @@ class PDFService:
     def _get_annotation_field_id(self, annotation) -> Optional[str]:
         """Get the full field ID from an annotation."""
         components = []
-        while annotation:
-            field_name = annotation.get('/T')
+        current = annotation
+        while current:
+            field_name = current.get('/T')
             if field_name:
-                components.append(field_name)
-            annotation = annotation.get('/Parent')
+                components.append(str(field_name))
+            current = current.get('/Parent')
         return ".".join(reversed(components)) if components else None
 
     def _auto_map_i9_fields(self, fields: List[Dict]) -> Dict[str, str]:
