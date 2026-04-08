@@ -34,6 +34,8 @@ interface ApplicantMessage {
   id: string;
   message: string;
   posted_by_name: string;
+  posted_by_first_name?: string;
+  location_name?: string;
   created_at: string;
   updated_at: string;
 }
@@ -386,6 +388,17 @@ export function ApplicantDashboardPage() {
     return null;
   };
 
+  // Format the manager message header
+  const formatMessageHeader = (msg: ApplicantMessage): string => {
+    const firstName = msg.posted_by_first_name || msg.posted_by_name?.split(' ')[0] || 'Manager';
+    const location = msg.location_name;
+    
+    if (location) {
+      return `Important note from ${firstName}, Manager at ${location}`;
+    }
+    return `Important note from ${firstName}, Manager`;
+  };
+
   if (loading) {
     return (
       <div className="flex h-64 items-center justify-center">
@@ -427,7 +440,7 @@ export function ApplicantDashboardPage() {
               </svg>
             </div>
             <div>
-              <p className="text-sm font-semibold text-maroon">Message from {managerMessage.posted_by_name}</p>
+              <p className="text-sm font-semibold text-maroon">{formatMessageHeader(managerMessage)}</p>
               <p className="text-sm text-slate mt-1">{managerMessage.message}</p>
               <p className="text-xs text-gray mt-2">
                 {new Date(managerMessage.updated_at || managerMessage.created_at).toLocaleDateString('en-US', { 
