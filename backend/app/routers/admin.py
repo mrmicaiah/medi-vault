@@ -144,19 +144,13 @@ def get_location_names(supabase: Client, location_ids: List[str]) -> Dict[str, s
 def get_staff_location_filter(user: dict, requested_location: Optional[str] = None) -> Optional[str]:
     """
     Get the location_id to filter queries by.
-    
-    - Superadmin: Returns requested_location if provided, else None (sees everything)
-    - Admin: Returns requested_location if provided, else None (sees all in agency)
-    - Manager: Always returns their assigned location_id (ignores requested_location)
     """
     role = user.get("role", "")
     profile = user.get("profile", {})
     
-    # Superadmins and Admins can filter by any location or see all
     if role in ("superadmin", "admin"):
-        return requested_location  # None means all, or specific location if requested
+        return requested_location
     
-    # Managers always see only their location
     location_id = profile.get("location_id")
     return location_id
 
@@ -182,6 +176,29 @@ def get_applicant_position(supabase: Client, application_id: str) -> tuple[str, 
     return "", "Home Care Worker"
 
 
+def get_decrypted_ssn(supabase: Client, user_id: str) -> Optional[str]:
+    """
+    Safely retrieve and decrypt SSN for a user.
+    Returns None if not found or decryption fails.
+    """
+    try:
+        # Use .execute() without .single() to avoid errors on 0 rows
+        ssn_res = supabase.table("sensitive_data").select("ssn_encrypted").eq("user_id", user_id).execute()
+        
+        if ssn_res.data and len(ssn_res.data) > 0:
+            ssn_encrypted = ssn_res.data[0].get("ssn_encrypted")
+            if ssn_encrypted:
+                ssn = encryption_service.decrypt(ssn_encrypted)
+                logger.info(f"Successfully decrypted SSN for user {user_id}")
+                return ssn
+        
+        logger.info(f"No SSN found in sensitive_data for user {user_id}")
+        return None
+    except Exception as e:
+        logger.warning(f"Could not decrypt SSN for user {user_id}: {e}")
+        return None
+
+
 @router.get("/dashboard")
 @router.get("/dashboard/")
 async def get_dashboard_stats(
@@ -193,7 +210,6 @@ async def get_dashboard_stats(
         now = datetime.utcnow()
         thirty_days_ago = (now - timedelta(days=30)).isoformat()
         
-        # Get location filter for this staff member
         location_filter = get_staff_location_filter(user, location_id)
         
         stats = {
@@ -204,13 +220,11 @@ async def get_dashboard_stats(
             "recent_activity": []
         }
         
-        # Build queries with optional location filter
         apps_query = supabase.table("applications").select("id", count="exact")
         pending_query = supabase.table("applications").select("id", count="exact").eq("status", "submitted")
         approved_query = supabase.table("applications").select("id", count="exact").eq("status", "approved").gte("updated_at", thirty_days_ago)
         recent_query = supabase.table("applications").select("id, status, updated_at, profiles!applications_user_id_fkey(first_name, last_name)").order("updated_at", desc=True).limit(5)
         
-        # Apply location filter if set
         if location_filter:
             apps_query = apps_query.eq("location_id", location_filter)
             pending_query = pending_query.eq("location_id", location_filter)
@@ -257,23 +271,19 @@ async def get_pipeline(
     user: dict = Depends(get_staff_user)
 ):
     try:
-        # Get location filter for this staff member
         location_filter = get_staff_location_filter(user, location_id)
         
         query = supabase.table("applications").select(
             "id, user_id, status, created_at, submitted_at, updated_at, current_step, location_id, profiles!applications_user_id_fkey(first_name, last_name, email), locations(name)"
         ).order("created_at", desc=True)
         
-        # Apply location filter if set
         if location_filter:
             query = query.eq("location_id", location_filter)
         
         res = query.execute()
         
-        # Get all application IDs to fetch step 1 data (position_applied)
         app_ids = [app.get("id") for app in (res.data or []) if app.get("id")]
         
-        # Fetch step 1 (Application Basics) for all applications to get position
         position_map = {}
         if app_ids:
             steps_res = supabase.table("application_steps").select(
@@ -351,9 +361,9 @@ async def get_applicant_detail(
         
         ssn_last_four = None
         try:
-            ssn_res = supabase.table("sensitive_data").select("ssn_last_four").eq("user_id", user_id).single().execute()
-            if ssn_res.data:
-                ssn_last_four = ssn_res.data.get("ssn_last_four")
+            ssn_res = supabase.table("sensitive_data").select("ssn_last_four").eq("user_id", user_id).execute()
+            if ssn_res.data and len(ssn_res.data) > 0:
+                ssn_last_four = ssn_res.data[0].get("ssn_last_four")
         except:
             pass
         
@@ -460,16 +470,15 @@ async def get_applicant_ssn(
         
         user_id = app_res.data.get("user_id")
         
-        ssn_res = supabase.table("sensitive_data").select("ssn_encrypted").eq("user_id", user_id).single().execute()
-        if not ssn_res.data or not ssn_res.data.get("ssn_encrypted"):
+        ssn = get_decrypted_ssn(supabase, user_id)
+        if not ssn:
             raise HTTPException(status_code=404, detail="SSN not on file")
         
-        ssn_raw = encryption_service.decrypt(ssn_res.data["ssn_encrypted"])
-        ssn_formatted = f"{ssn_raw[:3]}-{ssn_raw[3:5]}-{ssn_raw[5:]}" if len(ssn_raw) == 9 else ssn_raw
+        ssn_formatted = f"{ssn[:3]}-{ssn[3:5]}-{ssn[5:]}" if len(ssn) == 9 else ssn
         
         logger.info(f"SSN revealed for application {application_id} by user {user['user_id']}")
         
-        return {"ssn": ssn_formatted, "ssn_raw": ssn_raw}
+        return {"ssn": ssn_formatted, "ssn_raw": ssn}
     except HTTPException:
         raise
     except Exception as e:
@@ -502,7 +511,7 @@ async def update_applicant_ssn(
         
         existing = supabase.table("sensitive_data").select("id").eq("user_id", user_id).execute()
         
-        if existing.data:
+        if existing.data and len(existing.data) > 0:
             supabase.table("sensitive_data").update({
                 "ssn_encrypted": ssn_encrypted,
                 "ssn_last_four": ssn_last_four,
@@ -537,7 +546,6 @@ async def get_employees(
     try:
         location_filter = get_staff_location_filter(user, location_id)
         
-        # Query employees WITHOUT the locations join (no FK constraint)
         query = supabase.table("employees").select(
             "id, user_id, status, position, hire_date, termination_date, created_at, location_id, profiles(first_name, last_name, email, phone)"
         ).order("created_at", desc=True)
@@ -547,7 +555,6 @@ async def get_employees(
         
         res = query.execute()
         
-        # Fetch location names separately
         location_ids = [emp.get("location_id") for emp in (res.data or []) if emp.get("location_id")]
         location_map = get_location_names(supabase, location_ids)
         
@@ -770,7 +777,6 @@ async def preview_agreement_html(
         step2_res = supabase.table("application_steps").select("data").eq("application_id", application_id).eq("step_number", 2).single().execute()
         personal_info = step2_res.data.get("data") if step2_res.data else {}
         
-        # Get position info for job description agreement
         position_type, position_title = get_applicant_position(supabase, application_id)
         
         context = {
@@ -936,13 +942,33 @@ async def generate_i9_pdf(
                 "completed": step.get("is_completed", False)
             }
         
-        ssn = None
-        try:
-            ssn_res = supabase.table("sensitive_data").select("ssn_encrypted").eq("user_id", user_id).single().execute()
-            if ssn_res.data and ssn_res.data.get("ssn_encrypted"):
-                ssn = encryption_service.decrypt(ssn_res.data["ssn_encrypted"])
-        except Exception as e:
-            logger.warning(f"Could not decrypt SSN for I-9: {e}")
+        # Get SSN using the safe retrieval function
+        ssn = get_decrypted_ssn(supabase, user_id)
+        
+        # Build document info from uploaded steps for Section 2
+        # Step 12 = ID Front (List B - Identity)
+        # Step 14 = Social Security Card (List C - Employment Authorization)
+        uploaded_docs = {}
+        
+        # ID document (List B)
+        step12_data = steps.get(12, {}).get("data", {})
+        if step12_data.get("storage_path") or step12_data.get("file_name"):
+            uploaded_docs["list_b"] = {
+                "title": "Driver's License",  # Most common ID type
+                "issuing_authority": steps.get(2, {}).get("data", {}).get("state", "Virginia"),
+                "number": "",  # Would need to be entered manually
+                "expiration": "",
+            }
+        
+        # SSN Card (List C)
+        step14_data = steps.get(14, {}).get("data", {})
+        if step14_data.get("storage_path") or step14_data.get("file_name"):
+            uploaded_docs["list_c"] = {
+                "title": "Social Security Card",
+                "issuing_authority": "SSA",
+                "number": "",  # Don't put full SSN here, just indicate card exists
+                "expiration": "",  # SSN cards don't expire
+            }
         
         application_data = {
             "id": application_id,
@@ -951,7 +977,17 @@ async def generate_i9_pdf(
             "steps": steps
         }
         
-        pdf_bytes = pdf_service.generate_i9_form(application_data, ssn)
+        # Build employer data for Section 2
+        employer_data = {
+            "organization": "Eveready Home Care",
+            "address": "2700 S. Quincy Street Suite #220",
+            "city": "Arlington",
+            "state": "VA",
+            "zip": "22206",
+            "documents": uploaded_docs,
+        }
+        
+        pdf_bytes = pdf_service.generate_i9_form(application_data, ssn, employer_data)
         
         step2 = steps.get(2, {}).get("data", {})
         first_name = step2.get("first_name", "Applicant")
@@ -1012,7 +1048,6 @@ async def generate_agreement_pdf(
         step2_res = supabase.table("application_steps").select("data").eq("application_id", application_id).eq("step_number", 2).single().execute()
         personal_info = step2_res.data.get("data") if step2_res.data else {}
         
-        # Get position info for job description agreement
         position_type, position_title = get_applicant_position(supabase, application_id)
         
         context = {
@@ -1083,8 +1118,8 @@ async def get_employee_documents(
         employee = emp_res.data
         user_id = employee.get("user_id")
         
-        app_res = supabase.table("applications").select("id").eq("user_id", user_id).single().execute()
-        application_id = app_res.data.get("id") if app_res.data else None
+        app_res = supabase.table("applications").select("id").eq("user_id", user_id).execute()
+        application_id = app_res.data[0].get("id") if app_res.data and len(app_res.data) > 0 else None
         
         documents = {
             "uploaded": [],
@@ -1335,14 +1370,9 @@ async def get_unassigned_employees(
     supabase: Client = Depends(get_supabase),
     user: dict = Depends(get_staff_user)
 ):
-    """
-    Get active employees who don't have any active client assignments.
-    These are employees ready to be assigned to clients.
-    """
     try:
         location_filter = get_staff_location_filter(user, location_id)
         
-        # Query WITHOUT locations join (no FK constraint in DB)
         emp_query = supabase.table("employees").select(
             "id, user_id, status, position, hire_date, location_id, "
             "profiles(first_name, last_name, email, phone)"
@@ -1356,7 +1386,6 @@ async def get_unassigned_employees(
         if not emp_res.data:
             return {"unassigned_employees": [], "total": 0}
         
-        # Fetch location names separately
         location_ids = [emp.get("location_id") for emp in emp_res.data if emp.get("location_id")]
         location_map = get_location_names(supabase, location_ids)
         
