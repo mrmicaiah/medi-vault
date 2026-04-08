@@ -80,10 +80,23 @@ export function useApplication() {
         stepsMap[step.step_number] = { data: step.data || {}, status: step.status };
       });
 
-      // Use initialStep if provided, otherwise use server's current_step
-      const stepToUse = initialStep && initialStep >= 1 && initialStep <= 22 
-        ? initialStep 
-        : res.application.current_step;
+      // Determine the furthest step the user has reached
+      // This is the highest step number they have data for, or current_step from server
+      const furthestReachedStep = Math.max(
+        res.application.current_step,
+        ...Object.keys(stepsMap).map(Number).filter(n => !isNaN(n))
+      );
+
+      // Only allow jumping to a step if it's within the range they've reached
+      // This prevents URL manipulation to skip ahead
+      let stepToUse = res.application.current_step;
+      if (initialStep && initialStep >= 1 && initialStep <= 22) {
+        // Allow going back to previous steps, but not beyond what they've reached
+        if (initialStep <= furthestReachedStep) {
+          stepToUse = initialStep;
+        }
+        // If they try to jump ahead, just go to their current step
+      }
 
       initialDataRef.current = stepsMap[stepToUse]?.data || {};
 

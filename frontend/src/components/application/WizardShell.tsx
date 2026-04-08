@@ -84,9 +84,9 @@ const STEP_REQUIRED_FIELDS: Record<number, string[]> = {
     'comfortable_with_pets',
     'comfortable_with_smokers',
   ],
-  // Steps 9-10: Agreements
-  9: ['signature'],
-  10: ['signature'],
+  // Steps 9-10: Agreements (require both checkbox AND signature)
+  9: ['agreed', 'signature'],
+  10: ['agreed', 'signature'],
   // Steps 11-17: Upload steps
   11: ['worker_type', 'document_type'],
   12: ['id_type', 'id_number', 'issuing_state', 'expiration_date'],
@@ -95,13 +95,13 @@ const STEP_REQUIRED_FIELDS: Record<number, string[]> = {
   15: [],
   16: [],
   17: [],
-  // Steps 18-21: More agreements
-  18: ['signature'],
-  19: ['signature', 'attestation_confirmed'],
-  20: ['signature', 'disclosure_confirmed'],
-  21: ['signature'],
-  // Step 22: Final submission
-  22: [],
+  // Steps 18-21: More agreements (require both checkbox AND signature)
+  18: ['agreed', 'signature'],
+  19: ['agreed', 'signature', 'attestation_confirmed'],
+  20: ['agreed', 'signature', 'disclosure_confirmed'],
+  21: ['agreed', 'signature'],
+  // Step 22: Final submission (requires all 3 checkboxes + signature)
+  22: ['agreed_truthful', 'agreed_at_will', 'agreed_policies', 'signature'],
 };
 
 // Steps that require a file upload (when not skipped)
