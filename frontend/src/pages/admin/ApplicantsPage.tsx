@@ -6,6 +6,32 @@ import { api } from '../../lib/api';
 import { supabase } from '../../lib/supabase';
 import { useAuth } from '../../hooks/useAuth';
 
+// Per-applicant note from manager (visible at top of page)
+const APPLICANT_NOTE_KEY = 'medivault_applicant_note';
+
+interface ApplicantNote {
+  message: string;
+  managerName: string;
+  timestamp: number;
+  applicantId: string;
+  applicantName: string;
+}
+
+const getApplicantNote = (): ApplicantNote | null => {
+  try {
+    const stored = localStorage.getItem(APPLICANT_NOTE_KEY);
+    return stored ? JSON.parse(stored) : null;
+  } catch { return null; }
+};
+
+const setApplicantNote = (note: ApplicantNote | null) => {
+  if (note) {
+    localStorage.setItem(APPLICANT_NOTE_KEY, JSON.stringify(note));
+  } else {
+    localStorage.removeItem(APPLICANT_NOTE_KEY);
+  }
+};
+
 interface Applicant {
   id: string;
   user_id: string;
@@ -134,11 +160,16 @@ const TOTAL_STEPS = 22;
 export function ApplicantsPage() {
   const navigate = useNavigate();
   const fileInputRef = useRef<HTMLInputElement>(null);
-  const { role } = useAuth();
+  const { role, profile } = useAuth();
   
   // Admins can filter by location, managers see only their location
   const isAdmin = role === 'admin' || role === 'superadmin';
   const [selectedLocationFilter, setSelectedLocationFilter] = useState<string>('');
+  
+  // Per-applicant note state (posted from side panel, shown at top)
+  const [applicantNote, setApplicantNoteState] = useState<ApplicantNote | null>(null);
+  const [noteDraft, setNoteDraft] = useState('');
+  const [showNoteCompose, setShowNoteCompose] = useState(false);
   
   const [applicants, setApplicants] = useState<Applicant[]>([]);
   const [loading, setLoading] = useState(true);
@@ -187,6 +218,11 @@ export function ApplicantsPage() {
 
   const [showDeleteConfirm, setShowDeleteConfirm] = useState(false);
   const [deleting, setDeleting] = useState(false);
+
+  // Load applicant note on mount
+  useEffect(() => {
+    setApplicantNoteState(getApplicantNote());
+  }, []);
 
   useEffect(() => {
     loadApplicants();
@@ -353,6 +389,8 @@ export function ApplicantsPage() {
     setRevealedSsn(null);
     setEditingSsn(false);
     setPreviewDoc(null);
+    setShowNoteCompose(false);
+    setNoteDraft('');
     
     const cached = detailCache.get(applicant.id);
     if (cached) {
@@ -402,7 +440,7 @@ export function ApplicantsPage() {
         how_heard: step1.how_heard as string,
         first_name: (step2.first_name as string) || (profile.first_name as string),
         last_name: (step2.last_name as string) || (profile.last_name as string),
-        email: (step2.email as string) || (profile.email as string),
+        email: (profile.email as string) || (step2.email as string),
         phone: (step2.phone as string) || (profile.phone as string),
         city: step2.city as string,
         address_line1: step2.address_line1 as string,
@@ -558,6 +596,8 @@ export function ApplicantsPage() {
     setRevealedSsn(null);
     setEditingSsn(false);
     setPreviewDoc(null);
+    setShowNoteCompose(false);
+    setNoteDraft('');
     setTimeout(() => {
       setSelectedApplicant(null);
       setApplicantDetail(null);
@@ -810,6 +850,45 @@ export function ApplicantsPage() {
 
   return (
     <div className="space-y-6">
+      {/* Per-Applicant Note Banner (posted from side panel) */}
+      {applicantNote && (
+        <div className="bg-gradient-to-r from-amber-50 to-amber-50/50 rounded-xl border border-amber-200 p-4">
+          <div className="flex items-start justify-between gap-4">
+            <div className="flex items-start gap-3">
+              <div className="w-10 h-10 rounded-full bg-amber-100 flex items-center justify-center flex-shrink-0">
+                <svg className="w-5 h-5 text-amber-600" fill="none" viewBox="0 0 24 24" stroke="currentColor">
+                  <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M7 8h10M7 12h4m1 8l-4-4H5a2 2 0 01-2-2V6a2 2 0 012-2h14a2 2 0 012 2v8a2 2 0 01-2 2h-3l-4 4z" />
+                </svg>
+              </div>
+              <div>
+                <p className="text-sm font-semibold text-amber-800">
+                  Note about {applicantNote.applicantName}
+                  <span className="font-normal text-amber-600 ml-2">— from {applicantNote.managerName}</span>
+                </p>
+                <p className="text-sm text-slate mt-1">{applicantNote.message}</p>
+                <p className="text-xs text-gray mt-2">
+                  Posted {new Date(applicantNote.timestamp).toLocaleDateString('en-US', { 
+                    weekday: 'short', month: 'short', day: 'numeric', hour: 'numeric', minute: '2-digit' 
+                  })}
+                </p>
+              </div>
+            </div>
+            <button
+              onClick={() => {
+                setApplicantNote(null);
+                setApplicantNoteState(null);
+              }}
+              className="text-amber-600/60 hover:text-amber-700 p-1 rounded hover:bg-amber-100 transition-colors"
+              title="Clear note"
+            >
+              <svg className="w-5 h-5" fill="none" viewBox="0 0 24 24" stroke="currentColor">
+                <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M6 18L18 6M6 6l12 12" />
+              </svg>
+            </button>
+          </div>
+        </div>
+      )}
+
       {/* Header */}
       <div className="flex items-center justify-between flex-wrap gap-4">
         <div>
@@ -1204,6 +1283,67 @@ export function ApplicantsPage() {
                     <button onClick={() => setEditMode(true)} className="py-3 bg-white border border-border text-navy text-sm font-semibold rounded-lg hover:bg-gray-50 transition-colors">Edit</button>
                     <button onClick={() => goToHire(selectedApplicant.id)} className="py-3 bg-success text-navy text-sm font-semibold rounded-lg hover:bg-success/90 transition-colors">Onboard</button>
                   </div>
+
+                  {/* Post Note About This Applicant */}
+                  {(role === 'manager' || isAdmin) && (
+                    <div className="bg-white rounded-lg shadow-sm p-4 mt-5">
+                      <div className="flex items-center justify-between mb-3">
+                        <span className="text-[11px] font-semibold text-gray uppercase tracking-wide">Post Note to Staff</span>
+                      </div>
+                      {!showNoteCompose ? (
+                        <button
+                          onClick={() => setShowNoteCompose(true)}
+                          className="w-full py-2.5 border border-dashed border-amber-300 text-amber-700 text-sm rounded-lg hover:bg-amber-50 transition-colors flex items-center justify-center gap-2"
+                        >
+                          <svg className="w-4 h-4" fill="none" viewBox="0 0 24 24" stroke="currentColor">
+                            <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M7 8h10M7 12h4m1 8l-4-4H5a2 2 0 01-2-2V6a2 2 0 012-2h14a2 2 0 012 2v8a2 2 0 01-2 2h-3l-4 4z" />
+                          </svg>
+                          Add note about {selectedApplicant.first_name}
+                        </button>
+                      ) : (
+                        <div className="space-y-3">
+                          <textarea
+                            value={noteDraft}
+                            onChange={(e) => setNoteDraft(e.target.value)}
+                            placeholder={`Add a note about ${selectedApplicant.first_name} for other staff to see...`}
+                            className="w-full px-3 py-2 border border-border rounded-lg text-sm resize-none focus:border-amber-400 focus:ring-1 focus:ring-amber-200 outline-none"
+                            rows={3}
+                            autoFocus
+                          />
+                          <div className="flex gap-2">
+                            <button
+                              onClick={() => {
+                                setShowNoteCompose(false);
+                                setNoteDraft('');
+                              }}
+                              className="flex-1 py-2 text-sm border border-border rounded-lg hover:bg-gray-50"
+                            >
+                              Cancel
+                            </button>
+                            <button
+                              disabled={!noteDraft.trim()}
+                              onClick={() => {
+                                const newNote: ApplicantNote = {
+                                  message: noteDraft.trim(),
+                                  managerName: `${profile?.first_name || ''} ${profile?.last_name || ''}`.trim() || 'Manager',
+                                  timestamp: Date.now(),
+                                  applicantId: selectedApplicant.id,
+                                  applicantName: `${selectedApplicant.first_name} ${selectedApplicant.last_name}`,
+                                };
+                                setApplicantNote(newNote);
+                                setApplicantNoteState(newNote);
+                                setNoteDraft('');
+                                setShowNoteCompose(false);
+                              }}
+                              className="flex-1 py-2 text-sm bg-amber-500 text-white rounded-lg hover:bg-amber-600 disabled:opacity-50 disabled:cursor-not-allowed"
+                            >
+                              Post Note
+                            </button>
+                          </div>
+                        </div>
+                      )}
+                    </div>
+                  )}
 
                   <div className="bg-white rounded-lg shadow-sm p-4 mt-5">
                     <div className="flex items-center justify-between mb-3">
