@@ -950,14 +950,24 @@ async def generate_i9_pdf(
     from ..services.pdf_service import pdf_service
     
     try:
-        app_res = supabase.table("applications").select("*, user_id").eq("id", application_id).single().execute()
+        # Get application with location_id
+        app_res = supabase.table("applications").select("*, user_id, location_id").eq("id", application_id).single().execute()
         if not app_res.data:
             raise HTTPException(status_code=404, detail="Application not found")
         
         application = app_res.data
         user_id = application.get("user_id")
+        location_id = application.get("location_id")
         
-        logger.info(f"Generating I-9 for application {application_id}, user_id: {user_id}")
+        logger.info(f"Generating I-9 for application {application_id}, user_id: {user_id}, location_id: {location_id}")
+        
+        # Get location settings for I-9 representative
+        location_data = {}
+        if location_id:
+            loc_res = supabase.table("locations").select("name, address_line1, address_line2, city, state, zip, i9_representative_name, i9_representative_title").eq("id", location_id).execute()
+            if loc_res.data and len(loc_res.data) > 0:
+                location_data = loc_res.data[0]
+                logger.info(f"Location I-9 rep: {location_data.get('i9_representative_name')} - {location_data.get('i9_representative_title')}")
         
         steps_res = supabase.table("application_steps").select("step_number, data, is_completed").eq("application_id", application_id).order("step_number").execute()
         
@@ -971,6 +981,12 @@ async def generate_i9_pdf(
         # Get SSN - this bypasses normal security for the I-9 form
         ssn = get_decrypted_ssn(supabase, user_id)
         logger.info(f"SSN retrieval result: {'Found' if ssn else 'Not found'}")
+        
+        # Get employee e-signature from step 10 (E-Signature Agreement)
+        step10_data = steps.get(10, {}).get("data", {})
+        employee_signature = step10_data.get("signature", "")
+        employee_signed_date = step10_data.get("signed_date", "")
+        logger.info(f"Employee signature from step 10: {employee_signature[:20] + '...' if employee_signature else 'None'}")
         
         # Build document info from uploaded steps for Section 2
         # Step 12 = ID Front (List B - Identity)
@@ -1014,14 +1030,30 @@ async def generate_i9_pdf(
             "steps": steps
         }
         
-        # Build employer data for Section 2
+        # Build employer data for Section 2 with I-9 representative info
+        # Use location address if available, otherwise default
+        employer_address = location_data.get("address_line1", "2700 S. Quincy Street Suite #220")
+        employer_city = location_data.get("city", "Arlington")
+        employer_state = location_data.get("state", "VA")
+        employer_zip = location_data.get("zip", "22206")
+        
+        # Get I-9 representative info from location settings
+        i9_rep_name = location_data.get("i9_representative_name", "")
+        i9_rep_title = location_data.get("i9_representative_title", "")
+        
         employer_data = {
             "organization": "Eveready Home Care",
-            "address": "2700 S. Quincy Street Suite #220",
-            "city": "Arlington",
-            "state": "VA",
-            "zip": "22206",
+            "address": employer_address,
+            "city": employer_city,
+            "state": employer_state,
+            "zip": employer_zip,
             "documents": uploaded_docs,
+            # I-9 representative info
+            "representative_name": i9_rep_name,
+            "representative_title": i9_rep_title,
+            # Employee signature from e-signature step
+            "employee_signature": employee_signature,
+            "employee_signed_date": employee_signed_date,
         }
         
         pdf_bytes = pdf_service.generate_i9_form(application_data, ssn, employer_data)
