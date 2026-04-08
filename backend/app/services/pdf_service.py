@@ -497,11 +497,21 @@ class PDFService:
 
         # Extract applicant info from steps
         steps = application_data.get("steps", {})
-        step2_data = steps.get(2, {}).get("data", {})
-        step1_data = steps.get(1, {}).get("data", {})
+        
+        # DEBUG: Log what we received
+        logger.info(f"I-9 generate_i9_form called with steps keys: {list(steps.keys())}")
+        
+        # Try both int and string keys since JSON might have string keys
+        step2_data = steps.get(2, steps.get("2", {})).get("data", {})
+        step1_data = steps.get(1, steps.get("1", {})).get("data", {})
+        
+        logger.info(f"Step 1 data keys: {list(step1_data.keys()) if step1_data else 'empty'}")
+        logger.info(f"Step 2 data keys: {list(step2_data.keys()) if step2_data else 'empty'}")
 
         # Use step 2 primarily, fall back to step 1
         personal = {**step1_data, **step2_data}
+        
+        logger.info(f"Personal data: first_name={personal.get('first_name')}, last_name={personal.get('last_name')}, email={personal.get('email')}")
 
         # Format date of birth as MM/DD/YYYY
         dob = personal.get("date_of_birth", "")
@@ -519,6 +529,9 @@ class PDFService:
             ssn_clean = ssn.replace("-", "").replace(" ", "")
             if len(ssn_clean) == 9:
                 ssn_formatted = f"{ssn_clean[:3]}-{ssn_clean[3:5]}-{ssn_clean[5:]}"
+            logger.info(f"SSN provided, formatted: {ssn_formatted[:3]}***")
+        else:
+            logger.info("No SSN provided")
 
         # Get middle initial
         middle_name = personal.get("middle_name", "")
@@ -551,9 +564,9 @@ class PDFService:
         set_field("phone", personal.get("phone", ""))
         set_field("employee_signature_date", today)
 
-        # Citizenship status - check the appropriate box
+        # Citizenship status - default to citizen, check the appropriate box
         citizenship = personal.get("citizenship_status", "citizen")
-        if citizenship == "citizen":
+        if citizenship == "citizen" or not citizenship:
             values_to_fill["CB_1"] = "/On"
         elif citizenship == "noncitizen_national":
             values_to_fill["CB_2"] = "/On"
@@ -625,6 +638,9 @@ class PDFService:
             if employer_data.get("additional_info"):
                 set_field("additional_info", employer_data["additional_info"])
 
+        # Log what we're about to fill
+        logger.info(f"I-9 filling {len(values_to_fill)} fields: {list(values_to_fill.keys())}")
+
         # Fill the form
         if values_to_fill:
             try:
@@ -634,11 +650,12 @@ class PDFService:
                     values_to_fill,
                     auto_regenerate=False
                 )
-                logger.info(f"Filled I-9 form with {len(values_to_fill)} fields for: "
+                logger.info(f"Successfully filled I-9 form for: "
                            f"{personal.get('first_name', '')} {personal.get('last_name', '')}")
             except Exception as e:
                 logger.warning(f"Bulk fill failed, trying individual fields: {e}")
                 # Try filling fields one by one
+                filled_count = 0
                 for field_id, value in values_to_fill.items():
                     try:
                         writer.update_page_form_field_values(
@@ -646,8 +663,12 @@ class PDFService:
                             {field_id: value},
                             auto_regenerate=False
                         )
+                        filled_count += 1
                     except Exception as field_error:
                         logger.debug(f"Could not fill field '{field_id}': {field_error}")
+                logger.info(f"Individual fill completed: {filled_count}/{len(values_to_fill)} fields")
+        else:
+            logger.warning("No values to fill in I-9 form - personal data may be empty")
 
         # Set NeedAppearances to ensure fields display properly
         try:
