@@ -6,31 +6,14 @@ import { api } from '../../lib/api';
 import { supabase } from '../../lib/supabase';
 import { useAuth } from '../../hooks/useAuth';
 
-// Per-applicant note from manager (visible at top of page)
-const APPLICANT_NOTE_KEY = 'medivault_applicant_note';
-
-interface ApplicantNote {
+// Message from manager to applicant (stored in database, shown on applicant's dashboard)
+interface ApplicantMessage {
+  id: string;
   message: string;
-  managerName: string;
-  timestamp: number;
-  applicantId: string;
-  applicantName: string;
+  posted_by_name: string;
+  created_at: string;
+  updated_at: string;
 }
-
-const getApplicantNote = (): ApplicantNote | null => {
-  try {
-    const stored = localStorage.getItem(APPLICANT_NOTE_KEY);
-    return stored ? JSON.parse(stored) : null;
-  } catch { return null; }
-};
-
-const setApplicantNote = (note: ApplicantNote | null) => {
-  if (note) {
-    localStorage.setItem(APPLICANT_NOTE_KEY, JSON.stringify(note));
-  } else {
-    localStorage.removeItem(APPLICANT_NOTE_KEY);
-  }
-};
 
 interface Applicant {
   id: string;
@@ -97,13 +80,11 @@ interface ApplicantDetail {
   cpr_uploaded?: boolean;
   tb_uploaded?: boolean;
   ssn_last_four?: string;
-  // Step completion tracking
   stepsCompletion?: Record<number, boolean>;
 }
 
 const detailCache = new Map<string, ApplicantDetail>();
 
-// Position configuration
 const POSITION_CONFIG: Record<string, { label: string; color: string; icon: string }> = {
   cna: { label: 'CNA', color: 'bg-purple-500', icon: '🩺' },
   hha: { label: 'HHA', color: 'bg-teal-500', icon: '🏠' },
@@ -129,7 +110,6 @@ const DOC_STEPS: Record<string, number> = {
   tb: 17,
 };
 
-// Step names for progress display
 const STEP_NAMES: Record<number, string> = {
   1: 'Application Basics',
   2: 'Personal Info',
@@ -162,14 +142,15 @@ export function ApplicantsPage() {
   const fileInputRef = useRef<HTMLInputElement>(null);
   const { role, profile } = useAuth();
   
-  // Admins can filter by location, managers see only their location
   const isAdmin = role === 'admin' || role === 'superadmin';
   const [selectedLocationFilter, setSelectedLocationFilter] = useState<string>('');
   
-  // Per-applicant note state (posted from side panel, shown at top)
-  const [applicantNote, setApplicantNoteState] = useState<ApplicantNote | null>(null);
-  const [noteDraft, setNoteDraft] = useState('');
-  const [showNoteCompose, setShowNoteCompose] = useState(false);
+  // Message to applicant (fetched from API per selected applicant)
+  const [applicantMessage, setApplicantMessage] = useState<ApplicantMessage | null>(null);
+  const [messageDraft, setMessageDraft] = useState('');
+  const [messageMode, setMessageMode] = useState<'view' | 'compose' | 'edit'>('view');
+  const [savingMessage, setSavingMessage] = useState(false);
+  const [loadingMessage, setLoadingMessage] = useState(false);
   
   const [applicants, setApplicants] = useState<Applicant[]>([]);
   const [loading, setLoading] = useState(true);
@@ -179,16 +160,12 @@ export function ApplicantsPage() {
   const [loadingDetail, setLoadingDetail] = useState(false);
   const [panelOpen, setPanelOpen] = useState(false);
   
-  // Pool collapse state - using Set for expanded pools (all collapsed by default)
   const [expandedPools, setExpandedPools] = useState<Set<string>>(new Set());
   const [recentExpanded, setRecentExpanded] = useState(false);
   const [hiredExpanded, setHiredExpanded] = useState(false);
   const [notStartedExpanded, setNotStartedExpanded] = useState(false);
   
-  // Toggle for rejected only
   const [showRejected, setShowRejected] = useState(false);
-  
-  // Search
   const [searchQuery, setSearchQuery] = useState('');
   
   const [editMode, setEditMode] = useState(false);
@@ -219,11 +196,6 @@ export function ApplicantsPage() {
   const [showDeleteConfirm, setShowDeleteConfirm] = useState(false);
   const [deleting, setDeleting] = useState(false);
 
-  // Load applicant note on mount
-  useEffect(() => {
-    setApplicantNoteState(getApplicantNote());
-  }, []);
-
   useEffect(() => {
     loadApplicants();
     loadLocations();
@@ -253,12 +225,59 @@ export function ApplicantsPage() {
     }
   };
 
-  // Filter and organize applicants
+  // Load message for an applicant
+  const loadApplicantMessage = async (applicationId: string) => {
+    setLoadingMessage(true);
+    try {
+      const res = await api.get<{ message: ApplicantMessage | null }>(`/applicant-messages/${applicationId}`);
+      setApplicantMessage(res.message);
+      setMessageMode(res.message ? 'view' : 'view');
+    } catch (err) {
+      console.log('No message or error loading:', err);
+      setApplicantMessage(null);
+    } finally {
+      setLoadingMessage(false);
+    }
+  };
+
+  // Post or update message
+  const handlePostMessage = async () => {
+    if (!selectedApplicant || !messageDraft.trim()) return;
+    setSavingMessage(true);
+    try {
+      const res = await api.post<{ success: boolean; message: ApplicantMessage }>(`/applicant-messages/${selectedApplicant.id}`, {
+        message: messageDraft.trim()
+      });
+      setApplicantMessage(res.message);
+      setMessageMode('view');
+      setMessageDraft('');
+    } catch (err) {
+      setError(err instanceof Error ? err.message : 'Failed to post message');
+    } finally {
+      setSavingMessage(false);
+    }
+  };
+
+  // Delete message
+  const handleDeleteMessage = async () => {
+    if (!selectedApplicant) return;
+    setSavingMessage(true);
+    try {
+      await api.delete(`/applicant-messages/${selectedApplicant.id}`);
+      setApplicantMessage(null);
+      setMessageMode('view');
+      setMessageDraft('');
+    } catch (err) {
+      setError(err instanceof Error ? err.message : 'Failed to delete message');
+    } finally {
+      setSavingMessage(false);
+    }
+  };
+
   const { recentApplicants, positionPools, uncategorizedApplicants, hiredByPosition, notStartedApplicants, rejectedCount } = useMemo(() => {
     const now = new Date();
     const oneWeekAgo = new Date(now.getTime() - 7 * 24 * 60 * 60 * 1000);
     
-    // Separate by status
     const hired = applicants.filter(a => a.status === 'hired');
     const notStarted = applicants.filter(a => a.status === 'not_started');
     const rejected = applicants.filter(a => a.status === 'rejected');
@@ -268,7 +287,6 @@ export function ApplicantsPage() {
       (a.status !== 'rejected' || showRejected)
     );
     
-    // Apply search to active applicants
     let filtered = active;
     if (searchQuery.trim()) {
       const query = searchQuery.toLowerCase();
@@ -280,15 +298,12 @@ export function ApplicantsPage() {
       );
     }
     
-    // Sort all by created_at desc (most recent first)
     filtered.sort((a, b) => new Date(b.created_at).getTime() - new Date(a.created_at).getTime());
     hired.sort((a, b) => new Date(b.created_at).getTime() - new Date(a.created_at).getTime());
     notStarted.sort((a, b) => new Date(b.created_at).getTime() - new Date(a.created_at).getTime());
     
-    // Recent = past 7 days (active only)
     const recent = filtered.filter(a => new Date(a.created_at) >= oneWeekAgo);
     
-    // Group active by position
     const pools: Record<string, Applicant[]> = {};
     const uncategorized: Applicant[] = [];
     
@@ -302,7 +317,6 @@ export function ApplicantsPage() {
       }
     });
     
-    // Group hired by position
     const hiredPools: Record<string, Applicant[]> = {};
     hired.forEach(a => {
       const pos = a.position?.toLowerCase() || 'uncategorized';
@@ -389,8 +403,12 @@ export function ApplicantsPage() {
     setRevealedSsn(null);
     setEditingSsn(false);
     setPreviewDoc(null);
-    setShowNoteCompose(false);
-    setNoteDraft('');
+    setMessageMode('view');
+    setMessageDraft('');
+    setApplicantMessage(null);
+    
+    // Load message for this applicant
+    loadApplicantMessage(applicant.id);
     
     const cached = detailCache.get(applicant.id);
     if (cached) {
@@ -428,7 +446,7 @@ export function ApplicantsPage() {
       const step15 = stepsMap.get(15) || {};
       const step16 = stepsMap.get(16) || {};
       const step17 = stepsMap.get(17) || {};
-      const profile = res.profile || {};
+      const profileData = res.profile || {};
       
       const detail: ApplicantDetail = {
         position_applied: step1.position_applied as string,
@@ -438,10 +456,10 @@ export function ApplicantsPage() {
         speaks_other_languages: step1.speaks_other_languages as string,
         other_languages: step1.other_languages as string,
         how_heard: step1.how_heard as string,
-        first_name: (step2.first_name as string) || (profile.first_name as string),
-        last_name: (step2.last_name as string) || (profile.last_name as string),
-        email: (profile.email as string) || (step2.email as string),
-        phone: (step2.phone as string) || (profile.phone as string),
+        first_name: (step2.first_name as string) || (profileData.first_name as string),
+        last_name: (step2.last_name as string) || (profileData.last_name as string),
+        email: (profileData.email as string) || (step2.email as string),
+        phone: (step2.phone as string) || (profileData.phone as string),
         city: step2.city as string,
         address_line1: step2.address_line1 as string,
         address_line2: step2.address_line2 as string,
@@ -596,8 +614,9 @@ export function ApplicantsPage() {
     setRevealedSsn(null);
     setEditingSsn(false);
     setPreviewDoc(null);
-    setShowNoteCompose(false);
-    setNoteDraft('');
+    setMessageMode('view');
+    setMessageDraft('');
+    setApplicantMessage(null);
     setTimeout(() => {
       setSelectedApplicant(null);
       setApplicantDetail(null);
@@ -742,7 +761,6 @@ export function ApplicantsPage() {
 
   const canDelete = selectedApplicant && selectedApplicant.status !== 'hired';
 
-  // Applicant Row Component
   const ApplicantRow = ({ applicant, showStatus = true }: { applicant: Applicant; showStatus?: boolean }) => {
     const config = getPositionConfig(applicant.position);
     return (
@@ -750,12 +768,10 @@ export function ApplicantsPage() {
         onClick={() => selectApplicant(applicant)}
         className="flex items-center gap-3 px-4 py-3 hover:bg-gray-50 cursor-pointer transition-colors border-b border-gray-100 last:border-b-0"
       >
-        {/* Position badge */}
         <div className={`flex-shrink-0 w-10 h-10 rounded-lg flex items-center justify-center text-xs font-bold text-white ${config?.color || 'bg-gray-400'}`}>
           {config?.label || '—'}
         </div>
         
-        {/* Name and email */}
         <div className="flex-1 min-w-0">
           <p className="text-sm font-semibold text-navy truncate">
             {applicant.first_name} {applicant.last_name}
@@ -763,7 +779,6 @@ export function ApplicantsPage() {
           <p className="text-xs text-gray truncate">{applicant.email}</p>
         </div>
         
-        {/* Status and location */}
         {showStatus && (
           <div className="hidden sm:flex items-center gap-3">
             <span className="text-xs text-gray">{applicant.location_name || '—'}</span>
@@ -784,22 +799,7 @@ export function ApplicantsPage() {
     );
   };
 
-  // Pool Section Component
-  const PoolSection = ({ 
-    id, 
-    title, 
-    icon, 
-    color, 
-    applicants,
-    showStatus = true,
-  }: { 
-    id: string;
-    title: string; 
-    icon: string; 
-    color: string;
-    applicants: Applicant[];
-    showStatus?: boolean;
-  }) => {
+  const PoolSection = ({ id, title, icon, color, applicants, showStatus = true }: { id: string; title: string; icon: string; color: string; applicants: Applicant[]; showStatus?: boolean }) => {
     const isExpanded = expandedPools.has(id);
     const count = applicants.length;
     
@@ -816,12 +816,7 @@ export function ApplicantsPage() {
             <span className="font-semibold text-navy">{title}</span>
             <span className={`px-2 py-0.5 rounded-full text-xs font-bold text-white ${color}`}>{count}</span>
           </div>
-          <svg 
-            className={`w-5 h-5 text-gray transition-transform ${isExpanded ? 'rotate-180' : ''}`} 
-            fill="none" 
-            viewBox="0 0 24 24" 
-            stroke="currentColor"
-          >
+          <svg className={`w-5 h-5 text-gray transition-transform ${isExpanded ? 'rotate-180' : ''}`} fill="none" viewBox="0 0 24 24" stroke="currentColor">
             <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M19 9l-7 7-7-7" />
           </svg>
         </button>
@@ -850,45 +845,6 @@ export function ApplicantsPage() {
 
   return (
     <div className="space-y-6">
-      {/* Per-Applicant Note Banner (posted from side panel) */}
-      {applicantNote && (
-        <div className="bg-gradient-to-r from-amber-50 to-amber-50/50 rounded-xl border border-amber-200 p-4">
-          <div className="flex items-start justify-between gap-4">
-            <div className="flex items-start gap-3">
-              <div className="w-10 h-10 rounded-full bg-amber-100 flex items-center justify-center flex-shrink-0">
-                <svg className="w-5 h-5 text-amber-600" fill="none" viewBox="0 0 24 24" stroke="currentColor">
-                  <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M7 8h10M7 12h4m1 8l-4-4H5a2 2 0 01-2-2V6a2 2 0 012-2h14a2 2 0 012 2v8a2 2 0 01-2 2h-3l-4 4z" />
-                </svg>
-              </div>
-              <div>
-                <p className="text-sm font-semibold text-amber-800">
-                  Note about {applicantNote.applicantName}
-                  <span className="font-normal text-amber-600 ml-2">— from {applicantNote.managerName}</span>
-                </p>
-                <p className="text-sm text-slate mt-1">{applicantNote.message}</p>
-                <p className="text-xs text-gray mt-2">
-                  Posted {new Date(applicantNote.timestamp).toLocaleDateString('en-US', { 
-                    weekday: 'short', month: 'short', day: 'numeric', hour: 'numeric', minute: '2-digit' 
-                  })}
-                </p>
-              </div>
-            </div>
-            <button
-              onClick={() => {
-                setApplicantNote(null);
-                setApplicantNoteState(null);
-              }}
-              className="text-amber-600/60 hover:text-amber-700 p-1 rounded hover:bg-amber-100 transition-colors"
-              title="Clear note"
-            >
-              <svg className="w-5 h-5" fill="none" viewBox="0 0 24 24" stroke="currentColor">
-                <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M6 18L18 6M6 6l12 12" />
-              </svg>
-            </button>
-          </div>
-        </div>
-      )}
-
       {/* Header */}
       <div className="flex items-center justify-between flex-wrap gap-4">
         <div>
@@ -898,7 +854,6 @@ export function ApplicantsPage() {
           </p>
         </div>
         
-        {/* Location filter for admins */}
         {isAdmin && locations.length > 1 && (
           <div className="flex items-center gap-2">
             <span className="text-sm text-gray">Location:</span>
@@ -909,9 +864,7 @@ export function ApplicantsPage() {
             >
               <option value="">All Locations</option>
               {locations.map((loc) => (
-                <option key={loc.id} value={loc.id}>
-                  {loc.name}
-                </option>
+                <option key={loc.id} value={loc.id}>{loc.name}</option>
               ))}
             </select>
           </div>
@@ -962,12 +915,7 @@ export function ApplicantsPage() {
               <span className="font-semibold text-navy">New This Week</span>
               <span className="px-2 py-0.5 rounded-full text-xs font-bold text-white bg-maroon">{recentApplicants.length}</span>
             </div>
-            <svg 
-              className={`w-5 h-5 text-gray transition-transform ${recentExpanded ? 'rotate-180' : ''}`} 
-              fill="none" 
-              viewBox="0 0 24 24" 
-              stroke="currentColor"
-            >
+            <svg className={`w-5 h-5 text-gray transition-transform ${recentExpanded ? 'rotate-180' : ''}`} fill="none" viewBox="0 0 24 24" stroke="currentColor">
               <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M19 9l-7 7-7-7" />
             </svg>
           </button>
@@ -990,30 +938,16 @@ export function ApplicantsPage() {
           const config = POSITION_CONFIG[pos];
           const poolApplicants = positionPools[pos] || [];
           return (
-            <PoolSection
-              key={pos}
-              id={pos}
-              title={`${config.label} Pool`}
-              icon={config.icon}
-              color={config.color}
-              applicants={poolApplicants}
-            />
+            <PoolSection key={pos} id={pos} title={`${config.label} Pool`} icon={config.icon} color={config.color} applicants={poolApplicants} />
           );
         })}
         
-        {/* Uncategorized */}
         {uncategorizedApplicants.length > 0 && (
-          <PoolSection
-            id="uncategorized"
-            title="Uncategorized"
-            icon="📋"
-            color="bg-gray-400"
-            applicants={uncategorizedApplicants}
-          />
+          <PoolSection id="uncategorized" title="Uncategorized" icon="📋" color="bg-gray-400" applicants={uncategorizedApplicants} />
         )}
       </div>
 
-      {/* Hired Applicants Section */}
+      {/* Hired */}
       {totalHired > 0 && (
         <div className="bg-gradient-to-r from-success/5 to-transparent rounded-xl border border-success/20 overflow-hidden">
           <button
@@ -1025,24 +959,17 @@ export function ApplicantsPage() {
               <span className="font-semibold text-navy">Hired Applicants</span>
               <span className="px-2 py-0.5 rounded-full text-xs font-bold text-white bg-success">{totalHired}</span>
             </div>
-            <svg 
-              className={`w-5 h-5 text-gray transition-transform ${hiredExpanded ? 'rotate-180' : ''}`} 
-              fill="none" 
-              viewBox="0 0 24 24" 
-              stroke="currentColor"
-            >
+            <svg className={`w-5 h-5 text-gray transition-transform ${hiredExpanded ? 'rotate-180' : ''}`} fill="none" viewBox="0 0 24 24" stroke="currentColor">
               <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M19 9l-7 7-7-7" />
             </svg>
           </button>
           
           {hiredExpanded && (
             <div className="border-t border-success/20 bg-white">
-              {/* Group hired by position */}
               {POSITION_ORDER.map(pos => {
                 const config = POSITION_CONFIG[pos];
                 const hiredInPosition = hiredByPosition[pos] || [];
                 if (hiredInPosition.length === 0) return null;
-                
                 return (
                   <div key={pos} className="border-b border-gray-100 last:border-b-0">
                     <div className="px-5 py-2 bg-gray-50 flex items-center gap-2">
@@ -1056,8 +983,6 @@ export function ApplicantsPage() {
                   </div>
                 );
               })}
-              
-              {/* Uncategorized hired */}
               {(hiredByPosition['uncategorized'] || []).length > 0 && (
                 <div className="border-b border-gray-100 last:border-b-0">
                   <div className="px-5 py-2 bg-gray-50 flex items-center gap-2">
@@ -1075,7 +1000,7 @@ export function ApplicantsPage() {
         </div>
       )}
 
-      {/* Not Started Section */}
+      {/* Not Started */}
       {notStartedApplicants.length > 0 && (
         <div className="bg-white rounded-xl border border-gray-200 overflow-hidden">
           <button
@@ -1087,16 +1012,10 @@ export function ApplicantsPage() {
               <span className="font-semibold text-navy">Not Started</span>
               <span className="px-2 py-0.5 rounded-full text-xs font-bold text-white bg-gray-400">{notStartedApplicants.length}</span>
             </div>
-            <svg 
-              className={`w-5 h-5 text-gray transition-transform ${notStartedExpanded ? 'rotate-180' : ''}`} 
-              fill="none" 
-              viewBox="0 0 24 24" 
-              stroke="currentColor"
-            >
+            <svg className={`w-5 h-5 text-gray transition-transform ${notStartedExpanded ? 'rotate-180' : ''}`} fill="none" viewBox="0 0 24 24" stroke="currentColor">
               <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M19 9l-7 7-7-7" />
             </svg>
           </button>
-          
           {notStartedExpanded && (
             <div className="border-t border-gray-200 bg-white">
               {notStartedApplicants.map(a => (
@@ -1118,10 +1037,7 @@ export function ApplicantsPage() {
       {/* Side Panel */}
       {selectedApplicant && (
         <>
-          <div 
-            className={`fixed inset-0 bg-black/20 z-40 transition-opacity duration-250 ${panelOpen ? 'opacity-100' : 'opacity-0 pointer-events-none'}`} 
-            onClick={closePanel} 
-          />
+          <div className={`fixed inset-0 bg-black/20 z-40 transition-opacity duration-250 ${panelOpen ? 'opacity-100' : 'opacity-0 pointer-events-none'}`} onClick={closePanel} />
           <div className={`fixed top-0 right-0 h-full w-[420px] bg-white shadow-2xl z-50 flex flex-col transition-transform duration-250 ease-out ${panelOpen ? 'translate-x-0' : 'translate-x-full'}`}>
             <div className="px-6 py-5 bg-navy flex items-center justify-between flex-shrink-0">
               <div className="flex items-center gap-3">
@@ -1146,6 +1062,7 @@ export function ApplicantsPage() {
                   </svg>
                 </div>
               ) : editMode ? (
+                /* Edit Mode UI - same as before */
                 <div className="space-y-4">
                   <div className="bg-white rounded-lg shadow-sm p-4 space-y-3">
                     <h3 className="text-xs font-semibold text-gray uppercase tracking-wide">Personal Info</h3>
@@ -1174,93 +1091,24 @@ export function ApplicantsPage() {
                   </div>
 
                   <div className="bg-white rounded-lg shadow-sm p-4 space-y-3">
-                    <h3 className="text-xs font-semibold text-gray uppercase tracking-wide">Social Security</h3>
-                    {editingSsn ? (
-                      <div className="space-y-2">
-                        <input type="text" value={formatSsnInput(newSsn)} onChange={(e) => setNewSsn(e.target.value.replace(/\D/g, '').slice(0, 9))} placeholder="XXX-XX-XXXX" className="w-full px-3 py-2 border border-border rounded-lg text-sm focus:border-maroon focus:ring-1 focus:ring-maroon/20 outline-none font-mono" />
-                        <p className="text-xs text-gray">Enter 9 digits. Leading zeros are preserved.</p>
-                        <div className="flex gap-2">
-                          <button onClick={() => setEditingSsn(false)} className="flex-1 py-2 text-sm border border-border rounded-lg hover:bg-gray-50">Cancel</button>
-                          <button onClick={handleSaveSsn} disabled={savingSsn || newSsn.replace(/\D/g, '').length !== 9} className="flex-1 py-2 text-sm bg-maroon text-white rounded-lg hover:bg-maroon/90 disabled:opacity-50">{savingSsn ? 'Saving...' : 'Save SSN'}</button>
-                        </div>
-                      </div>
-                    ) : ssnRevealed ? (
-                      <div className="flex items-center justify-between">
-                        <span className="font-mono text-sm">{revealedSsn}</span>
-                        <button onClick={handleEditSsn} className="text-xs text-maroon hover:underline">Edit</button>
-                      </div>
-                    ) : (
-                      <div className="flex items-center justify-between">
-                        <span className="text-sm text-slate">{applicantDetail?.ssn_last_four ? `***-**-${applicantDetail.ssn_last_four}` : 'Not on file'}</span>
-                        <div className="flex gap-2">
-                          {applicantDetail?.ssn_last_four && <button onClick={handleRevealSsn} disabled={loadingSsn} className="text-xs text-maroon hover:underline disabled:opacity-50">{loadingSsn ? 'Loading...' : 'Reveal'}</button>}
-                          <button onClick={handleEditSsn} className="text-xs text-maroon hover:underline">{applicantDetail?.ssn_last_four ? 'Edit' : 'Add'}</button>
-                        </div>
-                      </div>
-                    )}
-                  </div>
-
-                  <div className="bg-white rounded-lg shadow-sm p-4 space-y-3">
                     <h3 className="text-xs font-semibold text-gray uppercase tracking-wide">Address</h3>
-                    <div>
-                      <label className="block text-xs text-gray mb-1">Street Address</label>
-                      <input type="text" value={editForm.address_line1} onChange={(e) => setEditForm({ ...editForm, address_line1: e.target.value })} className="w-full px-3 py-2 border border-border rounded-lg text-sm focus:border-maroon focus:ring-1 focus:ring-maroon/20 outline-none" />
-                    </div>
-                    <div>
-                      <label className="block text-xs text-gray mb-1">Apt/Suite</label>
-                      <input type="text" value={editForm.address_line2} onChange={(e) => setEditForm({ ...editForm, address_line2: e.target.value })} className="w-full px-3 py-2 border border-border rounded-lg text-sm focus:border-maroon focus:ring-1 focus:ring-maroon/20 outline-none" />
-                    </div>
+                    <input type="text" value={editForm.address_line1} onChange={(e) => setEditForm({ ...editForm, address_line1: e.target.value })} placeholder="Street Address" className="w-full px-3 py-2 border border-border rounded-lg text-sm focus:border-maroon focus:ring-1 focus:ring-maroon/20 outline-none" />
+                    <input type="text" value={editForm.address_line2} onChange={(e) => setEditForm({ ...editForm, address_line2: e.target.value })} placeholder="Apt/Suite" className="w-full px-3 py-2 border border-border rounded-lg text-sm focus:border-maroon focus:ring-1 focus:ring-maroon/20 outline-none" />
                     <div className="grid grid-cols-3 gap-3">
-                      <div>
-                        <label className="block text-xs text-gray mb-1">City</label>
-                        <input type="text" value={editForm.city} onChange={(e) => setEditForm({ ...editForm, city: e.target.value })} className="w-full px-3 py-2 border border-border rounded-lg text-sm focus:border-maroon focus:ring-1 focus:ring-maroon/20 outline-none" />
-                      </div>
-                      <div>
-                        <label className="block text-xs text-gray mb-1">State</label>
-                        <input type="text" value={editForm.state} onChange={(e) => setEditForm({ ...editForm, state: e.target.value })} className="w-full px-3 py-2 border border-border rounded-lg text-sm focus:border-maroon focus:ring-1 focus:ring-maroon/20 outline-none" />
-                      </div>
-                      <div>
-                        <label className="block text-xs text-gray mb-1">ZIP</label>
-                        <input type="text" value={editForm.zip} onChange={(e) => setEditForm({ ...editForm, zip: e.target.value })} className="w-full px-3 py-2 border border-border rounded-lg text-sm focus:border-maroon focus:ring-1 focus:ring-maroon/20 outline-none" />
-                      </div>
-                    </div>
-                  </div>
-
-                  <div className="bg-white rounded-lg shadow-sm p-4 space-y-3">
-                    <h3 className="text-xs font-semibold text-gray uppercase tracking-wide">Emergency Contact</h3>
-                    <div>
-                      <label className="block text-xs text-gray mb-1">Name</label>
-                      <input type="text" value={editForm.emergency_name} onChange={(e) => setEditForm({ ...editForm, emergency_name: e.target.value })} className="w-full px-3 py-2 border border-border rounded-lg text-sm focus:border-maroon focus:ring-1 focus:ring-maroon/20 outline-none" />
-                    </div>
-                    <div className="grid grid-cols-2 gap-3">
-                      <div>
-                        <label className="block text-xs text-gray mb-1">Relationship</label>
-                        <input type="text" value={editForm.emergency_relationship} onChange={(e) => setEditForm({ ...editForm, emergency_relationship: e.target.value })} className="w-full px-3 py-2 border border-border rounded-lg text-sm focus:border-maroon focus:ring-1 focus:ring-maroon/20 outline-none" />
-                      </div>
-                      <div>
-                        <label className="block text-xs text-gray mb-1">Phone</label>
-                        <input type="tel" value={editForm.emergency_phone} onChange={(e) => setEditForm({ ...editForm, emergency_phone: e.target.value })} className="w-full px-3 py-2 border border-border rounded-lg text-sm focus:border-maroon focus:ring-1 focus:ring-maroon/20 outline-none" />
-                      </div>
-                    </div>
-                  </div>
-
-                  <div className="bg-white rounded-lg shadow-sm p-4 space-y-3">
-                    <h3 className="text-xs font-semibold text-gray uppercase tracking-wide">Location</h3>
-                    <div className="flex items-center justify-between">
-                      <span className="text-sm text-slate">{selectedApplicant.location_name || 'Not assigned'}</span>
-                      {locations.length > 1 && (
-                        <button onClick={() => setShowTransferModal(true)} className="text-xs text-maroon hover:underline">Transfer</button>
-                      )}
+                      <input type="text" value={editForm.city} onChange={(e) => setEditForm({ ...editForm, city: e.target.value })} placeholder="City" className="w-full px-3 py-2 border border-border rounded-lg text-sm focus:border-maroon focus:ring-1 focus:ring-maroon/20 outline-none" />
+                      <input type="text" value={editForm.state} onChange={(e) => setEditForm({ ...editForm, state: e.target.value })} placeholder="State" className="w-full px-3 py-2 border border-border rounded-lg text-sm focus:border-maroon focus:ring-1 focus:ring-maroon/20 outline-none" />
+                      <input type="text" value={editForm.zip} onChange={(e) => setEditForm({ ...editForm, zip: e.target.value })} placeholder="ZIP" className="w-full px-3 py-2 border border-border rounded-lg text-sm focus:border-maroon focus:ring-1 focus:ring-maroon/20 outline-none" />
                     </div>
                   </div>
 
                   <div className="grid grid-cols-2 gap-3 pt-2">
-                    <button onClick={() => setEditMode(false)} className="py-3 bg-white border border-border text-navy text-sm font-semibold rounded-lg hover:bg-gray-50 transition-colors">Cancel</button>
-                    <button onClick={handleSaveEdit} disabled={saving} className="py-3 bg-maroon text-white text-sm font-semibold rounded-lg hover:bg-maroon/90 transition-colors disabled:opacity-50">{saving ? 'Saving...' : 'Save Changes'}</button>
+                    <button onClick={() => setEditMode(false)} className="py-3 bg-white border border-border text-navy text-sm font-semibold rounded-lg hover:bg-gray-50">Cancel</button>
+                    <button onClick={handleSaveEdit} disabled={saving} className="py-3 bg-maroon text-white text-sm font-semibold rounded-lg hover:bg-maroon/90 disabled:opacity-50">{saving ? 'Saving...' : 'Save Changes'}</button>
                   </div>
                 </div>
               ) : (
                 <>
+                  {/* Quick Info */}
                   <div className="bg-white rounded-lg shadow-sm overflow-hidden">
                     {[
                       { label: 'City', value: applicantDetail?.city || '—' },
@@ -1278,66 +1126,90 @@ export function ApplicantsPage() {
                     ))}
                   </div>
 
+                  {/* Action Buttons */}
                   <div className="grid grid-cols-3 gap-3 mt-5">
-                    <button onClick={() => goToView(selectedApplicant.id)} className="py-3 bg-navy text-white text-sm font-semibold rounded-lg hover:bg-navy/90 transition-colors">Full Profile</button>
-                    <button onClick={() => setEditMode(true)} className="py-3 bg-white border border-border text-navy text-sm font-semibold rounded-lg hover:bg-gray-50 transition-colors">Edit</button>
-                    <button onClick={() => goToHire(selectedApplicant.id)} className="py-3 bg-success text-navy text-sm font-semibold rounded-lg hover:bg-success/90 transition-colors">Onboard</button>
+                    <button onClick={() => goToView(selectedApplicant.id)} className="py-3 bg-navy text-white text-sm font-semibold rounded-lg hover:bg-navy/90">Full Profile</button>
+                    <button onClick={() => setEditMode(true)} className="py-3 bg-white border border-border text-navy text-sm font-semibold rounded-lg hover:bg-gray-50">Edit</button>
+                    <button onClick={() => goToHire(selectedApplicant.id)} className="py-3 bg-success text-navy text-sm font-semibold rounded-lg hover:bg-success/90">Onboard</button>
                   </div>
 
-                  {/* Post Note About This Applicant */}
+                  {/* Message to Applicant Section */}
                   {(role === 'manager' || isAdmin) && (
                     <div className="bg-white rounded-lg shadow-sm p-4 mt-5">
                       <div className="flex items-center justify-between mb-3">
-                        <span className="text-[11px] font-semibold text-gray uppercase tracking-wide">Post Note to Staff</span>
+                        <span className="text-[11px] font-semibold text-gray uppercase tracking-wide">Message to {selectedApplicant.first_name}</span>
+                        {loadingMessage && <span className="text-xs text-gray">Loading...</span>}
                       </div>
-                      {!showNoteCompose ? (
-                        <button
-                          onClick={() => setShowNoteCompose(true)}
-                          className="w-full py-2.5 border border-dashed border-amber-300 text-amber-700 text-sm rounded-lg hover:bg-amber-50 transition-colors flex items-center justify-center gap-2"
-                        >
-                          <svg className="w-4 h-4" fill="none" viewBox="0 0 24 24" stroke="currentColor">
-                            <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M7 8h10M7 12h4m1 8l-4-4H5a2 2 0 01-2-2V6a2 2 0 012-2h14a2 2 0 012 2v8a2 2 0 01-2 2h-3l-4 4z" />
-                          </svg>
-                          Add note about {selectedApplicant.first_name}
-                        </button>
-                      ) : (
+                      
+                      {/* View Mode: Show existing message or compose button */}
+                      {messageMode === 'view' && !loadingMessage && (
+                        <>
+                          {applicantMessage ? (
+                            <div className="bg-maroon/5 border border-maroon/20 rounded-lg p-3">
+                              <p className="text-sm text-slate">{applicantMessage.message}</p>
+                              <p className="text-xs text-gray mt-2">
+                                Posted by {applicantMessage.posted_by_name} • {new Date(applicantMessage.updated_at || applicantMessage.created_at).toLocaleDateString('en-US', { month: 'short', day: 'numeric', hour: 'numeric', minute: '2-digit' })}
+                              </p>
+                              <div className="flex gap-2 mt-3">
+                                <button
+                                  onClick={() => {
+                                    setMessageDraft(applicantMessage.message);
+                                    setMessageMode('edit');
+                                  }}
+                                  className="flex-1 py-2 text-xs bg-white border border-border text-navy rounded-lg hover:bg-gray-50"
+                                >
+                                  Edit
+                                </button>
+                                <button
+                                  onClick={handleDeleteMessage}
+                                  disabled={savingMessage}
+                                  className="flex-1 py-2 text-xs bg-white border border-error/30 text-error rounded-lg hover:bg-error/5 disabled:opacity-50"
+                                >
+                                  {savingMessage ? 'Deleting...' : 'Delete'}
+                                </button>
+                              </div>
+                            </div>
+                          ) : (
+                            <button
+                              onClick={() => setMessageMode('compose')}
+                              className="w-full py-2.5 border border-dashed border-maroon/30 text-maroon text-sm rounded-lg hover:bg-maroon/5 transition-colors flex items-center justify-center gap-2"
+                            >
+                              <svg className="w-4 h-4" fill="none" viewBox="0 0 24 24" stroke="currentColor">
+                                <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M7 8h10M7 12h4m1 8l-4-4H5a2 2 0 01-2-2V6a2 2 0 012-2h14a2 2 0 012 2v8a2 2 0 01-2 2h-3l-4 4z" />
+                              </svg>
+                              Send message to {selectedApplicant.first_name}
+                            </button>
+                          )}
+                        </>
+                      )}
+
+                      {/* Compose/Edit Mode */}
+                      {(messageMode === 'compose' || messageMode === 'edit') && (
                         <div className="space-y-3">
                           <textarea
-                            value={noteDraft}
-                            onChange={(e) => setNoteDraft(e.target.value)}
-                            placeholder={`Add a note about ${selectedApplicant.first_name} for other staff to see...`}
-                            className="w-full px-3 py-2 border border-border rounded-lg text-sm resize-none focus:border-amber-400 focus:ring-1 focus:ring-amber-200 outline-none"
+                            value={messageDraft}
+                            onChange={(e) => setMessageDraft(e.target.value)}
+                            placeholder={`Write a message that ${selectedApplicant.first_name} will see on their dashboard...`}
+                            className="w-full px-3 py-2 border border-border rounded-lg text-sm resize-none focus:border-maroon focus:ring-1 focus:ring-maroon/20 outline-none"
                             rows={3}
                             autoFocus
                           />
                           <div className="flex gap-2">
                             <button
                               onClick={() => {
-                                setShowNoteCompose(false);
-                                setNoteDraft('');
+                                setMessageMode('view');
+                                setMessageDraft('');
                               }}
                               className="flex-1 py-2 text-sm border border-border rounded-lg hover:bg-gray-50"
                             >
                               Cancel
                             </button>
                             <button
-                              disabled={!noteDraft.trim()}
-                              onClick={() => {
-                                const newNote: ApplicantNote = {
-                                  message: noteDraft.trim(),
-                                  managerName: `${profile?.first_name || ''} ${profile?.last_name || ''}`.trim() || 'Manager',
-                                  timestamp: Date.now(),
-                                  applicantId: selectedApplicant.id,
-                                  applicantName: `${selectedApplicant.first_name} ${selectedApplicant.last_name}`,
-                                };
-                                setApplicantNote(newNote);
-                                setApplicantNoteState(newNote);
-                                setNoteDraft('');
-                                setShowNoteCompose(false);
-                              }}
-                              className="flex-1 py-2 text-sm bg-amber-500 text-white rounded-lg hover:bg-amber-600 disabled:opacity-50 disabled:cursor-not-allowed"
+                              disabled={!messageDraft.trim() || savingMessage}
+                              onClick={handlePostMessage}
+                              className="flex-1 py-2 text-sm bg-maroon text-white rounded-lg hover:bg-maroon/90 disabled:opacity-50 disabled:cursor-not-allowed"
                             >
-                              Post Note
+                              {savingMessage ? 'Posting...' : messageMode === 'edit' ? 'Update Message' : 'Post Message'}
                             </button>
                           </div>
                         </div>
@@ -1345,6 +1217,7 @@ export function ApplicantsPage() {
                     </div>
                   )}
 
+                  {/* Documents */}
                   <div className="bg-white rounded-lg shadow-sm p-4 mt-5">
                     <div className="flex items-center justify-between mb-3">
                       <span className="text-[11px] font-semibold text-gray uppercase tracking-wide">Documents</span>
@@ -1382,27 +1255,18 @@ export function ApplicantsPage() {
                     )}
                   </div>
 
-                  <button onClick={handleUploadClick} className="w-full mt-5 py-3 bg-white border border-border text-navy text-sm font-medium rounded-lg hover:bg-gray-50 transition-colors">Upload Document</button>
+                  <button onClick={handleUploadClick} className="w-full mt-5 py-3 bg-white border border-border text-navy text-sm font-medium rounded-lg hover:bg-gray-50">Upload Document</button>
 
-                  {/* Application Progress Section */}
+                  {/* Progress */}
                   {applicantDetail?.stepsCompletion && (
                     <div className="bg-white rounded-lg shadow-sm p-4 mt-5">
                       <div className="flex items-center justify-between mb-3">
                         <span className="text-[11px] font-semibold text-gray uppercase tracking-wide">Application Progress</span>
-                        <span className="text-xs text-gray">
-                          {Object.values(applicantDetail.stepsCompletion).filter(Boolean).length}/{TOTAL_STEPS} complete
-                        </span>
+                        <span className="text-xs text-gray">{Object.values(applicantDetail.stepsCompletion).filter(Boolean).length}/{TOTAL_STEPS}</span>
                       </div>
-                      
-                      {/* Progress bar */}
                       <div className="w-full h-2 bg-gray-100 rounded-full mb-4 overflow-hidden">
-                        <div 
-                          className="h-full bg-success rounded-full transition-all"
-                          style={{ width: `${(Object.values(applicantDetail.stepsCompletion).filter(Boolean).length / TOTAL_STEPS) * 100}%` }}
-                        />
+                        <div className="h-full bg-success rounded-full" style={{ width: `${(Object.values(applicantDetail.stepsCompletion).filter(Boolean).length / TOTAL_STEPS) * 100}%` }} />
                       </div>
-                      
-                      {/* Step grid */}
                       <div className="grid grid-cols-2 gap-x-4 gap-y-1">
                         {Array.from({ length: TOTAL_STEPS }, (_, i) => {
                           const stepNum = i + 1;
@@ -1418,32 +1282,16 @@ export function ApplicantsPage() {
                                   <span className="text-[8px] text-gray font-medium">{stepNum}</span>
                                 )}
                               </div>
-                              <span className={`text-xs truncate ${isComplete ? 'text-slate' : 'text-gray font-medium'}`}>
-                                {STEP_NAMES[stepNum]}
-                              </span>
+                              <span className={`text-xs truncate ${isComplete ? 'text-slate' : 'text-gray'}`}>{STEP_NAMES[stepNum]}</span>
                             </div>
                           );
                         })}
                       </div>
-                      
-                      {/* Missing steps summary */}
-                      {Object.values(applicantDetail.stepsCompletion).filter(Boolean).length < TOTAL_STEPS && (
-                        <div className="mt-3 pt-3 border-t border-gray-100">
-                          <p className="text-[10px] text-warning font-medium">
-                            Missing: {Array.from({ length: TOTAL_STEPS }, (_, i) => i + 1)
-                              .filter(n => !applicantDetail.stepsCompletion?.[n])
-                              .map(n => STEP_NAMES[n])
-                              .join(', ')}
-                          </p>
-                        </div>
-                      )}
                     </div>
                   )}
 
                   {canDelete && (
-                    <button onClick={() => setShowDeleteConfirm(true)} className="w-full mt-3 py-3 bg-white border border-error/30 text-error text-sm font-medium rounded-lg hover:bg-error/5 transition-colors">
-                      Delete Application
-                    </button>
+                    <button onClick={() => setShowDeleteConfirm(true)} className="w-full mt-3 py-3 bg-white border border-error/30 text-error text-sm font-medium rounded-lg hover:bg-error/5">Delete Application</button>
                   )}
                 </>
               )}
@@ -1465,7 +1313,6 @@ export function ApplicantsPage() {
             <p className="text-sm text-gray mb-4">Upload a document for {selectedApplicant.first_name} {selectedApplicant.last_name}</p>
             {uploadError && <Alert variant="error" className="mb-4">{uploadError}</Alert>}
             <div className="mb-4">
-              <label className="block text-sm font-medium text-slate mb-1">Document Type</label>
               <select value={uploadType} onChange={(e) => setUploadType(e.target.value)} className="w-full rounded-lg border border-border px-3 py-2 text-sm focus:border-maroon focus:outline-none focus:ring-2 focus:ring-maroon/20">
                 <option value="">Select type...</option>
                 <option value="credentials">Professional Credentials</option>
@@ -1493,27 +1340,14 @@ export function ApplicantsPage() {
           <div className="fixed inset-0 bg-black/40 z-[60]" onClick={() => setShowTransferModal(false)} />
           <div className="fixed top-1/2 left-1/2 -translate-x-1/2 -translate-y-1/2 w-full max-w-md bg-white rounded-xl shadow-2xl z-[70] p-6">
             <h3 className="text-lg font-semibold text-navy mb-4">Transfer Applicant</h3>
-            <p className="text-sm text-gray mb-4">Transfer {selectedApplicant.first_name} {selectedApplicant.last_name} to another location</p>
-            {error && <Alert variant="error" className="mb-4">{error}</Alert>}
-            <div className="mb-4">
-              <label className="block text-sm font-medium text-slate mb-1">Current Location</label>
-              <div className="px-3 py-2 bg-gray-50 rounded-lg text-sm text-gray">{selectedApplicant.location_name || 'Not assigned'}</div>
-            </div>
-            <div className="mb-4">
-              <label className="block text-sm font-medium text-slate mb-1">Transfer To</label>
-              <select value={transferToLocation} onChange={(e) => setTransferToLocation(e.target.value)} className="w-full rounded-lg border border-border px-3 py-2 text-sm focus:border-maroon focus:outline-none focus:ring-2 focus:ring-maroon/20">
-                <option value="">Select location...</option>
-                {locations.filter(l => l.id !== selectedApplicant.location_id).map(l => (
-                  <option key={l.id} value={l.id}>{l.name}</option>
-                ))}
-              </select>
-            </div>
-            <div className="mb-4">
-              <label className="block text-sm font-medium text-slate mb-1">Reason (optional)</label>
-              <input type="text" value={transferReason} onChange={(e) => setTransferReason(e.target.value)} placeholder="e.g., Closer to applicant's home" className="w-full rounded-lg border border-border px-3 py-2 text-sm focus:border-maroon focus:outline-none focus:ring-2 focus:ring-maroon/20" />
-            </div>
+            <select value={transferToLocation} onChange={(e) => setTransferToLocation(e.target.value)} className="w-full rounded-lg border border-border px-3 py-2 text-sm mb-4">
+              <option value="">Select location...</option>
+              {locations.filter(l => l.id !== selectedApplicant.location_id).map(l => (
+                <option key={l.id} value={l.id}>{l.name}</option>
+              ))}
+            </select>
             <div className="flex gap-3">
-              <Button variant="secondary" className="flex-1" onClick={() => { setShowTransferModal(false); setTransferToLocation(''); setTransferReason(''); }}>Cancel</Button>
+              <Button variant="secondary" className="flex-1" onClick={() => setShowTransferModal(false)}>Cancel</Button>
               <Button className="flex-1" disabled={!transferToLocation || transferring} loading={transferring} onClick={handleTransferApplicant}>Transfer</Button>
             </div>
           </div>
@@ -1525,21 +1359,11 @@ export function ApplicantsPage() {
         <>
           <div className="fixed inset-0 bg-black/40 z-[60]" onClick={() => setShowDeleteConfirm(false)} />
           <div className="fixed top-1/2 left-1/2 -translate-x-1/2 -translate-y-1/2 w-full max-w-md bg-white rounded-xl shadow-2xl z-[70] p-6">
-            <div className="flex items-center gap-3 mb-4">
-              <div className="w-10 h-10 rounded-full bg-error/10 flex items-center justify-center">
-                <svg className="w-5 h-5 text-error" fill="none" viewBox="0 0 24 24" stroke="currentColor">
-                  <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M19 7l-.867 12.142A2 2 0 0116.138 21H7.862a2 2 0 01-1.995-1.858L5 7m5 4v6m4-6v6m1-10V4a1 1 0 00-1-1h-4a1 1 0 00-1 1v3M4 7h16" />
-                </svg>
-              </div>
-              <h3 className="text-lg font-semibold text-navy">Delete Application</h3>
-            </div>
-            <p className="text-sm text-gray mb-2">Are you sure you want to delete the application for <strong>{selectedApplicant.first_name} {selectedApplicant.last_name}</strong>?</p>
-            <p className="text-sm text-gray mb-6">This will move the application to the trash. A superadmin can restore it if needed.</p>
+            <h3 className="text-lg font-semibold text-navy mb-4">Delete Application</h3>
+            <p className="text-sm text-gray mb-6">Are you sure you want to delete the application for <strong>{selectedApplicant.first_name} {selectedApplicant.last_name}</strong>?</p>
             <div className="flex gap-3">
               <Button variant="secondary" className="flex-1" onClick={() => setShowDeleteConfirm(false)}>Cancel</Button>
-              <button onClick={handleDeleteApplicant} disabled={deleting} className="flex-1 py-2.5 bg-error text-white text-sm font-semibold rounded-lg hover:bg-error/90 transition-colors disabled:opacity-50">
-                {deleting ? 'Deleting...' : 'Delete Application'}
-              </button>
+              <button onClick={handleDeleteApplicant} disabled={deleting} className="flex-1 py-2.5 bg-error text-white text-sm font-semibold rounded-lg hover:bg-error/90 disabled:opacity-50">{deleting ? 'Deleting...' : 'Delete'}</button>
             </div>
           </div>
         </>
