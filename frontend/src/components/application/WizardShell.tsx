@@ -77,7 +77,7 @@ const STEP_REQUIRED_FIELDS: Record<number, string[]> = {
     'ref2_phone',
   ],
   // Step 7: Employment History
-  7: [], // Has its own validation (at least one employer or no experience checkbox)
+  7: [], // Has its own custom validation below
   // Step 8: Work Preferences
   8: [
     'has_transportation',
@@ -88,7 +88,7 @@ const STEP_REQUIRED_FIELDS: Record<number, string[]> = {
   9: ['agreed', 'signature'],
   10: ['agreed', 'signature'],
   // Steps 11-17: Upload steps
-  11: ['worker_type', 'document_type'],
+  11: ['authorization_type'],  // Work authorization type is required
   12: ['id_type', 'id_number', 'issuing_state', 'expiration_date'],
   13: [],
   14: [],
@@ -193,11 +193,27 @@ export function WizardShell({
       return false;
     }
 
-    // Step 7 (Employment History) special case - need either employers or "no experience" checked
+    // Step 7 (Employment History) special case
     if (currentStep === 7) {
-      const employers = stepData.employers as Array<unknown> | undefined;
-      const noExperience = stepData.no_experience === true;
-      if (!noExperience && (!employers || employers.length === 0)) {
+      // Must answer "are you currently employed?"
+      const isCurrentlyEmployed = stepData.is_currently_employed as string;
+      if (!isCurrentlyEmployed) return false;
+      
+      // If currently employed, must provide current employer
+      if (isCurrentlyEmployed === 'yes') {
+        const currentEmployer = stepData.current_employer as string;
+        if (!currentEmployer || currentEmployer.trim() === '') return false;
+      }
+      
+      // Must have at least one previous employer with required fields filled
+      // OR have current employment (which counts as employment history)
+      const jobs = stepData.jobs as Array<{ employer?: string; title?: string }> | undefined;
+      const hasValidPreviousJob = jobs && jobs.length > 0 && 
+        jobs[0].employer && jobs[0].employer.trim() !== '' &&
+        jobs[0].title && jobs[0].title.trim() !== '';
+      
+      // If not currently employed, must have previous employment
+      if (isCurrentlyEmployed === 'no' && !hasValidPreviousJob) {
         return false;
       }
     }
@@ -260,8 +276,11 @@ export function WizardShell({
       stepData.eligible_to_work === 'no'
     )) ||
     (currentStep === 7 && (
-      stepData.no_experience !== true &&
-      (!stepData.employers || (stepData.employers as Array<unknown>).length === 0)
+      !stepData.is_currently_employed ||
+      (stepData.is_currently_employed === 'no' && (
+        !stepData.jobs || 
+        !(stepData.jobs as Array<{ employer?: string }>)[0]?.employer
+      ))
     ));
 
   const showValidationError = hasValidationErrors || hasSpecialErrors;
