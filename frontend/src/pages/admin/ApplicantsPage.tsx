@@ -1063,7 +1063,7 @@ export function ApplicantsPage() {
                   </svg>
                 </div>
               ) : editMode ? (
-                /* Edit Mode UI - same as before */
+                /* Edit Mode UI */
                 <div className="space-y-4">
                   <div className="bg-white rounded-lg shadow-sm p-4 space-y-3">
                     <h3 className="text-xs font-semibold text-gray uppercase tracking-wide">Personal Info</h3>
@@ -1099,6 +1099,62 @@ export function ApplicantsPage() {
                       <input type="text" value={editForm.city} onChange={(e) => setEditForm({ ...editForm, city: e.target.value })} placeholder="City" className="w-full px-3 py-2 border border-border rounded-lg text-sm focus:border-maroon focus:ring-1 focus:ring-maroon/20 outline-none" />
                       <input type="text" value={editForm.state} onChange={(e) => setEditForm({ ...editForm, state: e.target.value })} placeholder="State" className="w-full px-3 py-2 border border-border rounded-lg text-sm focus:border-maroon focus:ring-1 focus:ring-maroon/20 outline-none" />
                       <input type="text" value={editForm.zip} onChange={(e) => setEditForm({ ...editForm, zip: e.target.value })} placeholder="ZIP" className="w-full px-3 py-2 border border-border rounded-lg text-sm focus:border-maroon focus:ring-1 focus:ring-maroon/20 outline-none" />
+                    </div>
+                  </div>
+
+                  {/* SSN Section */}
+                  <div className="bg-white rounded-lg shadow-sm p-4 space-y-3">
+                    <h3 className="text-xs font-semibold text-gray uppercase tracking-wide">Social Security Number</h3>
+                    {applicantDetail?.ssn_last_four && !editingSsn && (
+                      <div className="flex items-center gap-3">
+                        <span className="text-sm text-slate font-mono">
+                          {ssnRevealed && revealedSsn ? revealedSsn : `***-**-${applicantDetail.ssn_last_four}`}
+                        </span>
+                        {!ssnRevealed && (
+                          <button onClick={handleRevealSsn} disabled={loadingSsn} className="text-xs text-maroon hover:underline">
+                            {loadingSsn ? 'Loading...' : 'Reveal'}
+                          </button>
+                        )}
+                        <button onClick={handleEditSsn} className="text-xs text-maroon hover:underline">Edit</button>
+                      </div>
+                    )}
+                    {(!applicantDetail?.ssn_last_four || editingSsn) && (
+                      <div className="space-y-2">
+                        <input
+                          type="text"
+                          value={formatSsnInput(newSsn)}
+                          onChange={(e) => setNewSsn(e.target.value.replace(/\D/g, '').slice(0, 9))}
+                          placeholder="XXX-XX-XXXX"
+                          className="w-full px-3 py-2 border border-border rounded-lg text-sm font-mono focus:border-maroon focus:ring-1 focus:ring-maroon/20 outline-none"
+                        />
+                        <div className="flex gap-2">
+                          {editingSsn && (
+                            <button onClick={() => { setEditingSsn(false); setNewSsn(''); }} className="flex-1 py-2 text-xs bg-white border border-border text-navy rounded-lg hover:bg-gray-50">Cancel</button>
+                          )}
+                          <button onClick={handleSaveSsn} disabled={savingSsn || newSsn.replace(/\D/g, '').length !== 9} className="flex-1 py-2 text-xs bg-maroon text-white rounded-lg hover:bg-maroon/90 disabled:opacity-50">
+                            {savingSsn ? 'Saving...' : 'Save SSN'}
+                          </button>
+                        </div>
+                      </div>
+                    )}
+                  </div>
+
+                  {/* Emergency Contact Section */}
+                  <div className="bg-white rounded-lg shadow-sm p-4 space-y-3">
+                    <h3 className="text-xs font-semibold text-gray uppercase tracking-wide">Emergency Contact</h3>
+                    <div>
+                      <label className="block text-xs text-gray mb-1">Name</label>
+                      <input type="text" value={editForm.emergency_name} onChange={(e) => setEditForm({ ...editForm, emergency_name: e.target.value })} placeholder="Emergency contact name" className="w-full px-3 py-2 border border-border rounded-lg text-sm focus:border-maroon focus:ring-1 focus:ring-maroon/20 outline-none" />
+                    </div>
+                    <div className="grid grid-cols-2 gap-3">
+                      <div>
+                        <label className="block text-xs text-gray mb-1">Relationship</label>
+                        <input type="text" value={editForm.emergency_relationship} onChange={(e) => setEditForm({ ...editForm, emergency_relationship: e.target.value })} placeholder="e.g. Spouse, Parent" className="w-full px-3 py-2 border border-border rounded-lg text-sm focus:border-maroon focus:ring-1 focus:ring-maroon/20 outline-none" />
+                      </div>
+                      <div>
+                        <label className="block text-xs text-gray mb-1">Phone</label>
+                        <input type="tel" value={editForm.emergency_phone} onChange={(e) => setEditForm({ ...editForm, emergency_phone: e.target.value })} placeholder="Phone number" className="w-full px-3 py-2 border border-border rounded-lg text-sm focus:border-maroon focus:ring-1 focus:ring-maroon/20 outline-none" />
+                      </div>
                     </div>
                   </div>
 
