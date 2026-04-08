@@ -50,6 +50,89 @@ TEMPLATE_DIR = Path(__file__).parent.parent / "templates"
 ASSETS_DIR = Path(__file__).parent.parent / "assets"
 
 
+# =============================================================================
+# EXACT I-9 FIELD MAPPING (from analyze_i9.py output)
+# =============================================================================
+I9_FIELD_MAPPING = {
+    # Section 1 - Employee Information (Page 1)
+    "last_name": "Last Name (Family Name)",
+    "first_name": "First Name Given Name",
+    "middle_initial": "Employee Middle Initial (if any)",
+    "other_names": "Employee Other Last Names Used (if any)",
+    "address_street": "Address Street Number and Name",
+    "address_apt": "Apt Number (if any)",
+    "address_city": "City or Town",
+    "address_state": "State",
+    "address_zip": "ZIP Code",
+    "date_of_birth": "Date of Birth mmddyyyy",
+    "ssn": "US Social Security Number",
+    "email": "Employees E-mail Address",
+    "phone": "Telephone Number",
+    
+    # Citizenship checkboxes
+    "citizen_checkbox": "CB_1",
+    "noncitizen_national_checkbox": "CB_2",
+    "lpr_checkbox": "CB_3",
+    "alien_authorized_checkbox": "CB_4",
+    
+    # LPR/Alien authorization fields
+    "lpr_uscis_number": "3 A lawful permanent resident Enter USCIS or ANumber",
+    "alien_expiration_date": "Exp Date mmddyyyy",
+    "alien_uscis_number": "USCIS ANumber",
+    "i94_number": "Form I94 Admission Number",
+    "foreign_passport_country": "Foreign Passport Number and Country of IssuanceRow1",
+    
+    # Employee signature
+    "employee_signature_date": "Today's Date mmddyyy",
+    "employee_signature": "Signature of Employee",
+    
+    # Section 2 - List A Documents
+    "list_a_doc_title": "Document Title 2 If any",  # First List A doc title field
+    "list_a_issuing": "Issuing Authority 1",
+    "list_a_doc_number": "Document Number 0 (if any)",
+    "list_a_expiration": "Expiration Date if any",
+    
+    # List A Document 2
+    "list_a_doc_title_2": "Document Title 2 If any",
+    "list_a_issuing_2": "Issuing Authority_2",
+    "list_a_doc_number_2": "Document Number If any_2",
+    "list_a_expiration_2": "List A.  Document 2. Expiration Date (if any)",
+    
+    # List A Document 3
+    "list_a_doc_title_3": "List A.   Document Title 3.  If any",
+    "list_a_issuing_3": "List A. Document 3.  Enter Issuing Authority",
+    "list_a_doc_number_3": "List A.  Document 3 Number.  If any",
+    "list_a_expiration_3": "Document Number if any_3",
+    
+    # Section 2 - List B Documents
+    "list_b_doc_title": "List B Document 1 Title",
+    "list_b_issuing": "List B Issuing Authority 1",
+    "list_b_doc_number": "List B Document Number 1",
+    "list_b_expiration": "List B Expiration Date 1",
+    
+    # Section 2 - List C Documents  
+    "list_c_doc_title": "List C Document Title 1",
+    "list_c_issuing": "List C Issuing Authority 1",
+    "list_c_doc_number": "List C Document Number 1",
+    "list_c_expiration": "List C Expiration Date 1",
+    
+    # Employer/Section 2 fields
+    "additional_info": "Additional Information",
+    "alternative_procedure_checkbox": "CB_Alt",
+    "first_day_employment": "FirstDayEmployed mmddyyyy",
+    "employer_name_title": "Last Name First Name and Title of Employer or Authorized Representative",
+    "employer_signature": "Signature of Employer or AR",
+    "employer_signature_date": "S2 Todays Date mmddyyyy",
+    "employer_organization": "Employers Business or Org Name",
+    "employer_address": "Employers Business or Org Address",
+    
+    # Preparer/Translator (Page 3)
+    "preparer_last_name_header": "Last Name Family Name from Section 1",
+    "preparer_first_name_header": "First Name Given Name from Section 1",
+    "preparer_middle_initial_header": "Middle initial if any from Section 1",
+}
+
+
 class PDFService:
     """Generates PDF documents from HTML templates."""
 
@@ -245,7 +328,7 @@ class PDFService:
             "page_count": len(reader.pages),
             "is_fillable": bool(fields),
             "fields": [],
-            "field_mapping": {},
+            "field_mapping": I9_FIELD_MAPPING,  # Use our hardcoded mapping
         }
 
         if not fields:
@@ -324,9 +407,6 @@ class PDFService:
         
         result["fields"].sort(key=sort_key)
 
-        # Auto-generate field mapping
-        result["field_mapping"] = self._auto_map_i9_fields(result["fields"])
-
         self._i9_field_cache = result
         return result
 
@@ -375,92 +455,6 @@ class PDFService:
             current = current.get('/Parent')
         return ".".join(reversed(components)) if components else None
 
-    def _auto_map_i9_fields(self, fields: List[Dict]) -> Dict[str, str]:
-        """
-        Automatically map semantic field names to PDF field IDs.
-        
-        Uses pattern matching on field IDs to identify fields.
-        """
-        import re
-
-        # Patterns to match against field IDs (case-insensitive)
-        patterns = {
-            # Section 1 - Employee Info
-            "last_name": [r"last.*name", r"family.*name", r"surname"],
-            "first_name": [r"first.*name", r"given.*name"],
-            "middle_initial": [r"middle.*initial", r"mi\b"],
-            "other_names": [r"other.*name", r"maiden"],
-            "address_street": [r"address.*street", r"street.*number"],
-            "address_apt": [r"apt", r"apartment", r"unit"],
-            "address_city": [r"city", r"town"],
-            "address_state": [r"\bstate\b"],
-            "address_zip": [r"zip", r"postal"],
-            "date_of_birth": [r"birth", r"dob"],
-            "ssn": [r"ssn", r"social.*security"],
-            "email": [r"e-?mail"],
-            "phone": [r"phone", r"telephone"],
-            
-            # Citizenship checkboxes
-            "citizen_checkbox": [r"citizen.*us", r"checkbox.*1\b", r"citizen\b"],
-            "noncitizen_national_checkbox": [r"noncitizen.*national", r"checkbox.*2\b"],
-            "lpr_checkbox": [r"lawful.*permanent", r"lpr", r"checkbox.*3\b"],
-            "alien_authorized_checkbox": [r"alien.*auth", r"checkbox.*4\b"],
-            
-            # Authorization fields
-            "uscis_number": [r"uscis", r"a-?number"],
-            "expiration_date": [r"expir"],
-            "i94_number": [r"i-?94", r"admission.*number"],
-            "foreign_passport": [r"foreign.*passport"],
-            "country_issuance": [r"country.*issu"],
-            
-            # Signature
-            "employee_signature_date": [r"employee.*signature.*date", r"sign.*date.*1"],
-            
-            # Section 2 - Document fields
-            "list_a_doc_title": [r"list.*a.*title", r"list.*a.*doc"],
-            "list_a_issuing": [r"list.*a.*issuing", r"list.*a.*auth"],
-            "list_a_doc_number": [r"list.*a.*number"],
-            "list_a_expiration": [r"list.*a.*expir"],
-            
-            "list_b_doc_title": [r"list.*b.*title", r"list.*b.*doc"],
-            "list_b_issuing": [r"list.*b.*issuing", r"list.*b.*auth"],
-            "list_b_doc_number": [r"list.*b.*number"],
-            "list_b_expiration": [r"list.*b.*expir"],
-            
-            "list_c_doc_title": [r"list.*c.*title", r"list.*c.*doc"],
-            "list_c_issuing": [r"list.*c.*issuing", r"list.*c.*auth"],
-            "list_c_doc_number": [r"list.*c.*number"],
-            "list_c_expiration": [r"list.*c.*expir"],
-            
-            # Employer fields
-            "first_day_employment": [r"first.*day.*employ", r"employment.*date"],
-            "employer_last_name": [r"employer.*last.*name"],
-            "employer_first_name": [r"employer.*first.*name"],
-            "employer_title": [r"employer.*title", r"title.*employer"],
-            "employer_organization": [r"organization", r"business.*name", r"company"],
-            "employer_address": [r"employer.*address"],
-            "employer_city": [r"employer.*city"],
-            "employer_state": [r"employer.*state"],
-            "employer_zip": [r"employer.*zip"],
-            "employer_signature_date": [r"employer.*signature.*date", r"sign.*date.*2"],
-        }
-
-        mapping = {}
-        
-        for field in fields:
-            field_id = field.get("field_id", "")
-            field_lower = field_id.lower().replace(" ", "").replace("-", "").replace("_", "")
-
-            for semantic_name, pattern_list in patterns.items():
-                if semantic_name in mapping:
-                    continue
-                for pattern in pattern_list:
-                    if re.search(pattern.replace(" ", "").replace("_", ""), field_lower):
-                        mapping[semantic_name] = field_id
-                        break
-
-        return mapping
-
     def generate_i9_form(
         self,
         application_data: Dict[str, Any],
@@ -501,10 +495,6 @@ class PDFService:
             writer.write(output)
             return output.getvalue()
 
-        # Get field analysis and mapping
-        field_info = self._analyze_i9_fields()
-        field_mapping = field_info.get("field_mapping", {})
-
         # Extract applicant info from steps
         steps = application_data.get("steps", {})
         step2_data = steps.get(2, {}).get("data", {})
@@ -534,96 +524,111 @@ class PDFService:
         middle_name = personal.get("middle_name", "")
         middle_initial = middle_name[0].upper() if middle_name else ""
 
-        # Build values to fill using discovered field mapping
-        values_to_fill = {}
+        # Today's date
+        today = datetime.now().strftime("%m/%d/%Y")
 
-        # Helper to add value if field exists in mapping
-        def add_if_mapped(semantic_name: str, value: str):
-            if value and semantic_name in field_mapping:
-                values_to_fill[field_mapping[semantic_name]] = value
+        # Build field values using the EXACT field names from the PDF
+        values_to_fill = {}
+        
+        def set_field(semantic_name: str, value: str):
+            """Set a field value using our mapping."""
+            if value and semantic_name in I9_FIELD_MAPPING:
+                values_to_fill[I9_FIELD_MAPPING[semantic_name]] = value
 
         # Section 1 - Employee Information
-        add_if_mapped("last_name", personal.get("last_name", ""))
-        add_if_mapped("first_name", personal.get("first_name", ""))
-        add_if_mapped("middle_initial", middle_initial)
-        add_if_mapped("other_names", personal.get("other_names", ""))
-        add_if_mapped("address_street", personal.get("address_line1", ""))
-        add_if_mapped("address_apt", personal.get("address_line2", ""))
-        add_if_mapped("address_city", personal.get("city", ""))
-        add_if_mapped("address_state", personal.get("state", ""))
-        add_if_mapped("address_zip", personal.get("zip", personal.get("zip_code", "")))
-        add_if_mapped("date_of_birth", dob)
-        add_if_mapped("ssn", ssn_formatted)
-        add_if_mapped("email", personal.get("email", ""))
-        add_if_mapped("phone", personal.get("phone", ""))
+        set_field("last_name", personal.get("last_name", ""))
+        set_field("first_name", personal.get("first_name", ""))
+        set_field("middle_initial", middle_initial)
+        set_field("other_names", personal.get("other_names", personal.get("maiden_name", "")))
+        set_field("address_street", personal.get("address_line1", ""))
+        set_field("address_apt", personal.get("address_line2", ""))
+        set_field("address_city", personal.get("city", ""))
+        set_field("address_state", personal.get("state", ""))
+        set_field("address_zip", personal.get("zip", personal.get("zip_code", "")))
+        set_field("date_of_birth", dob)
+        set_field("ssn", ssn_formatted)
+        set_field("email", personal.get("email", ""))
+        set_field("phone", personal.get("phone", ""))
+        set_field("employee_signature_date", today)
 
-        # Today's date for employee signature
-        today = datetime.now().strftime("%m/%d/%Y")
-        add_if_mapped("employee_signature_date", today)
+        # Citizenship status - check the appropriate box
+        citizenship = personal.get("citizenship_status", "citizen")
+        if citizenship == "citizen":
+            values_to_fill["CB_1"] = "/On"
+        elif citizenship == "noncitizen_national":
+            values_to_fill["CB_2"] = "/On"
+        elif citizenship == "lpr":
+            values_to_fill["CB_3"] = "/On"
+            set_field("lpr_uscis_number", personal.get("uscis_number", ""))
+        elif citizenship == "alien_authorized":
+            values_to_fill["CB_4"] = "/On"
+            set_field("alien_expiration_date", personal.get("work_auth_expiration", ""))
+            set_field("alien_uscis_number", personal.get("uscis_number", ""))
+            set_field("i94_number", personal.get("i94_number", ""))
+            set_field("foreign_passport_country", personal.get("foreign_passport", ""))
 
         # Section 2 - Employer (if provided)
         if employer_data:
-            add_if_mapped("first_day_employment", employer_data.get("first_day", ""))
-            add_if_mapped("employer_last_name", employer_data.get("employer_last_name", ""))
-            add_if_mapped("employer_first_name", employer_data.get("employer_first_name", ""))
-            add_if_mapped("employer_title", employer_data.get("employer_title", ""))
-            add_if_mapped("employer_organization", employer_data.get("organization", "Eveready Home Care"))
-            add_if_mapped("employer_address", employer_data.get("address", "2700 S. Quincy Street Suite #220"))
-            add_if_mapped("employer_city", employer_data.get("city", "Arlington"))
-            add_if_mapped("employer_state", employer_data.get("state", "VA"))
-            add_if_mapped("employer_zip", employer_data.get("zip", "22206"))
-            add_if_mapped("employer_signature_date", today)
+            set_field("first_day_employment", employer_data.get("first_day", today))
+            
+            # Employer name and title combined
+            emp_name = employer_data.get("employer_name", "")
+            emp_title = employer_data.get("employer_title", "")
+            if emp_name and emp_title:
+                set_field("employer_name_title", f"{emp_name}, {emp_title}")
+            elif emp_name:
+                set_field("employer_name_title", emp_name)
+            
+            set_field("employer_signature_date", today)
+            set_field("employer_organization", employer_data.get("organization", "Eveready Home Care"))
+            
+            # Combine address into single field
+            emp_addr = employer_data.get("address", "2700 S. Quincy Street Suite #220")
+            emp_city = employer_data.get("city", "Arlington")
+            emp_state = employer_data.get("state", "VA")
+            emp_zip = employer_data.get("zip", "22206")
+            full_address = f"{emp_addr}, {emp_city}, {emp_state} {emp_zip}"
+            set_field("employer_address", full_address)
+
+            # Alternative procedure checkbox
+            if employer_data.get("alternative_procedure"):
+                values_to_fill["CB_Alt"] = "/Yes"
 
             # Document info
             docs = employer_data.get("documents", {})
+            
+            # List A documents (identity + work auth combined)
             if docs.get("list_a"):
                 doc = docs["list_a"]
-                add_if_mapped("list_a_doc_title", doc.get("title", ""))
-                add_if_mapped("list_a_issuing", doc.get("issuing_authority", ""))
-                add_if_mapped("list_a_doc_number", doc.get("number", ""))
-                add_if_mapped("list_a_expiration", doc.get("expiration", ""))
+                set_field("list_a_doc_title", doc.get("title", ""))
+                set_field("list_a_issuing", doc.get("issuing_authority", ""))
+                set_field("list_a_doc_number", doc.get("number", ""))
+                set_field("list_a_expiration", doc.get("expiration", ""))
             
+            # List B document (identity only)
             if docs.get("list_b"):
                 doc = docs["list_b"]
-                add_if_mapped("list_b_doc_title", doc.get("title", ""))
-                add_if_mapped("list_b_issuing", doc.get("issuing_authority", ""))
-                add_if_mapped("list_b_doc_number", doc.get("number", ""))
-                add_if_mapped("list_b_expiration", doc.get("expiration", ""))
+                set_field("list_b_doc_title", doc.get("title", ""))
+                set_field("list_b_issuing", doc.get("issuing_authority", ""))
+                set_field("list_b_doc_number", doc.get("number", ""))
+                set_field("list_b_expiration", doc.get("expiration", ""))
             
+            # List C document (work auth only)
             if docs.get("list_c"):
                 doc = docs["list_c"]
-                add_if_mapped("list_c_doc_title", doc.get("title", ""))
-                add_if_mapped("list_c_issuing", doc.get("issuing_authority", ""))
-                add_if_mapped("list_c_doc_number", doc.get("number", ""))
-                add_if_mapped("list_c_expiration", doc.get("expiration", ""))
+                set_field("list_c_doc_title", doc.get("title", ""))
+                set_field("list_c_issuing", doc.get("issuing_authority", ""))
+                set_field("list_c_doc_number", doc.get("number", ""))
+                set_field("list_c_expiration", doc.get("expiration", ""))
 
-        # Also try common I-9 field name patterns directly (fallback)
-        # These are common patterns in official USCIS I-9 PDFs
-        fallback_mappings = {
-            "Last Name (Family Name)": personal.get("last_name", ""),
-            "First Name (Given Name)": personal.get("first_name", ""),
-            "Middle Initial": middle_initial,
-            "Other Last Names Used (if any)": "",
-            "Address (Street Number and Name)": personal.get("address_line1", ""),
-            "Apt. Number (if any)": personal.get("address_line2", ""),
-            "City or Town": personal.get("city", ""),
-            "State": personal.get("state", ""),
-            "ZIP Code": personal.get("zip", personal.get("zip_code", "")),
-            "Date of Birth (mm/dd/yyyy)": dob,
-            "U.S. Social Security Number": ssn_formatted,
-            "Employee's E-mail Address": personal.get("email", ""),
-            "Employee's Telephone Number": personal.get("phone", ""),
-        }
-
-        # Merge fallback (don't overwrite discovered mappings)
-        for field_name, value in fallback_mappings.items():
-            if field_name not in values_to_fill and value:
-                values_to_fill[field_name] = value
+            # Additional info
+            if employer_data.get("additional_info"):
+                set_field("additional_info", employer_data["additional_info"])
 
         # Fill the form
         if values_to_fill:
             try:
-                # Try to fill page 1 (main form)
+                # Fill page 1 (main form - sections 1 and 2)
                 writer.update_page_form_field_values(
                     writer.pages[0],
                     values_to_fill,
@@ -632,8 +637,8 @@ class PDFService:
                 logger.info(f"Filled I-9 form with {len(values_to_fill)} fields for: "
                            f"{personal.get('first_name', '')} {personal.get('last_name', '')}")
             except Exception as e:
-                logger.warning(f"Could not fill some I-9 form fields: {e}")
-                # Try filling fields one by one to see which work
+                logger.warning(f"Bulk fill failed, trying individual fields: {e}")
+                # Try filling fields one by one
                 for field_id, value in values_to_fill.items():
                     try:
                         writer.update_page_form_field_values(
@@ -641,8 +646,8 @@ class PDFService:
                             {field_id: value},
                             auto_regenerate=False
                         )
-                    except Exception:
-                        logger.debug(f"Could not fill field: {field_id}")
+                    except Exception as field_error:
+                        logger.debug(f"Could not fill field '{field_id}': {field_error}")
 
         # Set NeedAppearances to ensure fields display properly
         try:
