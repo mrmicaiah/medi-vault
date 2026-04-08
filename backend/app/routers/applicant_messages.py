@@ -47,7 +47,23 @@ async def get_staff_user(
     if role not in ("admin", "superadmin", "manager"):
         raise HTTPException(status_code=403, detail="Staff access required")
     
-    return {"user_id": str(auth_user.id), "role": role, "profile": profile}
+    # Get location name if manager has a location
+    location_name = None
+    location_id = profile.get("location_id")
+    if location_id:
+        try:
+            loc_res = supabase.table("locations").select("name").eq("id", location_id).single().execute()
+            if loc_res.data:
+                location_name = loc_res.data.get("name")
+        except:
+            pass
+    
+    return {
+        "user_id": str(auth_user.id), 
+        "role": role, 
+        "profile": profile,
+        "location_name": location_name
+    }
 
 
 async def get_any_user(
@@ -134,7 +150,10 @@ async def create_or_update_message(
             raise HTTPException(status_code=404, detail="Application not found")
         
         profile = user["profile"]
+        # Store first name only for display, and location
+        posted_by_first_name = profile.get('first_name', '') or 'Manager'
         posted_by_name = f"{profile.get('first_name', '')} {profile.get('last_name', '')}".strip() or "Manager"
+        location_name = user.get("location_name") or ""
         
         # Check if message already exists for this application
         existing = supabase.table("applicant_messages").select("id").eq(
@@ -148,6 +167,8 @@ async def create_or_update_message(
                 "message": message_text,
                 "posted_by": user["user_id"],
                 "posted_by_name": posted_by_name,
+                "posted_by_first_name": posted_by_first_name,
+                "location_name": location_name,
                 "updated_at": datetime.utcnow().isoformat()
             }).eq("id", msg_id).execute()
             
@@ -159,6 +180,8 @@ async def create_or_update_message(
                 "message": message_text,
                 "posted_by": user["user_id"],
                 "posted_by_name": posted_by_name,
+                "posted_by_first_name": posted_by_first_name,
+                "location_name": location_name,
                 "created_at": datetime.utcnow().isoformat(),
                 "updated_at": datetime.utcnow().isoformat()
             }).execute()
