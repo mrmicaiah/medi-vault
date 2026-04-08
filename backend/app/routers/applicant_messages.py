@@ -161,7 +161,7 @@ async def create_or_update_message(
         ).execute()
         
         if existing.data and len(existing.data) > 0:
-            # Update existing message
+            # Update existing message - reset read_at since it's a new message
             msg_id = existing.data[0]["id"]
             update_res = supabase.table("applicant_messages").update({
                 "message": message_text,
@@ -169,6 +169,7 @@ async def create_or_update_message(
                 "posted_by_name": posted_by_name,
                 "posted_by_first_name": posted_by_first_name,
                 "location_name": location_name,
+                "read_at": None,  # Reset read status when message is updated
                 "updated_at": datetime.utcnow().isoformat()
             }).eq("id", msg_id).execute()
             
@@ -182,6 +183,7 @@ async def create_or_update_message(
                 "posted_by_name": posted_by_name,
                 "posted_by_first_name": posted_by_first_name,
                 "location_name": location_name,
+                "read_at": None,
                 "created_at": datetime.utcnow().isoformat(),
                 "updated_at": datetime.utcnow().isoformat()
             }).execute()
@@ -191,6 +193,35 @@ async def create_or_update_message(
         raise
     except Exception as e:
         logger.error(f"Create/update message error: {e}")
+        raise HTTPException(status_code=500, detail=str(e))
+
+
+@router.post("/{application_id}/read")
+async def mark_message_as_read(
+    application_id: str,
+    supabase: Client = Depends(get_supabase),
+    user: dict = Depends(get_any_user)
+):
+    """Mark a message as read. Only the applicant who owns the application can do this."""
+    try:
+        # Verify applicant owns this application
+        app_res = supabase.table("applications").select("user_id").eq("id", application_id).single().execute()
+        if not app_res.data:
+            raise HTTPException(status_code=404, detail="Application not found")
+        
+        if app_res.data.get("user_id") != user["user_id"]:
+            raise HTTPException(status_code=403, detail="Not authorized to mark this message as read")
+        
+        # Update the message with read_at timestamp
+        update_res = supabase.table("applicant_messages").update({
+            "read_at": datetime.utcnow().isoformat()
+        }).eq("application_id", application_id).execute()
+        
+        return {"success": True}
+    except HTTPException:
+        raise
+    except Exception as e:
+        logger.error(f"Mark read error: {e}")
         raise HTTPException(status_code=500, detail=str(e))
 
 
