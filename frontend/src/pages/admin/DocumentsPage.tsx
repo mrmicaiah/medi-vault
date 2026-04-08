@@ -83,10 +83,19 @@ const formatTimeAgo = (dateStr: string) => {
 // Document completion status
 type DocStatus = 'complete' | 'partial' | 'missing';
 
+// Required upload steps (11-17) and required agreement steps (9, 10, 18-22)
+const REQUIRED_UPLOAD_STEPS = [12, 14]; // ID Front and SSN Card are required
+const ALL_UPLOAD_STEPS = [11, 12, 13, 14, 15, 16, 17]; // All possible uploads
+const REQUIRED_AGREEMENT_STEPS = [9, 10, 18, 19, 20, 21, 22]; // All agreements
+
 interface ApplicantWithDocs extends Applicant {
   docStatus?: DocStatus;
   uploadedCount?: number;
-  totalRequired?: number;
+  agreementCount?: number;
+  totalUploads?: number;
+  totalAgreements?: number;
+  requiredUploadsComplete?: boolean;
+  allAgreementsSigned?: boolean;
 }
 
 export default function DocumentsPage() {
@@ -102,8 +111,8 @@ export default function DocumentsPage() {
   // Pool collapse state
   const [expandedPools, setExpandedPools] = useState<Set<string>>(new Set());
   const [completeExpanded, setCompleteExpanded] = useState(false);
-  const [partialExpanded, setPartialExpanded] = useState(false);
-  const [missingExpanded, setMissingExpanded] = useState(false);
+  const [partialExpanded, setPartialExpanded] = useState(true); // Default open for partial
+  const [missingExpanded, setMissingExpanded] = useState(true); // Default open for missing
   
   // Slide-out panel state
   const [panelOpen, setPanelOpen] = useState(false);
@@ -141,12 +150,73 @@ export default function DocumentsPage() {
       const submitted = (data.applications || []).filter(a => 
         ['submitted', 'under_review', 'approved', 'hired'].includes(a.status)
       );
-      setApplicants(submitted);
+      
+      // Load document status for each applicant
+      const applicantsWithDocs = await loadDocumentStatuses(submitted);
+      setApplicants(applicantsWithDocs);
     } catch (err) {
       setError(err instanceof Error ? err.message : 'Failed to load applicants');
     } finally {
       setLoading(false);
     }
+  }
+
+  async function loadDocumentStatuses(apps: Applicant[]): Promise<ApplicantWithDocs[]> {
+    // Load document summaries in parallel for all applicants
+    const results = await Promise.all(
+      apps.map(async (app) => {
+        try {
+          const summary = await api.get<DocumentSummary>(`/admin/applicants/${app.id}/documents-summary`);
+          
+          // Count uploaded documents
+          const uploadedCount = summary.documents.uploaded.length;
+          const uploadedSteps = new Set(summary.documents.uploaded.map(d => d.step_number));
+          
+          // Check if required uploads are complete (ID Front step 12, SSN Card step 14)
+          const requiredUploadsComplete = REQUIRED_UPLOAD_STEPS.every(step => uploadedSteps.has(step));
+          
+          // Count signed agreements
+          const signedAgreements = summary.documents.onboarding_agreements.filter(a => a.signed).length;
+          const totalAgreements = REQUIRED_AGREEMENT_STEPS.length;
+          const allAgreementsSigned = signedAgreements >= totalAgreements;
+          
+          // Determine status
+          let docStatus: DocStatus;
+          if (requiredUploadsComplete && allAgreementsSigned) {
+            docStatus = 'complete';
+          } else if (uploadedCount > 0 || signedAgreements > 0) {
+            docStatus = 'partial';
+          } else {
+            docStatus = 'missing';
+          }
+          
+          return {
+            ...app,
+            docStatus,
+            uploadedCount,
+            agreementCount: signedAgreements,
+            totalUploads: ALL_UPLOAD_STEPS.length,
+            totalAgreements,
+            requiredUploadsComplete,
+            allAgreementsSigned,
+          };
+        } catch {
+          // If we can't load docs, mark as missing
+          return {
+            ...app,
+            docStatus: 'missing' as DocStatus,
+            uploadedCount: 0,
+            agreementCount: 0,
+            totalUploads: ALL_UPLOAD_STEPS.length,
+            totalAgreements: REQUIRED_AGREEMENT_STEPS.length,
+            requiredUploadsComplete: false,
+            allAgreementsSigned: false,
+          };
+        }
+      })
+    );
+    
+    return results;
   }
 
   async function loadDocuments(applicant: ApplicantWithDocs) {
@@ -278,10 +348,10 @@ export default function DocumentsPage() {
       }
     });
     
-    // Categorize by status as proxy for document completion
-    const complete = filtered.filter(a => a.status === 'approved' || a.status === 'hired');
-    const partial = filtered.filter(a => a.status === 'under_review');
-    const missing = filtered.filter(a => a.status === 'submitted');
+    // Categorize by actual document status
+    const complete = filtered.filter(a => a.docStatus === 'complete');
+    const partial = filtered.filter(a => a.docStatus === 'partial');
+    const missing = filtered.filter(a => a.docStatus === 'missing');
     
     return {
       byPosition: pools,
@@ -303,8 +373,10 @@ export default function DocumentsPage() {
     });
   };
 
-  const getDocStatusBadge = (status: string) => {
-    if (status === 'approved' || status === 'hired') {
+  const getDocStatusBadge = (applicant: ApplicantWithDocs) => {
+    const { docStatus, uploadedCount = 0, agreementCount = 0, totalUploads = 7, totalAgreements = 7 } = applicant;
+    
+    if (docStatus === 'complete') {
       return (
         <span className="inline-flex items-center gap-1 px-2 py-0.5 rounded text-xs font-medium bg-success/10 text-success">
           <span className="w-1.5 h-1.5 rounded-full bg-success" />
@@ -312,11 +384,11 @@ export default function DocumentsPage() {
         </span>
       );
     }
-    if (status === 'under_review') {
+    if (docStatus === 'partial') {
       return (
         <span className="inline-flex items-center gap-1 px-2 py-0.5 rounded text-xs font-medium bg-warning/10 text-warning">
           <span className="w-1.5 h-1.5 rounded-full bg-warning" />
-          Partial
+          {uploadedCount}/{totalUploads} docs
         </span>
       );
     }
@@ -352,7 +424,7 @@ export default function DocumentsPage() {
         {/* Doc status and location */}
         <div className="hidden sm:flex items-center gap-3">
           <span className="text-xs text-gray">{applicant.location_name || '—'}</span>
-          {getDocStatusBadge(applicant.status)}
+          {getDocStatusBadge(applicant)}
         </div>
         
         <span className="text-xs text-gray-400 flex-shrink-0">
@@ -376,6 +448,7 @@ export default function DocumentsPage() {
     expanded,
     onToggle,
     borderColor = 'border-border',
+    subtitle,
   }: { 
     id: string;
     title: string; 
@@ -385,6 +458,7 @@ export default function DocumentsPage() {
     expanded: boolean;
     onToggle: () => void;
     borderColor?: string;
+    subtitle?: string;
   }) => {
     const count = poolApplicants.length;
     
@@ -398,7 +472,10 @@ export default function DocumentsPage() {
         >
           <div className="flex items-center gap-3">
             <span className="text-xl">{icon}</span>
-            <span className="font-semibold text-navy">{title}</span>
+            <div className="text-left">
+              <span className="font-semibold text-navy">{title}</span>
+              {subtitle && <p className="text-xs text-gray">{subtitle}</p>}
+            </div>
             <span className={`px-2 py-0.5 rounded-full text-xs font-bold text-white ${color}`}>{count}</span>
           </div>
           <svg 
@@ -424,23 +501,49 @@ export default function DocumentsPage() {
 
   // Count documents
   const getDocumentCounts = () => {
-    if (!documentSummary) return { generated: 0, agreements: 0, uploaded: 0 };
+    if (!documentSummary) return { generated: 0, agreements: 0, uploaded: 0, missingUploads: 0 };
+    
+    const uploadedSteps = new Set(documentSummary.documents.uploaded.map(d => d.step_number));
+    const missingUploads = ALL_UPLOAD_STEPS.filter(step => !uploadedSteps.has(step)).length;
+    
     return {
       generated: documentSummary.documents.generated.length,
       agreements: documentSummary.documents.onboarding_agreements.length,
       uploaded: documentSummary.documents.uploaded.length,
+      missingUploads,
     };
   };
 
   const counts = getDocumentCounts();
 
+  // Get missing upload names for the panel
+  const getMissingUploads = () => {
+    if (!documentSummary) return [];
+    
+    const uploadedSteps = new Set(documentSummary.documents.uploaded.map(d => d.step_number));
+    const uploadNames: Record<number, string> = {
+      11: 'Work Authorization',
+      12: 'ID Front',
+      13: 'ID Back',
+      14: 'Social Security Card',
+      15: 'Credentials',
+      16: 'CPR Certification',
+      17: 'TB Test',
+    };
+    
+    return ALL_UPLOAD_STEPS
+      .filter(step => !uploadedSteps.has(step))
+      .map(step => ({ step, name: uploadNames[step] }));
+  };
+
   if (loading) {
     return (
-      <div className="flex items-center justify-center py-12">
+      <div className="flex flex-col items-center justify-center py-12 gap-3">
         <svg className="h-8 w-8 animate-spin text-maroon" fill="none" viewBox="0 0 24 24">
           <circle className="opacity-25" cx="12" cy="12" r="10" stroke="currentColor" strokeWidth="4" />
           <path className="opacity-75" fill="currentColor" d="M4 12a8 8 0 018-8V0C5.373 0 0 5.373 0 12h4z" />
         </svg>
+        <p className="text-sm text-gray">Loading document statuses...</p>
       </div>
     );
   }
@@ -452,7 +555,7 @@ export default function DocumentsPage() {
         <div>
           <h1 className="font-display text-2xl font-bold text-navy">Documents</h1>
           <p className="text-sm text-gray mt-1">
-            {applicants.length} applicants with documents to review
+            {applicants.length} applicants • {completeApplicants.length} complete, {partialApplicants.length} partial, {missingApplicants.length} missing
           </p>
         </div>
       </div>
@@ -481,34 +584,37 @@ export default function DocumentsPage() {
       <div className="space-y-4">
         <h2 className="text-sm font-semibold text-gray uppercase tracking-wide px-1">By Document Status</h2>
         
-        {/* Needs Review (Submitted) */}
+        {/* Missing Documents */}
         <PoolSection
           id="missing"
-          title="Needs Review"
-          icon="📋"
-          color="bg-amber-500"
+          title="Missing Documents"
+          subtitle="No uploads or agreements"
+          icon="⚠️"
+          color="bg-error"
           applicants={missingApplicants}
           expanded={missingExpanded}
           onToggle={() => setMissingExpanded(!missingExpanded)}
-          borderColor="border-amber-200"
+          borderColor="border-error/30"
         />
         
-        {/* Under Review (Partial) */}
+        {/* Partial Documents */}
         <PoolSection
           id="partial"
-          title="Under Review"
-          icon="🔍"
-          color="bg-purple-500"
+          title="Incomplete"
+          subtitle="Some documents uploaded"
+          icon="📋"
+          color="bg-warning"
           applicants={partialApplicants}
           expanded={partialExpanded}
           onToggle={() => setPartialExpanded(!partialExpanded)}
-          borderColor="border-purple-200"
+          borderColor="border-warning/30"
         />
         
-        {/* Complete (Approved/Hired) */}
+        {/* Complete Documents */}
         <PoolSection
           id="complete"
           title="Documents Complete"
+          subtitle="All required docs & agreements"
           icon="✅"
           color="bg-success"
           applicants={completeApplicants}
@@ -608,7 +714,9 @@ export default function DocumentsPage() {
                 }`}
               >
                 Uploads
-                <span className="ml-1.5 rounded-full bg-gray-100 px-1.5 py-0.5 text-xs">{counts.uploaded}</span>
+                <span className={`ml-1.5 rounded-full px-1.5 py-0.5 text-xs ${counts.missingUploads > 0 ? 'bg-warning/20 text-warning' : 'bg-gray-100'}`}>
+                  {counts.uploaded}/{ALL_UPLOAD_STEPS.length}
+                </span>
               </button>
               <button
                 onClick={() => setActiveTab('agreements')}
@@ -646,6 +754,23 @@ export default function DocumentsPage() {
               ) : activeTab === 'uploaded' ? (
                 /* Uploaded Documents Tab */
                 <div className="space-y-3">
+                  {/* Missing uploads warning */}
+                  {getMissingUploads().length > 0 && (
+                    <div className="bg-warning/10 border border-warning/30 rounded-lg p-4 mb-4">
+                      <div className="flex items-center gap-2 mb-2">
+                        <svg className="w-4 h-4 text-warning" fill="none" viewBox="0 0 24 24" stroke="currentColor">
+                          <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M12 9v2m0 4h.01m-6.938 4h13.856c1.54 0 2.502-1.667 1.732-3L13.732 4c-.77-1.333-2.694-1.333-3.464 0L3.34 16c-.77 1.333.192 3 1.732 3z" />
+                        </svg>
+                        <span className="font-medium text-warning text-sm">Missing Uploads</span>
+                      </div>
+                      <ul className="text-xs text-warning/80 space-y-1">
+                        {getMissingUploads().map(({ step, name }) => (
+                          <li key={step}>• {name}</li>
+                        ))}
+                      </ul>
+                    </div>
+                  )}
+                  
                   {documentSummary.documents.uploaded.length === 0 ? (
                     <div className="bg-white rounded-lg shadow-sm p-6 text-center">
                       <div className="text-3xl mb-2">📎</div>
