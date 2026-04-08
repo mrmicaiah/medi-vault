@@ -33,6 +33,12 @@ export function ApplicationBasics({ data, onSave }: StepProps) {
     referral_name: (data.referral_name as string) || '',
     worked_for_eveready_before: (data.worked_for_eveready_before as string) || '',
     previous_eveready_details: (data.previous_eveready_details as string) || '',
+    
+    // Certifications - existing or interested
+    certifications: (data.certifications as string[]) || [],
+    has_cpr: (data.has_cpr as string) || '',
+    interested_in_hha: (data.interested_in_hha as string) || '',
+    interested_in_cpr: (data.interested_in_cpr as string) || '',
   });
 
   const handleChange = (field: string, value: unknown) => {
@@ -45,6 +51,24 @@ export function ApplicationBasics({ data, onSave }: StepProps) {
     
     setForm(updated);
     onSave(updated);
+  };
+
+  const handleCertificationToggle = (cert: string) => {
+    const current = form.certifications || [];
+    let updated: string[];
+    
+    if (current.includes(cert)) {
+      updated = current.filter(c => c !== cert);
+    } else {
+      // If selecting a cert, remove 'none' if present
+      if (cert === 'none') {
+        updated = ['none'];
+      } else {
+        updated = [...current.filter(c => c !== 'none'), cert];
+      }
+    }
+    
+    handleChange('certifications', updated);
   };
 
   return (
@@ -264,6 +288,124 @@ export function ApplicationBasics({ data, onSave }: StepProps) {
             onChange={(e) => handleChange('other_languages', e.target.value)}
             placeholder="e.g., Spanish, French, Tagalog"
           />
+        )}
+      </div>
+
+      {/* Certifications & Training Interest */}
+      <div className="space-y-4">
+        <h3 className="text-sm font-semibold text-navy border-b border-border pb-2">Certifications & Training</h3>
+        
+        <div>
+          <label className="block text-sm font-medium text-slate mb-2">
+            Which certifications do you currently hold? (Select all that apply)
+          </label>
+          <div className="space-y-2">
+            {[
+              { value: 'cna', label: 'CNA (Certified Nursing Assistant)' },
+              { value: 'hha', label: 'HHA (Home Health Aide)' },
+              { value: 'pca', label: 'PCA (Personal Care Aide)' },
+              { value: 'lpn', label: 'LPN (Licensed Practical Nurse)' },
+              { value: 'rn', label: 'RN (Registered Nurse)' },
+              { value: 'none', label: 'None - No certifications yet' },
+            ].map((cert) => (
+              <label key={cert.value} className="flex items-center gap-2 cursor-pointer">
+                <input
+                  type="checkbox"
+                  checked={(form.certifications || []).includes(cert.value)}
+                  onChange={() => handleCertificationToggle(cert.value)}
+                  className="h-4 w-4 rounded border-gray-300 text-maroon focus:ring-maroon"
+                />
+                <span className="text-sm text-slate">{cert.label}</span>
+              </label>
+            ))}
+          </div>
+        </div>
+
+        <div>
+          <label className="block text-sm font-medium text-slate mb-2">
+            Do you have a current CPR certification? <span className="text-error">*</span>
+          </label>
+          <div className="flex gap-4">
+            {['yes', 'no'].map((val) => (
+              <label key={val} className="flex items-center gap-2 cursor-pointer">
+                <input
+                  type="radio"
+                  name="has_cpr"
+                  value={val}
+                  checked={form.has_cpr === val}
+                  onChange={(e) => handleChange('has_cpr', e.target.value)}
+                  className="h-4 w-4 text-maroon focus:ring-maroon"
+                />
+                <span className="text-sm text-slate">{val === 'yes' ? 'Yes' : 'No'}</span>
+              </label>
+            ))}
+          </div>
+        </div>
+
+        {/* Training Interest - HHA */}
+        <div className="rounded-lg border border-info bg-info-bg p-4">
+          <p className="text-sm font-medium text-info mb-3">
+            We offer certification training programs for our employees!
+          </p>
+          
+          <div>
+            <label className="block text-sm font-medium text-slate mb-2">
+              Are you interested in HHA (Home Health Aide) certification training through our agency?
+            </label>
+            <div className="flex gap-4">
+              {[
+                { value: 'yes', label: 'Yes, I\'m interested!' },
+                { value: 'maybe', label: 'Maybe, tell me more' },
+                { value: 'no', label: 'No thanks' },
+              ].map((opt) => (
+                <label key={opt.value} className="flex items-center gap-2 cursor-pointer">
+                  <input
+                    type="radio"
+                    name="interested_in_hha"
+                    value={opt.value}
+                    checked={form.interested_in_hha === opt.value}
+                    onChange={(e) => handleChange('interested_in_hha', e.target.value)}
+                    className="h-4 w-4 text-maroon focus:ring-maroon"
+                  />
+                  <span className="text-sm text-slate">{opt.label}</span>
+                </label>
+              ))}
+            </div>
+          </div>
+        </div>
+
+        {/* Training Interest - CPR (only show if they don't have CPR) */}
+        {form.has_cpr === 'no' && (
+          <div className="rounded-lg border border-warning bg-warning-bg p-4">
+            <p className="text-sm font-medium text-warning mb-3">
+              CPR certification is required for most positions. We can help!
+            </p>
+            
+            <div>
+              <label className="block text-sm font-medium text-slate mb-2">
+                Are you interested in CPR certification training through our agency?
+              </label>
+              <div className="flex gap-4">
+                {[
+                  { value: 'yes', label: 'Yes, I\'m interested!' },
+                  { value: 'maybe', label: 'Maybe, tell me more' },
+                  { value: 'no', label: 'No, I\'ll get certified elsewhere' },
+                ].map((opt) => (
+                  <label key={opt.value} className="flex items-center gap-2 cursor-pointer">
+                    <input
+                      type="radio"
+                      name="interested_in_cpr"
+                      value={opt.value}
+                      checked={form.interested_in_cpr === opt.value}
+                      onChange={(e) => handleChange('interested_in_cpr', e.target.value)}
+                      className="h-4 w-4 text-maroon focus:ring-maroon"
+                    />
+                    <span className="text-sm text-slate">{opt.label}</span>
+                  </label>
+                ))}
+              </div>
+            </div>
+          </div>
         )}
       </div>
 
