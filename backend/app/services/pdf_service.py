@@ -87,7 +87,7 @@ I9_FIELD_MAPPING = {
     "employee_signature": "Signature of Employee",
     
     # Section 2 - List A Documents
-    "list_a_doc_title": "Document Title 2 If any",  # First List A doc title field
+    "list_a_doc_title": "Document Title 2 If any",
     "list_a_issuing": "Issuing Authority 1",
     "list_a_doc_number": "Document Number 0 (if any)",
     "list_a_expiration": "Expiration Date if any",
@@ -169,16 +169,9 @@ class PDFService:
     ) -> bytes:
         """
         Generate the employment application PDF.
-        
-        application_data should contain:
-        - id: application ID
-        - status: application status
-        - submitted_at: submission timestamp
-        - steps: dict of step_number -> {data: {...}, completed: bool}
         """
         steps = application_data.get("steps", {})
         
-        # Extract data from various steps
         step1_data = steps.get(1, {}).get("data", {})
         step2_data = steps.get(2, {}).get("data", {})
         step3_data = steps.get(3, {}).get("data", {})
@@ -188,56 +181,33 @@ class PDFService:
         step7_data = steps.get(7, {}).get("data", {})
         step8_data = steps.get(8, {}).get("data", {})
         
-        # Build context for template
         context = {
             "application_id": application_data.get("id", ""),
             "status": application_data.get("status", ""),
             "submitted_at": application_data.get("submitted_at", ""),
-            
-            # Personal info (step 1 or 2 depending on structure)
             "first_name": step2_data.get("first_name", step1_data.get("first_name", "")),
             "last_name": step2_data.get("last_name", step1_data.get("last_name", "")),
             "middle_name": step2_data.get("middle_name", step1_data.get("middle_name", "")),
             "date_of_birth": step2_data.get("date_of_birth", step1_data.get("date_of_birth", "")),
             "email": step2_data.get("email", step1_data.get("email", "")),
             "phone": step2_data.get("phone", step1_data.get("phone", "")),
-            
-            # Address info
             "address_line1": step2_data.get("address_line1", ""),
             "address_line2": step2_data.get("address_line2", ""),
             "city": step2_data.get("city", ""),
             "state": step2_data.get("state", ""),
             "zip": step2_data.get("zip", step2_data.get("zip_code", "")),
-            
-            # Emergency contact (step 3)
             "ec_name": step3_data.get("name", step3_data.get("ec_name", "")),
             "ec_relationship": step3_data.get("relationship", step3_data.get("ec_relationship", "")),
             "ec_phone": step3_data.get("phone", step3_data.get("ec_phone", "")),
-            
-            # Position/availability (step 4 or combined)
             "position": step4_data.get("position", step3_data.get("position", "")),
             "desired_pay": step4_data.get("desired_pay", ""),
             "start_date": step4_data.get("start_date", ""),
-            
-            # Work history (step 5)
             "employment_history": step5_data.get("employers", []),
-            
-            # Education (step 4 or 6)
             "education": step4_data.get("education", step6_data.get("education", [])),
-            
-            # References (step 6 or 7)
             "references": step6_data.get("references", step7_data.get("references", [])),
-            
-            # Skills (step 7 or 8)
             "skills": step7_data.get("skills", step8_data.get("skills", {})),
-            
-            # Availability
             "availability": step8_data.get("availability", step4_data.get("availability", {})),
-            
-            # Full steps data for flexibility
             "steps": steps,
-            
-            # Generation metadata
             "generated_at": datetime.now().strftime("%B %d, %Y at %I:%M %p"),
         }
 
@@ -284,30 +254,16 @@ class PDFService:
     # =========================================================================
 
     def get_i9_field_names(self) -> List[str]:
-        """
-        Get all fillable field names from the I-9 PDF template.
-        
-        Returns:
-            List of field IDs found in the PDF
-        """
+        """Get all fillable field names from the I-9 PDF template."""
         field_info = self._analyze_i9_fields()
         return [f["field_id"] for f in field_info.get("fields", [])]
 
     def get_i9_field_info(self) -> Dict[str, Any]:
-        """
-        Get detailed information about all I-9 form fields.
-        
-        Returns:
-            Dictionary with field analysis including types and positions
-        """
+        """Get detailed information about all I-9 form fields."""
         return self._analyze_i9_fields()
 
     def _analyze_i9_fields(self) -> Dict[str, Any]:
-        """
-        Analyze the I-9 PDF and extract field information.
-        
-        Uses caching to avoid repeated analysis.
-        """
+        """Analyze the I-9 PDF and extract field information."""
         if self._i9_field_cache is not None:
             return self._i9_field_cache
 
@@ -328,7 +284,7 @@ class PDFService:
             "page_count": len(reader.pages),
             "is_fillable": bool(fields),
             "fields": [],
-            "field_mapping": I9_FIELD_MAPPING,  # Use our hardcoded mapping
+            "field_mapping": I9_FIELD_MAPPING,
         }
 
         if not fields:
@@ -336,7 +292,6 @@ class PDFService:
             self._i9_field_cache = result
             return result
 
-        # Track radio button groups
         possible_radio_names = set()
 
         for field_id, field in fields.items():
@@ -349,7 +304,6 @@ class PDFService:
             if field_dict:
                 result["fields"].append(field_dict)
 
-        # Get page locations from annotations
         radio_fields = {}
         for page_index, page in enumerate(reader.pages):
             annotations = page.get('/Annots', [])
@@ -361,7 +315,6 @@ class PDFService:
                 except Exception:
                     continue
 
-                # Find matching field and add page info
                 for fi in result["fields"]:
                     if fi["field_id"] == ann_field_id:
                         fi["page"] = page_index + 1
@@ -371,7 +324,6 @@ class PDFService:
                             fi["rect"] = []
                         break
 
-                # Handle radio buttons
                 if ann_field_id in possible_radio_names:
                     try:
                         on_values = [v for v in ann["/AP"]["/N"] if v != "/Off"]
@@ -394,10 +346,8 @@ class PDFService:
                             "rect": rect,
                         })
 
-        # Add radio fields
         result["fields"].extend(radio_fields.values())
 
-        # Sort by page and position
         def sort_key(f):
             page = f.get("page", 0)
             rect = f.get("rect", [0, 0, 0, 0])
@@ -430,7 +380,6 @@ class PDFService:
         elif ft == "/Ch":
             field_dict["type"] = "choice"
             states = field.get("/_States_", [])
-            # Handle different formats of choice options
             choice_options = []
             for state in states:
                 if isinstance(state, (list, tuple)) and len(state) >= 2:
@@ -464,16 +413,11 @@ class PDFService:
         """
         Generate I-9 form PDF by filling in the official template.
         
-        Args:
-            application_data: Should contain steps dict with employee data
-            ssn: Decrypted SSN (optional)
-            employer_data: Employer/Section 2 data (optional)
-        
-        Returns:
-            PDF bytes with filled form
+        Uses direct field manipulation for better compatibility.
         """
         try:
             from pypdf import PdfReader, PdfWriter
+            from pypdf.generic import NameObject, TextStringObject, ArrayObject
         except ImportError:
             raise RuntimeError("pypdf is required for I-9 generation")
 
@@ -484,9 +428,8 @@ class PDFService:
         reader = PdfReader(str(i9_path))
         writer = PdfWriter()
 
-        # Copy all pages
-        for page in reader.pages:
-            writer.add_page(page)
+        # Clone the PDF
+        writer.clone_document_from_reader(reader)
 
         # Check if form is fillable
         if not reader.get_fields():
@@ -498,20 +441,28 @@ class PDFService:
         # Extract applicant info from steps
         steps = application_data.get("steps", {})
         
-        # DEBUG: Log what we received
-        logger.info(f"I-9 generate_i9_form called with steps keys: {list(steps.keys())}")
+        # Log for debugging
+        logger.info(f"I-9 generate_i9_form - steps keys: {list(steps.keys())}")
         
-        # Try both int and string keys since JSON might have string keys
-        step2_data = steps.get(2, steps.get("2", {})).get("data", {})
-        step1_data = steps.get(1, steps.get("1", {})).get("data", {})
+        # Try both int and string keys
+        step2_data = steps.get(2, steps.get("2", {}))
+        if isinstance(step2_data, dict):
+            step2_data = step2_data.get("data", step2_data)
+        else:
+            step2_data = {}
+            
+        step1_data = steps.get(1, steps.get("1", {}))
+        if isinstance(step1_data, dict):
+            step1_data = step1_data.get("data", step1_data)
+        else:
+            step1_data = {}
         
-        logger.info(f"Step 1 data keys: {list(step1_data.keys()) if step1_data else 'empty'}")
-        logger.info(f"Step 2 data keys: {list(step2_data.keys()) if step2_data else 'empty'}")
+        logger.info(f"Step 2 data: {json.dumps(step2_data, default=str)[:500]}")
 
         # Use step 2 primarily, fall back to step 1
         personal = {**step1_data, **step2_data}
         
-        logger.info(f"Personal data: first_name={personal.get('first_name')}, last_name={personal.get('last_name')}, email={personal.get('email')}")
+        logger.info(f"Personal info: first_name={personal.get('first_name')}, last_name={personal.get('last_name')}")
 
         # Format date of birth as MM/DD/YYYY
         dob = personal.get("date_of_birth", "")
@@ -523,15 +474,12 @@ class PDFService:
             except Exception:
                 pass
 
-        # Format SSN as XXX-XX-XXXX
+        # Format SSN
         ssn_formatted = ""
         if ssn:
             ssn_clean = ssn.replace("-", "").replace(" ", "")
             if len(ssn_clean) == 9:
                 ssn_formatted = f"{ssn_clean[:3]}-{ssn_clean[3:5]}-{ssn_clean[5:]}"
-            logger.info(f"SSN provided, formatted: {ssn_formatted[:3]}***")
-        else:
-            logger.info("No SSN provided")
 
         # Get middle initial
         middle_name = personal.get("middle_name", "")
@@ -540,13 +488,12 @@ class PDFService:
         # Today's date
         today = datetime.now().strftime("%m/%d/%Y")
 
-        # Build field values using the EXACT field names from the PDF
+        # Build field values
         values_to_fill = {}
         
         def set_field(semantic_name: str, value: str):
-            """Set a field value using our mapping."""
             if value and semantic_name in I9_FIELD_MAPPING:
-                values_to_fill[I9_FIELD_MAPPING[semantic_name]] = value
+                values_to_fill[I9_FIELD_MAPPING[semantic_name]] = str(value)
 
         # Section 1 - Employee Information
         set_field("last_name", personal.get("last_name", ""))
@@ -564,7 +511,7 @@ class PDFService:
         set_field("phone", personal.get("phone", ""))
         set_field("employee_signature_date", today)
 
-        # Citizenship status - default to citizen, check the appropriate box
+        # Citizenship - default to citizen
         citizenship = personal.get("citizenship_status", "citizen")
         if citizenship == "citizen" or not citizenship:
             values_to_fill["CB_1"] = "/On"
@@ -575,111 +522,77 @@ class PDFService:
             set_field("lpr_uscis_number", personal.get("uscis_number", ""))
         elif citizenship == "alien_authorized":
             values_to_fill["CB_4"] = "/On"
-            set_field("alien_expiration_date", personal.get("work_auth_expiration", ""))
-            set_field("alien_uscis_number", personal.get("uscis_number", ""))
-            set_field("i94_number", personal.get("i94_number", ""))
-            set_field("foreign_passport_country", personal.get("foreign_passport", ""))
 
-        # Section 2 - Employer (if provided)
-        if employer_data:
-            set_field("first_day_employment", employer_data.get("first_day", today))
-            
-            # Employer name and title combined
-            emp_name = employer_data.get("employer_name", "")
-            emp_title = employer_data.get("employer_title", "")
-            if emp_name and emp_title:
-                set_field("employer_name_title", f"{emp_name}, {emp_title}")
-            elif emp_name:
-                set_field("employer_name_title", emp_name)
-            
-            set_field("employer_signature_date", today)
-            set_field("employer_organization", employer_data.get("organization", "Eveready Home Care"))
-            
-            # Combine address into single field
-            emp_addr = employer_data.get("address", "2700 S. Quincy Street Suite #220")
-            emp_city = employer_data.get("city", "Arlington")
-            emp_state = employer_data.get("state", "VA")
-            emp_zip = employer_data.get("zip", "22206")
-            full_address = f"{emp_addr}, {emp_city}, {emp_state} {emp_zip}"
-            set_field("employer_address", full_address)
+        logger.info(f"Filling {len(values_to_fill)} fields: {list(values_to_fill.keys())}")
 
-            # Alternative procedure checkbox
-            if employer_data.get("alternative_procedure"):
-                values_to_fill["CB_Alt"] = "/Yes"
-
-            # Document info
-            docs = employer_data.get("documents", {})
-            
-            # List A documents (identity + work auth combined)
-            if docs.get("list_a"):
-                doc = docs["list_a"]
-                set_field("list_a_doc_title", doc.get("title", ""))
-                set_field("list_a_issuing", doc.get("issuing_authority", ""))
-                set_field("list_a_doc_number", doc.get("number", ""))
-                set_field("list_a_expiration", doc.get("expiration", ""))
-            
-            # List B document (identity only)
-            if docs.get("list_b"):
-                doc = docs["list_b"]
-                set_field("list_b_doc_title", doc.get("title", ""))
-                set_field("list_b_issuing", doc.get("issuing_authority", ""))
-                set_field("list_b_doc_number", doc.get("number", ""))
-                set_field("list_b_expiration", doc.get("expiration", ""))
-            
-            # List C document (work auth only)
-            if docs.get("list_c"):
-                doc = docs["list_c"]
-                set_field("list_c_doc_title", doc.get("title", ""))
-                set_field("list_c_issuing", doc.get("issuing_authority", ""))
-                set_field("list_c_doc_number", doc.get("number", ""))
-                set_field("list_c_expiration", doc.get("expiration", ""))
-
-            # Additional info
-            if employer_data.get("additional_info"):
-                set_field("additional_info", employer_data["additional_info"])
-
-        # Log what we're about to fill
-        logger.info(f"I-9 filling {len(values_to_fill)} fields: {list(values_to_fill.keys())}")
-
-        # Fill the form
+        # Fill the form using update_page_form_field_values
         if values_to_fill:
             try:
-                # Fill page 1 (main form - sections 1 and 2)
+                # Get page 0
+                page = writer.pages[0]
+                
+                # Update form fields
                 writer.update_page_form_field_values(
-                    writer.pages[0],
+                    page,
                     values_to_fill,
                     auto_regenerate=False
                 )
-                logger.info(f"Successfully filled I-9 form for: "
-                           f"{personal.get('first_name', '')} {personal.get('last_name', '')}")
+                
+                logger.info(f"Successfully filled I-9 form for: {personal.get('first_name', '')} {personal.get('last_name', '')}")
+                
             except Exception as e:
-                logger.warning(f"Bulk fill failed, trying individual fields: {e}")
-                # Try filling fields one by one
-                filled_count = 0
-                for field_id, value in values_to_fill.items():
-                    try:
-                        writer.update_page_form_field_values(
-                            writer.pages[0],
-                            {field_id: value},
-                            auto_regenerate=False
-                        )
-                        filled_count += 1
-                    except Exception as field_error:
-                        logger.debug(f"Could not fill field '{field_id}': {field_error}")
-                logger.info(f"Individual fill completed: {filled_count}/{len(values_to_fill)} fields")
-        else:
-            logger.warning("No values to fill in I-9 form - personal data may be empty")
+                logger.error(f"Failed to fill form fields: {e}")
+                # Try alternative method - direct field update
+                try:
+                    self._fill_fields_directly(writer, values_to_fill)
+                except Exception as e2:
+                    logger.error(f"Alternative fill method also failed: {e2}")
 
-        # Set NeedAppearances to ensure fields display properly
+        # Ensure appearances are regenerated
         try:
-            writer.set_need_appearances_writer(True)
-        except Exception:
-            pass
+            if "/AcroForm" in writer._root_object:
+                writer._root_object["/AcroForm"].update({
+                    NameObject("/NeedAppearances"): NameObject("/true")
+                })
+        except Exception as e:
+            logger.debug(f"Could not set NeedAppearances: {e}")
 
         # Write to bytes
         output = io.BytesIO()
         writer.write(output)
+        output.seek(0)
         return output.getvalue()
+
+    def _fill_fields_directly(self, writer, values_to_fill: Dict[str, str]):
+        """Alternative method to fill fields by directly modifying annotations."""
+        from pypdf.generic import NameObject, TextStringObject, ArrayObject
+        
+        for page in writer.pages:
+            if "/Annots" not in page:
+                continue
+                
+            annotations = page["/Annots"]
+            for annot in annotations:
+                try:
+                    annot_obj = annot.get_object()
+                    field_name = annot_obj.get("/T")
+                    
+                    if field_name and str(field_name) in values_to_fill:
+                        value = values_to_fill[str(field_name)]
+                        
+                        # Set the value
+                        annot_obj.update({
+                            NameObject("/V"): TextStringObject(value)
+                        })
+                        
+                        # Clear any existing appearance stream to force regeneration
+                        if "/AP" in annot_obj:
+                            del annot_obj["/AP"]
+                            
+                        logger.debug(f"Filled field {field_name} = {value}")
+                        
+                except Exception as e:
+                    logger.debug(f"Could not process annotation: {e}")
 
     def clear_i9_cache(self):
         """Clear the cached I-9 field analysis."""
