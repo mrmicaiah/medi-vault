@@ -208,6 +208,20 @@ def get_decrypted_ssn(supabase: Client, user_id: str) -> Optional[str]:
         return None
 
 
+def check_step_has_document(step_data: dict) -> bool:
+    """Check if a step has an uploaded document using various possible field names."""
+    # Check all possible field names for document uploads
+    possible_fields = [
+        "storage_path", "file_name", "file_url", "storage_url", 
+        "original_filename", "url", "path", "uploaded", "document_url"
+    ]
+    for field in possible_fields:
+        if step_data.get(field):
+            return True
+    # Also check if there's any non-empty data at all
+    return bool(step_data)
+
+
 @router.get("/dashboard")
 @router.get("/dashboard/")
 async def get_dashboard_stats(
@@ -963,9 +977,14 @@ async def generate_i9_pdf(
         # Step 14 = Social Security Card (List C - Employment Authorization)
         uploaded_docs = {}
         
-        # ID document (List B)
+        # Log step data for debugging
         step12_data = steps.get(12, {}).get("data", {})
-        if step12_data.get("storage_path") or step12_data.get("file_name"):
+        step14_data = steps.get(14, {}).get("data", {})
+        logger.info(f"Step 12 (ID) data keys: {list(step12_data.keys()) if step12_data else 'empty'}")
+        logger.info(f"Step 14 (SSN Card) data keys: {list(step14_data.keys()) if step14_data else 'empty'}")
+        
+        # Check for ID document (List B) - check multiple possible field names
+        if check_step_has_document(step12_data):
             uploaded_docs["list_b"] = {
                 "title": "Driver's License",
                 "issuing_authority": steps.get(2, {}).get("data", {}).get("state", "Virginia"),
@@ -973,10 +992,11 @@ async def generate_i9_pdf(
                 "expiration": "",
             }
             logger.info("Found ID document for List B")
+        else:
+            logger.info("No ID document found in Step 12")
         
-        # SSN Card (List C)
-        step14_data = steps.get(14, {}).get("data", {})
-        if step14_data.get("storage_path") or step14_data.get("file_name"):
+        # Check for SSN Card (List C)
+        if check_step_has_document(step14_data):
             uploaded_docs["list_c"] = {
                 "title": "Social Security Card",
                 "issuing_authority": "SSA",
@@ -984,6 +1004,8 @@ async def generate_i9_pdf(
                 "expiration": "N/A",
             }
             logger.info("Found SSN card for List C")
+        else:
+            logger.info("No SSN card found in Step 14")
         
         application_data = {
             "id": application_id,
