@@ -407,6 +407,27 @@ class PDFService:
             full_address = f"{emp_addr}, {emp_city}, {emp_state} {emp_zip}"
             set_field("employer_address", full_address)
             
+            # Employee signature from e-signature step
+            employee_signature = employer_data.get("employee_signature", "")
+            if employee_signature:
+                set_field("employee_signature", employee_signature)
+                logger.info(f"Added employee signature: {employee_signature}")
+            
+            # Employer/Authorized Representative signature
+            rep_name = employer_data.get("representative_name", "")
+            rep_title = employer_data.get("representative_title", "")
+            if rep_name:
+                # Format: "Last Name, First Name, Title" for the name/title field
+                name_and_title = rep_name
+                if rep_title:
+                    name_and_title = f"{rep_name}, {rep_title}"
+                set_field("employer_name_title", name_and_title)
+                # Use the typed name as the signature
+                set_field("employer_signature", rep_name)
+                # Set Section 2 signature date to now (when PDF is generated)
+                set_field("employer_signature_date", today)
+                logger.info(f"Added employer signature: {rep_name} ({rep_title})")
+            
             # Document info from uploaded steps
             docs = employer_data.get("documents", {})
             
