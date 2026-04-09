@@ -5,6 +5,7 @@ import { Alert } from '../../components/ui/Alert';
 import { api } from '../../lib/api';
 import { supabase } from '../../lib/supabase';
 import { useAuth } from '../../hooks/useAuth';
+import { DocumentTabs } from '../../components/admin/DocumentTabs';
 
 // Message from manager to applicant (stored in database, shown on applicant's dashboard)
 interface ApplicantMessage {
@@ -101,16 +102,6 @@ const getPositionConfig = (position?: string) => {
   return POSITION_CONFIG[position.toLowerCase()] || null;
 };
 
-const DOC_STEPS: Record<string, number> = {
-  work_auth: 11,
-  id_front: 12,
-  id_back: 13,
-  ssn_card: 14,
-  credentials: 15,
-  cpr: 16,
-  tb: 17,
-};
-
 const STEP_NAMES: Record<number, string> = {
   1: 'Application Basics',
   2: 'Personal Info',
@@ -138,6 +129,9 @@ const STEP_NAMES: Record<number, string> = {
 
 const TOTAL_STEPS = 22;
 
+// Panel tab type
+type PanelTab = 'overview' | 'uploads' | 'agreements' | 'application';
+
 export function ApplicantsPage() {
   const navigate = useNavigate();
   const fileInputRef = useRef<HTMLInputElement>(null);
@@ -145,6 +139,9 @@ export function ApplicantsPage() {
   
   const isAdmin = role === 'admin' || role === 'superadmin';
   const [selectedLocationFilter, setSelectedLocationFilter] = useState<string>('');
+  
+  // Panel tab state
+  const [panelTab, setPanelTab] = useState<PanelTab>('overview');
   
   // Message to applicant (fetched from API per selected applicant)
   const [applicantMessage, setApplicantMessage] = useState<ApplicantMessage | null>(null);
@@ -184,9 +181,6 @@ export function ApplicantsPage() {
   const [uploadType, setUploadType] = useState('');
   const [uploading, setUploading] = useState(false);
   const [uploadError, setUploadError] = useState<string | null>(null);
-  
-  const [previewDoc, setPreviewDoc] = useState<{ url: string; name: string; type: string } | null>(null);
-  const [loadingDoc, setLoadingDoc] = useState<string | null>(null);
 
   const [locations, setLocations] = useState<Location[]>([]);
   const [showTransferModal, setShowTransferModal] = useState(false);
@@ -399,11 +393,11 @@ export function ApplicantsPage() {
   const selectApplicant = async (applicant: Applicant) => {
     setSelectedApplicant(applicant);
     setPanelOpen(true);
+    setPanelTab('overview');
     setEditMode(false);
     setSsnRevealed(false);
     setRevealedSsn(null);
     setEditingSsn(false);
-    setPreviewDoc(null);
     setMessageMode('view');
     setMessageDraft('');
     setApplicantMessage(null);
@@ -614,10 +608,10 @@ export function ApplicantsPage() {
     setSsnRevealed(false);
     setRevealedSsn(null);
     setEditingSsn(false);
-    setPreviewDoc(null);
     setMessageMode('view');
     setMessageDraft('');
     setApplicantMessage(null);
+    setPanelTab('overview');
     setTimeout(() => {
       setSelectedApplicant(null);
       setApplicantDetail(null);
@@ -648,24 +642,6 @@ export function ApplicantsPage() {
     } finally {
       setUploading(false);
       if (fileInputRef.current) fileInputRef.current.value = '';
-    }
-  };
-
-  const handleViewDoc = async (docType: string, label: string) => {
-    if (!selectedApplicant) return;
-    const stepNumber = DOC_STEPS[docType];
-    if (!stepNumber) return;
-    setLoadingDoc(docType);
-    try {
-      const res = await api.get<{ signed_url: string; file_name?: string }>(`/admin/applicants/${selectedApplicant.id}/documents/${stepNumber}/url`);
-      if (res.signed_url) {
-        setPreviewDoc({ url: res.signed_url, name: res.file_name || label, type: docType });
-      }
-    } catch (err) {
-      console.error('Error loading document:', err);
-      setError(err instanceof Error ? err.message : 'Failed to load document');
-    } finally {
-      setLoadingDoc(null);
     }
   };
 
@@ -736,27 +712,6 @@ export function ApplicantsPage() {
       <span className={`inline-flex items-center px-2 py-0.5 rounded text-xs font-medium ${styles[status] || 'bg-gray-100 text-gray'}`}>
         {labels[status] || status}
       </span>
-    );
-  };
-
-  const DocLight = ({ uploaded, label, docType }: { uploaded: boolean; label: string; docType: string }) => {
-    const isLoading = loadingDoc === docType;
-    return (
-      <button
-        onClick={() => uploaded && handleViewDoc(docType, label)}
-        disabled={!uploaded || isLoading}
-        className={`flex items-center gap-1.5 px-2 py-1 rounded-md transition-colors ${uploaded ? 'hover:bg-success/10 cursor-pointer' : 'cursor-default opacity-60'}`}
-        title={uploaded ? `View ${label}` : `${label} not uploaded`}
-      >
-        <div className={`w-3 h-3 rounded-full flex-shrink-0 ${isLoading ? 'bg-warning animate-pulse' : uploaded ? 'bg-success' : 'bg-error'}`} />
-        <span className="text-xs text-gray">{label}</span>
-        {uploaded && !isLoading && (
-          <svg className="w-3 h-3 text-gray-400" fill="none" viewBox="0 0 24 24" stroke="currentColor">
-            <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M15 12a3 3 0 11-6 0 3 3 0 016 0z" />
-            <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M2.458 12C3.732 7.943 7.523 5 12 5c4.478 0 8.268 2.943 9.542 7-1.274 4.057-5.064 7-9.542 7-4.477 0-8.268-2.943-9.542-7z" />
-          </svg>
-        )}
-      </button>
     );
   };
 
@@ -1039,7 +994,8 @@ export function ApplicantsPage() {
       {selectedApplicant && (
         <>
           <div className={`fixed inset-0 bg-black/20 z-40 transition-opacity duration-250 ${panelOpen ? 'opacity-100' : 'opacity-0 pointer-events-none'}`} onClick={closePanel} />
-          <div className={`fixed top-0 right-0 h-full w-[420px] bg-white shadow-2xl z-50 flex flex-col transition-transform duration-250 ease-out ${panelOpen ? 'translate-x-0' : 'translate-x-full'}`}>
+          <div className={`fixed top-0 right-0 h-full w-[480px] bg-white shadow-2xl z-50 flex flex-col transition-transform duration-250 ease-out ${panelOpen ? 'translate-x-0' : 'translate-x-full'}`}>
+            {/* Header */}
             <div className="px-6 py-5 bg-navy flex items-center justify-between flex-shrink-0">
               <div className="flex items-center gap-3">
                 <h2 className="text-lg font-semibold text-white">
@@ -1053,6 +1009,44 @@ export function ApplicantsPage() {
               </div>
               <button onClick={closePanel} className="text-white/60 hover:text-white text-2xl leading-none p-1">×</button>
             </div>
+
+            {/* Panel Tab Navigation */}
+            {!editMode && (
+              <div className="flex border-b border-border bg-white flex-shrink-0">
+                <button
+                  onClick={() => setPanelTab('overview')}
+                  className={`flex-1 py-3 text-sm font-medium transition-colors ${
+                    panelTab === 'overview' ? 'text-maroon border-b-2 border-maroon' : 'text-gray hover:text-slate'
+                  }`}
+                >
+                  Overview
+                </button>
+                <button
+                  onClick={() => setPanelTab('uploads')}
+                  className={`flex-1 py-3 text-sm font-medium transition-colors ${
+                    panelTab === 'uploads' ? 'text-maroon border-b-2 border-maroon' : 'text-gray hover:text-slate'
+                  }`}
+                >
+                  Uploads
+                </button>
+                <button
+                  onClick={() => setPanelTab('agreements')}
+                  className={`flex-1 py-3 text-sm font-medium transition-colors ${
+                    panelTab === 'agreements' ? 'text-maroon border-b-2 border-maroon' : 'text-gray hover:text-slate'
+                  }`}
+                >
+                  Agreements
+                </button>
+                <button
+                  onClick={() => setPanelTab('application')}
+                  className={`flex-1 py-3 text-sm font-medium transition-colors ${
+                    panelTab === 'application' ? 'text-maroon border-b-2 border-maroon' : 'text-gray hover:text-slate'
+                  }`}
+                >
+                  Application
+                </button>
+              </div>
+            )}
 
             <div className="flex-1 overflow-y-auto p-5 bg-gray-50">
               {loadingDetail ? (
@@ -1163,7 +1157,8 @@ export function ApplicantsPage() {
                     <button onClick={handleSaveEdit} disabled={saving} className="py-3 bg-maroon text-white text-sm font-semibold rounded-lg hover:bg-maroon/90 disabled:opacity-50">{saving ? 'Saving...' : 'Save Changes'}</button>
                   </div>
                 </div>
-              ) : (
+              ) : panelTab === 'overview' ? (
+                /* Overview Tab */
                 <>
                   {/* Quick Info */}
                   <div className="bg-white rounded-lg shadow-sm overflow-hidden">
@@ -1198,14 +1193,12 @@ export function ApplicantsPage() {
                         {loadingMessage && <span className="text-xs text-gray">Loading...</span>}
                       </div>
                       
-                      {/* View Mode: Show existing message or compose button */}
                       {messageMode === 'view' && !loadingMessage && (
                         <>
                           {applicantMessage ? (
                             <div className="bg-maroon/5 border border-maroon/20 rounded-lg p-3">
                               <div className="flex items-start justify-between gap-2">
                                 <p className="text-sm text-slate flex-1">{applicantMessage.message}</p>
-                                {/* Read badge */}
                                 {applicantMessage.read_at && (
                                   <span className="flex-shrink-0 inline-flex items-center gap-1 px-2 py-0.5 rounded-full text-xs font-medium bg-success/10 text-success">
                                     <svg className="w-3 h-3" fill="none" viewBox="0 0 24 24" stroke="currentColor">
@@ -1256,7 +1249,6 @@ export function ApplicantsPage() {
                         </>
                       )}
 
-                      {/* Compose/Edit Mode */}
                       {(messageMode === 'compose' || messageMode === 'edit') && (
                         <div className="space-y-3">
                           <textarea
@@ -1289,46 +1281,6 @@ export function ApplicantsPage() {
                       )}
                     </div>
                   )}
-
-                  {/* Documents */}
-                  <div className="bg-white rounded-lg shadow-sm p-4 mt-5">
-                    <div className="flex items-center justify-between mb-3">
-                      <span className="text-[11px] font-semibold text-gray uppercase tracking-wide">Documents</span>
-                      <span className="text-[10px] text-gray-400">Click to preview</span>
-                    </div>
-                    <div className="flex flex-wrap gap-1">
-                      <DocLight uploaded={applicantDetail?.id_front_uploaded || false} label="ID Front" docType="id_front" />
-                      <DocLight uploaded={applicantDetail?.id_back_uploaded || false} label="ID Back" docType="id_back" />
-                      <DocLight uploaded={applicantDetail?.ssn_card_uploaded || false} label="SSN Card" docType="ssn_card" />
-                      <DocLight uploaded={applicantDetail?.work_auth_uploaded || false} label="Work Auth" docType="work_auth" />
-                    </div>
-                    <div className="flex flex-wrap gap-1 mt-1">
-                      <DocLight uploaded={applicantDetail?.credentials_uploaded || false} label="Credentials" docType="credentials" />
-                      <DocLight uploaded={applicantDetail?.cpr_uploaded || false} label="CPR" docType="cpr" />
-                      <DocLight uploaded={applicantDetail?.tb_uploaded || false} label="TB" docType="tb" />
-                    </div>
-                    
-                    {previewDoc && (
-                      <div className="mt-4 border-t border-gray-100 pt-4">
-                        <div className="flex items-center justify-between mb-2">
-                          <span className="text-xs font-medium text-navy">{previewDoc.name}</span>
-                          <div className="flex gap-2">
-                            <a href={previewDoc.url} target="_blank" rel="noopener noreferrer" className="text-xs text-maroon hover:underline">Open ↗</a>
-                            <button onClick={() => setPreviewDoc(null)} className="text-xs text-gray hover:text-navy">Close</button>
-                          </div>
-                        </div>
-                        <div className="bg-gray-100 rounded-lg overflow-hidden" style={{ height: '200px' }}>
-                          {previewDoc.url.toLowerCase().match(/\.(jpg|jpeg|png|gif|webp)/) || previewDoc.name.toLowerCase().match(/\.(jpg|jpeg|png|gif|webp)/) ? (
-                            <img src={previewDoc.url} alt={previewDoc.name} className="w-full h-full object-contain" />
-                          ) : (
-                            <iframe src={previewDoc.url} className="w-full h-full" title={previewDoc.name} />
-                          )}
-                        </div>
-                      </div>
-                    )}
-                  </div>
-
-                  <button onClick={handleUploadClick} className="w-full mt-5 py-3 bg-white border border-border text-navy text-sm font-medium rounded-lg hover:bg-gray-50">Upload Document</button>
 
                   {/* Progress */}
                   {applicantDetail?.stepsCompletion && (
@@ -1367,6 +1319,14 @@ export function ApplicantsPage() {
                     <button onClick={() => setShowDeleteConfirm(true)} className="w-full mt-3 py-3 bg-white border border-error/30 text-error text-sm font-medium rounded-lg hover:bg-error/5">Delete Application</button>
                   )}
                 </>
+              ) : (
+                /* Document Tabs (uploads, agreements, application) */
+                <DocumentTabs
+                  applicationId={selectedApplicant.id}
+                  applicantName={`${selectedApplicant.first_name} ${selectedApplicant.last_name}`}
+                  activeTab={panelTab as 'uploads' | 'agreements' | 'application'}
+                  onTabChange={(tab) => setPanelTab(tab)}
+                />
               )}
             </div>
 
