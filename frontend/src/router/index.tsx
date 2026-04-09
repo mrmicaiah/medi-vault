@@ -28,7 +28,6 @@ import { ApplicantsPage } from '../pages/admin/ApplicantsPage';
 import { ApplicantDetailPage } from '../pages/admin/ApplicantDetailPage';
 import { EmployeesPage } from '../pages/admin/EmployeesPage';
 import { EmployeeDetailPage } from '../pages/admin/EmployeeDetailPage';
-import AdminDocumentsPage from '../pages/admin/DocumentsPage';
 import ClientsPage from '../pages/admin/ClientsPage';
 import { HirePage } from '../pages/admin/HirePage';
 import { UsersPage } from '../pages/admin/UsersPage';
@@ -271,8 +270,9 @@ export function RouterConfig() {
         <Route path="/admin/employees" element={<EmployeesPage />} />
         <Route path="/admin/employee/:id" element={<EmployeeDetailPage />} />
         <Route path="/admin/clients" element={<ClientsPage />} />
-        <Route path="/admin/documents" element={<AdminDocumentsPage />} />
-        <Route path="/admin/compliance" element={<Navigate to="/admin/documents" replace />} />
+        {/* Removed: /admin/documents and /admin/compliance - documents are now in Employees/Applicants panels */}
+        <Route path="/admin/documents" element={<Navigate to="/admin/employees" replace />} />
+        <Route path="/admin/compliance" element={<Navigate to="/admin/employees" replace />} />
         <Route path="/admin/hire/:id" element={<HirePage />} />
         <Route path="/admin/users" element={<UsersPage />} />
         <Route path="/admin/training-leads" element={<TrainingLeadsPage />} />
