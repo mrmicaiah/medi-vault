@@ -4,6 +4,7 @@ import { supabase } from '../../lib/supabase';
 import { formatDate } from '../../lib/utils';
 import { AgreementViewModal } from './AgreementViewModal';
 import { DocumentPreviewModal } from './DocumentPreviewModal';
+import { DocumentUploadModal } from './DocumentUploadModal';
 
 interface DocumentSummary {
   application_id: string;
@@ -48,6 +49,7 @@ interface EmployeeDocuments {
       filename?: string;
       uploaded_at?: string;
       expires_at?: string;
+      document_number?: string;
       endpoint: string;
       source: 'application' | 'documents_table';
     }>;
@@ -80,6 +82,19 @@ const UPLOAD_STEP_NAMES: Record<number, string> = {
 };
 
 const ALL_UPLOAD_STEPS = [11, 12, 13, 14, 15, 16, 17];
+
+// Check if a date is expiring soon (within 30 days) or expired
+function getExpirationStatus(expiresAt?: string): 'expired' | 'expiring' | 'valid' | null {
+  if (!expiresAt) return null;
+  
+  const expDate = new Date(expiresAt);
+  const now = new Date();
+  const thirtyDaysFromNow = new Date(now.getTime() + 30 * 24 * 60 * 60 * 1000);
+  
+  if (expDate < now) return 'expired';
+  if (expDate < thirtyDaysFromNow) return 'expiring';
+  return 'valid';
+}
 
 interface DocumentTabsProps {
   // For applicants - use applicationId
@@ -133,6 +148,19 @@ export function DocumentTabs({
     fileName?: string;
     loading: boolean;
   }>({ isOpen: false, name: '', url: null, loading: false });
+
+  // Document upload modal state (for employees)
+  const [uploadModal, setUploadModal] = useState<{
+    isOpen: boolean;
+    existingDocument?: {
+      id: string;
+      type: string;
+      name: string;
+      filename?: string;
+      expires_at?: string;
+      document_number?: string;
+    };
+  }>({ isOpen: false });
 
   const isEmployee = !!employeeId;
   const id = applicationId || employeeId || '';
@@ -233,6 +261,30 @@ export function DocumentTabs({
 
   function closeDocumentModal() {
     setDocumentModal({ isOpen: false, name: '', url: null, loading: false });
+  }
+
+  function openUpdateModal(doc: any) {
+    setUploadModal({
+      isOpen: true,
+      existingDocument: {
+        id: doc.id,
+        type: doc.type,
+        name: doc.name,
+        filename: doc.filename,
+        expires_at: doc.expires_at,
+        document_number: doc.document_number,
+      }
+    });
+  }
+
+  function closeUploadModal() {
+    setUploadModal({ isOpen: false });
+  }
+
+  function handleUploadSuccess() {
+    // Refresh documents
+    setHasLoaded(false);
+    loadDocuments();
   }
 
   // Get counts for applicants
@@ -386,42 +438,69 @@ export function DocumentTabs({
               </div>
             ) : (
               // Unified rendering for both applicant and employee uploads
-              // Both now have endpoint field for View button
-              uploadedDocs.map((doc: any) => (
-                <div key={doc.id || doc.step_number} className="bg-white rounded-lg shadow-sm p-4">
-                  <div className="flex items-center justify-between">
-                    <div className="flex items-center gap-3">
-                      <div className="flex h-10 w-10 items-center justify-center rounded-lg bg-maroon/10">
-                        <svg className="h-5 w-5 text-maroon" fill="none" viewBox="0 0 24 24" stroke="currentColor">
-                          <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M15.172 7l-6.586 6.586a2 2 0 102.828 2.828l6.414-6.586a4 4 0 00-5.656-5.656l-6.415 6.585a6 6 0 108.486 8.486L20.5 13" />
-                        </svg>
-                      </div>
-                      <div>
-                        <p className="font-medium text-slate text-sm">{doc.name}</p>
-                        <p className="text-xs text-gray">
-                          {doc.filename || 'File uploaded'}
-                          {doc.uploaded_at && ` • ${formatDate(doc.uploaded_at)}`}
-                        </p>
-                        {doc.expires_at && (
-                          <p className="text-xs text-warning">
-                            Expires {formatDate(doc.expires_at)}
+              uploadedDocs.map((doc: any) => {
+                const expirationStatus = getExpirationStatus(doc.expires_at);
+                
+                return (
+                  <div key={doc.id || doc.step_number} className="bg-white rounded-lg shadow-sm p-4">
+                    <div className="flex items-center justify-between">
+                      <div className="flex items-center gap-3">
+                        <div className={`flex h-10 w-10 items-center justify-center rounded-lg ${
+                          expirationStatus === 'expired' ? 'bg-error/10' :
+                          expirationStatus === 'expiring' ? 'bg-warning/10' :
+                          'bg-maroon/10'
+                        }`}>
+                          <svg className={`h-5 w-5 ${
+                            expirationStatus === 'expired' ? 'text-error' :
+                            expirationStatus === 'expiring' ? 'text-warning' :
+                            'text-maroon'
+                          }`} fill="none" viewBox="0 0 24 24" stroke="currentColor">
+                            <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M15.172 7l-6.586 6.586a2 2 0 102.828 2.828l6.414-6.586a4 4 0 00-5.656-5.656l-6.415 6.585a6 6 0 108.486 8.486L20.5 13" />
+                          </svg>
+                        </div>
+                        <div>
+                          <p className="font-medium text-slate text-sm">{doc.name}</p>
+                          <p className="text-xs text-gray">
+                            {doc.filename || 'File uploaded'}
+                            {doc.uploaded_at && ` • ${formatDate(doc.uploaded_at)}`}
                           </p>
+                          {/* Expiration date with status */}
+                          {doc.expires_at && (
+                            <p className={`text-xs ${
+                              expirationStatus === 'expired' ? 'text-error font-medium' :
+                              expirationStatus === 'expiring' ? 'text-warning font-medium' :
+                              'text-gray'
+                            }`}>
+                              {expirationStatus === 'expired' ? '⚠️ Expired' : 
+                               expirationStatus === 'expiring' ? '⏰ Expiring soon:' :
+                               'Expires:'} {formatDate(doc.expires_at)}
+                            </p>
+                          )}
+                        </div>
+                      </div>
+                      <div className="flex gap-2">
+                        {doc.endpoint && (
+                          <button
+                            onClick={() => viewDocument(doc.endpoint, doc.name, doc.filename)}
+                            className="px-3 py-1.5 text-sm font-medium text-maroon hover:bg-maroon/5 rounded-lg transition-colors"
+                          >
+                            View
+                          </button>
+                        )}
+                        {/* Update button for employees with documents_table documents */}
+                        {isEmployee && doc.source === 'documents_table' && (
+                          <button
+                            onClick={() => openUpdateModal(doc)}
+                            className="px-3 py-1.5 text-sm font-medium text-gray hover:bg-gray-100 rounded-lg transition-colors"
+                          >
+                            Update
+                          </button>
                         )}
                       </div>
                     </div>
-                    {doc.endpoint ? (
-                      <button
-                        onClick={() => viewDocument(doc.endpoint, doc.name, doc.filename)}
-                        className="px-3 py-1.5 text-sm font-medium text-maroon hover:bg-maroon/5 rounded-lg transition-colors"
-                      >
-                        View
-                      </button>
-                    ) : (
-                      <span className="text-xs text-gray">No preview</span>
-                    )}
                   </div>
-                </div>
-              ))
+                );
+              })
             )}
           </div>
         )}
@@ -572,6 +651,18 @@ export function DocumentTabs({
         fileName={documentModal.fileName}
         loading={documentModal.loading}
       />
+
+      {/* Document Upload Modal (employees only) */}
+      {isEmployee && employeeId && (
+        <DocumentUploadModal
+          isOpen={uploadModal.isOpen}
+          onClose={closeUploadModal}
+          employeeId={employeeId}
+          employeeName={displayName}
+          existingDocument={uploadModal.existingDocument}
+          onSuccess={handleUploadSuccess}
+        />
+      )}
     </>
   );
 }
