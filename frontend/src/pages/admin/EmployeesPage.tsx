@@ -7,6 +7,7 @@ import { Alert } from '../../components/ui/Alert';
 import { api } from '../../lib/api';
 import { DocumentTabs } from '../../components/admin/DocumentTabs';
 import { DocumentUploadModal } from '../../components/admin/DocumentUploadModal';
+import { ExclusionCheckModal } from '../../components/admin/ExclusionCheckModal';
 
 interface Employee {
   id: string;
@@ -104,6 +105,32 @@ interface ComplianceStatus {
     type: string;
     status: string;
     expires_at?: string;
+  }>;
+}
+
+interface ExclusionCheckStatus {
+  employee_id: string;
+  employee_name: string;
+  current_month: {
+    month: string;
+    oig: {
+      completed: boolean;
+      result: string | null;
+      date: string | null;
+    };
+    sam: {
+      completed: boolean;
+      result: string | null;
+      date: string | null;
+    };
+  };
+  history: Array<{
+    id: string;
+    check_type: string;
+    check_date: string;
+    result: string;
+    notes?: string;
+    checked_by_name?: string;
   }>;
 }
 
@@ -250,6 +277,12 @@ export function EmployeesPage() {
   const [preferences, setPreferences] = useState<EmployeePreferences | null>(null);
   const [loadingPreferences, setLoadingPreferences] = useState(false);
 
+  // Exclusion check status
+  const [exclusionStatus, setExclusionStatus] = useState<ExclusionCheckStatus | null>(null);
+  const [loadingExclusion, setLoadingExclusion] = useState(false);
+  const [showExclusionModal, setShowExclusionModal] = useState(false);
+  const [exclusionCheckType, setExclusionCheckType] = useState<'oig' | 'sam'>('oig');
+
   // Assignment state
   const [assignments, setAssignments] = useState<ClientAssignment[]>([]);
   const [assignmentHistory, setAssignmentHistory] = useState<AssignmentHistoryEntry[]>([]);
@@ -350,6 +383,19 @@ export function EmployeesPage() {
     }
   };
 
+  const loadExclusionStatus = async (employeeId: string) => {
+    setLoadingExclusion(true);
+    try {
+      const res = await api.get<ExclusionCheckStatus>(`/admin/exclusion-checks/employee/${employeeId}`);
+      setExclusionStatus(res);
+    } catch (err) {
+      console.error('Failed to load exclusion status:', err);
+      setExclusionStatus(null);
+    } finally {
+      setLoadingExclusion(false);
+    }
+  };
+
   // Filter and organize employees
   const { recentHires, positionPools, unassignedEmployees, inactiveEmployees, terminatedEmployees } = useMemo(() => {
     const now = new Date();
@@ -429,12 +475,18 @@ export function EmployeesPage() {
     setShowHistorySection(false);
     setLoadingDetail(true);
     setPreferences(null);
+    setExclusionStatus(null);
 
     try {
-      const assignRes = await api.get<ClientAssignment[]>(`/employees/${employee.id}/assignments`);
+      // Load assignments, preferences, and exclusion status in parallel
+      const [assignRes] = await Promise.all([
+        api.get<ClientAssignment[]>(`/employees/${employee.id}/assignments`),
+      ]);
+      
       setAssignments(assignRes || []);
       setSelectedEmployee(prev => prev ? { ...prev, assignments: assignRes || [] } : null);
       
+      // Load preferences
       setLoadingPreferences(true);
       try {
         const prefRes = await api.get<{ preferences: EmployeePreferences; has_application: boolean }>(`/employees/${employee.id}/preferences`);
@@ -446,6 +498,9 @@ export function EmployeesPage() {
       } finally {
         setLoadingPreferences(false);
       }
+
+      // Load exclusion check status
+      loadExclusionStatus(employee.id);
     } catch (err) {
       console.error('Failed to load assignments:', err);
     } finally {
@@ -473,6 +528,7 @@ export function EmployeesPage() {
       setAssignments([]);
       setAssignmentHistory([]);
       setPreferences(null);
+      setExclusionStatus(null);
     }, 250);
   };
 
@@ -498,6 +554,18 @@ export function EmployeesPage() {
     setAssignmentNotes('');
     setClientSearch('');
     setClientPage(1);
+  }
+
+  function handleOpenExclusionModal(type: 'oig' | 'sam') {
+    setExclusionCheckType(type);
+    setShowExclusionModal(true);
+  }
+
+  function handleExclusionSuccess() {
+    // Refresh exclusion status after logging check
+    if (selectedEmployee) {
+      loadExclusionStatus(selectedEmployee.id);
+    }
   }
 
   async function handleAssignClient() {
@@ -590,6 +658,51 @@ export function EmployeesPage() {
     return (
       <span className={`inline-flex items-center px-2 py-0.5 rounded text-xs font-medium ${styles[status] || 'bg-gray-100 text-gray'}`}>
         {status.charAt(0).toUpperCase() + status.slice(1)}
+      </span>
+    );
+  };
+
+  // Exclusion check status badge component
+  const ExclusionBadge = ({ type, check }: { type: 'OIG' | 'SAM'; check: { completed: boolean; result: string | null; date: string | null } }) => {
+    if (!check.completed) {
+      return (
+        <button
+          onClick={() => handleOpenExclusionModal(type.toLowerCase() as 'oig' | 'sam')}
+          className="inline-flex items-center gap-1 px-2 py-1 rounded border border-warning/30 bg-warning/10 text-warning text-xs font-medium hover:bg-warning/20 transition-colors"
+        >
+          <svg className="h-3.5 w-3.5" fill="none" viewBox="0 0 24 24" stroke="currentColor">
+            <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M12 8v4l3 3m6-3a9 9 0 11-18 0 9 9 0 0118 0z" />
+          </svg>
+          {type}: Due
+        </button>
+      );
+    }
+    
+    if (check.result === 'clear') {
+      return (
+        <span className="inline-flex items-center gap-1 px-2 py-1 rounded border border-success/30 bg-success/10 text-success text-xs font-medium">
+          <svg className="h-3.5 w-3.5" fill="none" viewBox="0 0 24 24" stroke="currentColor">
+            <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M5 13l4 4L19 7" />
+          </svg>
+          {type}: Clear
+        </span>
+      );
+    }
+    
+    if (check.result === 'match_found') {
+      return (
+        <span className="inline-flex items-center gap-1 px-2 py-1 rounded border border-error/30 bg-error/10 text-error text-xs font-medium">
+          <svg className="h-3.5 w-3.5" fill="none" viewBox="0 0 24 24" stroke="currentColor">
+            <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M12 9v2m0 4h.01m-6.938 4h13.856c1.54 0 2.502-1.667 1.732-3L13.732 4c-.77-1.333-2.694-1.333-3.464 0L3.34 16c-.77 1.333.192 3 1.732 3z" />
+          </svg>
+          {type}: Match!
+        </span>
+      );
+    }
+    
+    return (
+      <span className="inline-flex items-center px-2 py-1 rounded bg-gray-100 text-gray text-xs font-medium">
+        {type}: {check.result || 'Unknown'}
       </span>
     );
   };
@@ -965,6 +1078,33 @@ export function EmployeesPage() {
               ) : panelTab === 'overview' ? (
                 /* Overview Tab */
                 <>
+                  {/* Monthly Exclusion Checks */}
+                  <div className="bg-white rounded-lg shadow-sm overflow-hidden mb-5">
+                    <div className="px-4 py-2 bg-gray-50 border-b border-gray-100 flex items-center justify-between">
+                      <span className="text-xs font-semibold text-gray uppercase tracking-wide">Monthly Compliance</span>
+                      {exclusionStatus && (
+                        <span className="text-xs text-gray">{exclusionStatus.current_month.month}</span>
+                      )}
+                    </div>
+                    <div className="p-4">
+                      {loadingExclusion ? (
+                        <div className="flex justify-center py-2">
+                          <svg className="h-5 w-5 animate-spin text-maroon" fill="none" viewBox="0 0 24 24">
+                            <circle className="opacity-25" cx="12" cy="12" r="10" stroke="currentColor" strokeWidth="4" />
+                            <path className="opacity-75" fill="currentColor" d="M4 12a8 8 0 018-8V0C5.373 0 0 5.373 0 12h4z" />
+                          </svg>
+                        </div>
+                      ) : exclusionStatus ? (
+                        <div className="flex gap-2">
+                          <ExclusionBadge type="OIG" check={exclusionStatus.current_month.oig} />
+                          <ExclusionBadge type="SAM" check={exclusionStatus.current_month.sam} />
+                        </div>
+                      ) : (
+                        <p className="text-sm text-gray">Unable to load compliance status</p>
+                      )}
+                    </div>
+                  </div>
+
                   {/* Work Preferences */}
                   {preferences && (
                     <div className="bg-white rounded-lg shadow-sm overflow-hidden mb-5">
@@ -1170,6 +1310,17 @@ export function EmployeesPage() {
           employeeId={selectedEmployee.id}
           employeeName={`${selectedEmployee.first_name} ${selectedEmployee.last_name}`}
           onSuccess={handleDocumentUploadSuccess}
+        />
+      )}
+
+      {/* Exclusion Check Modal */}
+      {selectedEmployee && (
+        <ExclusionCheckModal
+          isOpen={showExclusionModal}
+          onClose={() => setShowExclusionModal(false)}
+          onSuccess={handleExclusionSuccess}
+          preselectedEmployees={[{ id: selectedEmployee.id, name: `${selectedEmployee.first_name} ${selectedEmployee.last_name}` }]}
+          preselectedCheckType={exclusionCheckType}
         />
       )}
 
