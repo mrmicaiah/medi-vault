@@ -3,6 +3,7 @@ import { Link } from 'react-router-dom';
 import { Card } from '../../components/ui/Card';
 import { Alert } from '../../components/ui/Alert';
 import { api } from '../../lib/api';
+import { ExclusionCheckModal } from '../../components/admin/ExclusionCheckModal';
 
 interface DashboardStats {
   total_applicants: number;
@@ -52,40 +53,76 @@ interface TrainingLeadsResponse {
   total_cpr: number;
 }
 
+interface ComplianceStatus {
+  total_active: number;
+  oig_due: number;
+  sam_due: number;
+  oig_clear: number;
+  sam_clear: number;
+  matches_found: number;
+  month: string;
+  employees_due: Array<{
+    id: string;
+    name: string;
+    needs_oig: boolean;
+    needs_sam: boolean;
+  }>;
+  total_due: number;
+}
+
 export function AdminDashboardPage() {
   const [stats, setStats] = useState<DashboardStats | null>(null);
   const [unassigned, setUnassigned] = useState<UnassignedEmployee[]>([]);
   const [unassignedTotal, setUnassignedTotal] = useState(0);
   const [trainingLeads, setTrainingLeads] = useState<TrainingLeadsResponse | null>(null);
+  const [complianceStatus, setComplianceStatus] = useState<ComplianceStatus | null>(null);
   const [loading, setLoading] = useState(true);
   const [error, setError] = useState<string | null>(null);
+  
+  // Exclusion check modal
+  const [showExclusionModal, setShowExclusionModal] = useState(false);
+  const [exclusionCheckType, setExclusionCheckType] = useState<'oig' | 'sam'>('oig');
 
   useEffect(() => {
-    const loadData = async () => {
-      try {
-        setLoading(true);
-        setError(null);
-        
-        // Load all data in parallel
-        const [statsRes, unassignedRes, leadsRes] = await Promise.all([
-          api.get<DashboardStats>('/admin/dashboard'),
-          api.get<UnassignedResponse>('/admin/unassigned-employees'),
-          api.get<TrainingLeadsResponse>('/admin/training-leads'),
-        ]);
-        
-        setStats(statsRes);
-        setUnassigned(unassignedRes.unassigned_employees || []);
-        setUnassignedTotal(unassignedRes.total || 0);
-        setTrainingLeads(leadsRes);
-      } catch (err) {
-        setError(err instanceof Error ? err.message : 'Failed to load dashboard');
-      } finally {
-        setLoading(false);
-      }
-    };
-    
     loadData();
   }, []);
+
+  async function loadData() {
+    try {
+      setLoading(true);
+      setError(null);
+      
+      // Load all data in parallel
+      const [statsRes, unassignedRes, leadsRes, complianceRes] = await Promise.all([
+        api.get<DashboardStats>('/admin/dashboard'),
+        api.get<UnassignedResponse>('/admin/unassigned-employees'),
+        api.get<TrainingLeadsResponse>('/admin/training-leads'),
+        api.get<ComplianceStatus>('/admin/exclusion-checks/status').catch(() => null),
+      ]);
+      
+      setStats(statsRes);
+      setUnassigned(unassignedRes.unassigned_employees || []);
+      setUnassignedTotal(unassignedRes.total || 0);
+      setTrainingLeads(leadsRes);
+      setComplianceStatus(complianceRes);
+    } catch (err) {
+      setError(err instanceof Error ? err.message : 'Failed to load dashboard');
+    } finally {
+      setLoading(false);
+    }
+  }
+
+  function handleOpenExclusionModal(type: 'oig' | 'sam') {
+    setExclusionCheckType(type);
+    setShowExclusionModal(true);
+  }
+
+  function handleExclusionSuccess() {
+    // Refresh compliance status after logging checks
+    api.get<ComplianceStatus>('/admin/exclusion-checks/status')
+      .then(res => setComplianceStatus(res))
+      .catch(() => {});
+  }
 
   if (loading) {
     return (
@@ -109,6 +146,14 @@ export function AdminDashboardPage() {
       .map(l => ({ ...l, type: 'CPR' as const })),
   ] : [];
 
+  // Calculate compliance percentages
+  const oigPercent = complianceStatus && complianceStatus.total_active > 0
+    ? Math.round((complianceStatus.oig_clear / complianceStatus.total_active) * 100)
+    : 0;
+  const samPercent = complianceStatus && complianceStatus.total_active > 0
+    ? Math.round((complianceStatus.sam_clear / complianceStatus.total_active) * 100)
+    : 0;
+
   return (
     <div className="space-y-6">
       <div>
@@ -122,6 +167,134 @@ export function AdminDashboardPage() {
         <Alert variant="error" dismissible>
           {error}
         </Alert>
+      )}
+
+      {/* Monthly Compliance Checks Card */}
+      {complianceStatus && (complianceStatus.oig_due > 0 || complianceStatus.sam_due > 0 || complianceStatus.matches_found > 0) && (
+        <Card
+          header={
+            <div className="flex items-center justify-between">
+              <div className="flex items-center gap-2">
+                <h3 className="font-semibold text-navy">Monthly Exclusion Checks</h3>
+                <span className="text-xs text-gray bg-gray-100 px-2 py-0.5 rounded">
+                  {complianceStatus.month}
+                </span>
+              </div>
+            </div>
+          }
+        >
+          {complianceStatus.matches_found > 0 && (
+            <div className="mb-4 -mx-4 -mt-4 px-4 py-3 bg-error/10 border-b border-error/20">
+              <div className="flex items-center gap-2 text-error">
+                <svg className="h-5 w-5" fill="none" viewBox="0 0 24 24" stroke="currentColor">
+                  <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M12 9v2m0 4h.01m-6.938 4h13.856c1.54 0 2.502-1.667 1.732-3L13.732 4c-.77-1.333-2.694-1.333-3.464 0L3.34 16c-.77 1.333.192 3 1.732 3z" />
+                </svg>
+                <span className="font-semibold">{complianceStatus.matches_found} Exclusion Match{complianceStatus.matches_found !== 1 ? 'es' : ''} Found</span>
+              </div>
+              <p className="text-xs text-error/80 mt-1">Immediate action required for excluded individuals</p>
+            </div>
+          )}
+          
+          <div className="grid grid-cols-2 gap-4">
+            {/* OIG Status */}
+            <div 
+              className={`rounded-lg p-4 border-2 transition-colors ${
+                complianceStatus.oig_due > 0 
+                  ? 'border-warning/30 bg-warning/5 cursor-pointer hover:border-warning/50' 
+                  : 'border-success/30 bg-success/5'
+              }`}
+              onClick={() => complianceStatus.oig_due > 0 && handleOpenExclusionModal('oig')}
+            >
+              <div className="flex items-center justify-between mb-2">
+                <span className="text-sm font-semibold text-navy">OIG LEIE</span>
+                {complianceStatus.oig_due > 0 ? (
+                  <span className="text-xs font-bold text-warning bg-warning/20 px-2 py-0.5 rounded-full">
+                    {complianceStatus.oig_due} due
+                  </span>
+                ) : (
+                  <svg className="h-5 w-5 text-success" fill="none" viewBox="0 0 24 24" stroke="currentColor">
+                    <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M9 12l2 2 4-4m6 2a9 9 0 11-18 0 9 9 0 0118 0z" />
+                  </svg>
+                )}
+              </div>
+              <div className="flex items-end gap-2">
+                <span className="text-2xl font-bold text-navy">{oigPercent}%</span>
+                <span className="text-xs text-gray mb-1">complete</span>
+              </div>
+              <div className="mt-2 h-2 bg-gray-200 rounded-full overflow-hidden">
+                <div 
+                  className={`h-full rounded-full transition-all ${oigPercent === 100 ? 'bg-success' : 'bg-warning'}`}
+                  style={{ width: `${oigPercent}%` }}
+                />
+              </div>
+              {complianceStatus.oig_due > 0 && (
+                <p className="text-xs text-warning mt-2 font-medium">Click to run checks →</p>
+              )}
+            </div>
+
+            {/* SAM Status */}
+            <div 
+              className={`rounded-lg p-4 border-2 transition-colors ${
+                complianceStatus.sam_due > 0 
+                  ? 'border-warning/30 bg-warning/5 cursor-pointer hover:border-warning/50' 
+                  : 'border-success/30 bg-success/5'
+              }`}
+              onClick={() => complianceStatus.sam_due > 0 && handleOpenExclusionModal('sam')}
+            >
+              <div className="flex items-center justify-between mb-2">
+                <span className="text-sm font-semibold text-navy">SAM.gov</span>
+                {complianceStatus.sam_due > 0 ? (
+                  <span className="text-xs font-bold text-warning bg-warning/20 px-2 py-0.5 rounded-full">
+                    {complianceStatus.sam_due} due
+                  </span>
+                ) : (
+                  <svg className="h-5 w-5 text-success" fill="none" viewBox="0 0 24 24" stroke="currentColor">
+                    <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M9 12l2 2 4-4m6 2a9 9 0 11-18 0 9 9 0 0118 0z" />
+                  </svg>
+                )}
+              </div>
+              <div className="flex items-end gap-2">
+                <span className="text-2xl font-bold text-navy">{samPercent}%</span>
+                <span className="text-xs text-gray mb-1">complete</span>
+              </div>
+              <div className="mt-2 h-2 bg-gray-200 rounded-full overflow-hidden">
+                <div 
+                  className={`h-full rounded-full transition-all ${samPercent === 100 ? 'bg-success' : 'bg-warning'}`}
+                  style={{ width: `${samPercent}%` }}
+                />
+              </div>
+              {complianceStatus.sam_due > 0 && (
+                <p className="text-xs text-warning mt-2 font-medium">Click to run checks →</p>
+              )}
+            </div>
+          </div>
+
+          {/* Quick list of employees due */}
+          {complianceStatus.employees_due.length > 0 && (
+            <div className="mt-4 pt-4 border-t border-border">
+              <p className="text-xs font-semibold text-gray uppercase mb-2">Employees needing checks</p>
+              <div className="flex flex-wrap gap-2">
+                {complianceStatus.employees_due.slice(0, 8).map(emp => (
+                  <Link
+                    key={emp.id}
+                    to={`/admin/employees?selected=${emp.id}`}
+                    className="text-xs bg-gray-100 hover:bg-gray-200 px-2 py-1 rounded transition-colors"
+                  >
+                    {emp.name}
+                    <span className="ml-1 text-gray">
+                      ({emp.needs_oig && emp.needs_sam ? 'both' : emp.needs_oig ? 'OIG' : 'SAM'})
+                    </span>
+                  </Link>
+                ))}
+                {complianceStatus.total_due > 8 && (
+                  <span className="text-xs text-gray px-2 py-1">
+                    +{complianceStatus.total_due - 8} more
+                  </span>
+                )}
+              </div>
+            </div>
+          )}
+        </Card>
       )}
 
       {/* Recent Applicants */}
@@ -301,6 +474,14 @@ export function AdminDashboardPage() {
           </div>
         )}
       </Card>
+
+      {/* Exclusion Check Modal */}
+      <ExclusionCheckModal
+        isOpen={showExclusionModal}
+        onClose={() => setShowExclusionModal(false)}
+        onSuccess={handleExclusionSuccess}
+        preselectedCheckType={exclusionCheckType}
+      />
     </div>
   );
 }
