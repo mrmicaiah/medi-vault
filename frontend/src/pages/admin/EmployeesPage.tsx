@@ -6,6 +6,7 @@ import { Modal } from '../../components/ui/Modal';
 import { Alert } from '../../components/ui/Alert';
 import { api } from '../../lib/api';
 import { DocumentTabs } from '../../components/admin/DocumentTabs';
+import { DocumentUploadModal } from '../../components/admin/DocumentUploadModal';
 
 interface Employee {
   id: string;
@@ -278,6 +279,11 @@ export function EmployeesPage() {
   const [endReason, setEndReason] = useState('');
   const [endNotes, setEndNotes] = useState('');
   const [ending, setEnding] = useState(false);
+
+  // Document Upload modal (from Overview tab)
+  const [showDocumentUploadModal, setShowDocumentUploadModal] = useState(false);
+  // Key to force DocumentTabs remount after upload
+  const [documentTabsKey, setDocumentTabsKey] = useState(0);
 
   const [searchParams] = useSearchParams();
 
@@ -552,6 +558,15 @@ export function EmployeesPage() {
     } finally {
       setEnding(false);
     }
+  }
+
+  // Handle document upload success - refresh document tabs
+  function handleDocumentUploadSuccess() {
+    setShowDocumentUploadModal(false);
+    // Increment key to force DocumentTabs to remount and refetch
+    setDocumentTabsKey(prev => prev + 1);
+    // Switch to uploads tab to show the new document
+    setPanelTab('uploads');
   }
 
   const assignedClientIds = useMemo(() => {
@@ -1044,22 +1059,31 @@ export function EmployeesPage() {
                     )}
                   </div>
 
-                  {/* Actions */}
-                  <div className="grid grid-cols-2 gap-3 mt-5">
+                  {/* Actions - 3 column grid now */}
+                  <div className="grid grid-cols-3 gap-3 mt-5">
                     <button
                       onClick={handleOpenAssignModal}
-                      className="py-3 bg-navy text-white text-sm font-semibold rounded-lg hover:bg-navy/90 transition-colors flex items-center justify-center gap-2"
+                      className="py-3 bg-navy text-white text-sm font-semibold rounded-lg hover:bg-navy/90 transition-colors flex items-center justify-center gap-1"
                     >
                       <svg className="h-4 w-4" fill="none" viewBox="0 0 24 24" stroke="currentColor">
                         <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M18 9v3m0 0v3m0-3h3m-3 0h-3m-2-5a4 4 0 11-8 0 4 4 0 018 0zM3 20a6 6 0 0112 0v1H3v-1z" />
                       </svg>
-                      {activeAssignments.length > 0 ? 'Add Client' : 'Assign Client'}
+                      <span className="hidden sm:inline">{activeAssignments.length > 0 ? 'Add' : 'Assign'}</span>
+                    </button>
+                    <button
+                      onClick={() => setShowDocumentUploadModal(true)}
+                      className="py-3 bg-maroon text-white text-sm font-semibold rounded-lg hover:bg-maroon/90 transition-colors flex items-center justify-center gap-1"
+                    >
+                      <svg className="h-4 w-4" fill="none" viewBox="0 0 24 24" stroke="currentColor">
+                        <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M7 16a4 4 0 01-.88-7.903A5 5 0 1115.9 6L16 6a5 5 0 011 9.9M15 13l-3-3m0 0l-3 3m3-3v12" />
+                      </svg>
+                      <span className="hidden sm:inline">Upload</span>
                     </button>
                     <Link
                       to={`/admin/employee/${selectedEmployee.id}`}
                       className="py-3 bg-white border border-border text-navy text-sm font-semibold rounded-lg hover:bg-gray-50 transition-colors flex items-center justify-center"
                     >
-                      Full Profile
+                      Profile
                     </Link>
                   </div>
 
@@ -1121,6 +1145,7 @@ export function EmployeesPage() {
               ) : (
                 /* Document Tabs (uploads, agreements, application) */
                 <DocumentTabs
+                  key={documentTabsKey}
                   employeeId={selectedEmployee.id}
                   personName={`${selectedEmployee.first_name} ${selectedEmployee.last_name}`}
                   activeTab={panelTab as 'uploads' | 'agreements' | 'application'}
@@ -1135,6 +1160,17 @@ export function EmployeesPage() {
             </div>
           </div>
         </>
+      )}
+
+      {/* Document Upload Modal (from Overview tab) */}
+      {selectedEmployee && (
+        <DocumentUploadModal
+          isOpen={showDocumentUploadModal}
+          onClose={() => setShowDocumentUploadModal(false)}
+          employeeId={selectedEmployee.id}
+          employeeName={`${selectedEmployee.first_name} ${selectedEmployee.last_name}`}
+          onSuccess={handleDocumentUploadSuccess}
+        />
       )}
 
       {/* Assign/Reassign Client Modal */}
