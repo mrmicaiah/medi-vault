@@ -43,10 +43,13 @@ interface EmployeeDocuments {
     uploaded: Array<{
       id: string;
       type: string;
-      filename: string;
-      uploaded_at: string;
+      name: string;
+      step_number?: number;
+      filename?: string;
+      uploaded_at?: string;
       expires_at?: string;
-      storage_path: string;
+      endpoint: string;
+      source: 'application' | 'documents_table';
     }>;
     agreements: Array<{
       type: string;
@@ -54,11 +57,13 @@ interface EmployeeDocuments {
       signed: boolean;
       signed_date?: string;
       endpoint: string;
+      preview_endpoint?: string;
     }>;
     generated: Array<{
       type: string;
       name: string;
       endpoint: string;
+      preview_endpoint?: string | null;
     }>;
   };
 }
@@ -253,7 +258,7 @@ export function DocumentTabs({
       uploads: employeeDocuments.documents.uploaded.length,
       agreements: employeeDocuments.documents.agreements.filter(a => a.signed).length,
       application: employeeDocuments.documents.generated.length,
-      missingUploads: 0, // Employees don't track missing uploads
+      missingUploads: 0, // Employees don't track missing uploads the same way
     };
   };
 
@@ -380,63 +385,43 @@ export function DocumentTabs({
                 <p className="text-sm text-gray">No documents uploaded yet</p>
               </div>
             ) : (
-              isEmployee ? (
-                // Employee uploads (from documents table)
-                (uploadedDocs as EmployeeDocuments['documents']['uploaded']).map((doc) => (
-                  <div key={doc.id} className="bg-white rounded-lg shadow-sm p-4">
-                    <div className="flex items-center justify-between">
-                      <div className="flex items-center gap-3">
-                        <div className="flex h-10 w-10 items-center justify-center rounded-lg bg-maroon/10">
-                          <svg className="h-5 w-5 text-maroon" fill="none" viewBox="0 0 24 24" stroke="currentColor">
-                            <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M15.172 7l-6.586 6.586a2 2 0 102.828 2.828l6.414-6.586a4 4 0 00-5.656-5.656l-6.415 6.585a6 6 0 108.486 8.486L20.5 13" />
-                          </svg>
-                        </div>
-                        <div>
-                          <p className="font-medium text-slate text-sm">{doc.type}</p>
-                          <p className="text-xs text-gray">
-                            {doc.filename || 'File uploaded'}
-                            {doc.uploaded_at && ` • ${formatDate(doc.uploaded_at)}`}
-                          </p>
-                          {doc.expires_at && (
-                            <p className="text-xs text-warning">
-                              Expires {formatDate(doc.expires_at)}
-                            </p>
-                          )}
-                        </div>
+              // Unified rendering for both applicant and employee uploads
+              // Both now have endpoint field for View button
+              uploadedDocs.map((doc: any) => (
+                <div key={doc.id || doc.step_number} className="bg-white rounded-lg shadow-sm p-4">
+                  <div className="flex items-center justify-between">
+                    <div className="flex items-center gap-3">
+                      <div className="flex h-10 w-10 items-center justify-center rounded-lg bg-maroon/10">
+                        <svg className="h-5 w-5 text-maroon" fill="none" viewBox="0 0 24 24" stroke="currentColor">
+                          <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M15.172 7l-6.586 6.586a2 2 0 102.828 2.828l6.414-6.586a4 4 0 00-5.656-5.656l-6.415 6.585a6 6 0 108.486 8.486L20.5 13" />
+                        </svg>
                       </div>
-                      <span className="text-xs text-gray">View in profile</span>
+                      <div>
+                        <p className="font-medium text-slate text-sm">{doc.name}</p>
+                        <p className="text-xs text-gray">
+                          {doc.filename || 'File uploaded'}
+                          {doc.uploaded_at && ` • ${formatDate(doc.uploaded_at)}`}
+                        </p>
+                        {doc.expires_at && (
+                          <p className="text-xs text-warning">
+                            Expires {formatDate(doc.expires_at)}
+                          </p>
+                        )}
+                      </div>
                     </div>
-                  </div>
-                ))
-              ) : (
-                // Applicant uploads (from application steps)
-                (uploadedDocs as DocumentSummary['documents']['uploaded']).map((doc) => (
-                  <div key={doc.step_number} className="bg-white rounded-lg shadow-sm p-4">
-                    <div className="flex items-center justify-between">
-                      <div className="flex items-center gap-3">
-                        <div className="flex h-10 w-10 items-center justify-center rounded-lg bg-maroon/10">
-                          <svg className="h-5 w-5 text-maroon" fill="none" viewBox="0 0 24 24" stroke="currentColor">
-                            <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M15.172 7l-6.586 6.586a2 2 0 102.828 2.828l6.414-6.586a4 4 0 00-5.656-5.656l-6.415 6.585a6 6 0 108.486 8.486L20.5 13" />
-                          </svg>
-                        </div>
-                        <div>
-                          <p className="font-medium text-slate text-sm">{doc.name}</p>
-                          <p className="text-xs text-gray">
-                            {doc.filename || 'File uploaded'}
-                            {doc.uploaded_at && ` • ${formatDate(doc.uploaded_at)}`}
-                          </p>
-                        </div>
-                      </div>
+                    {doc.endpoint ? (
                       <button
                         onClick={() => viewDocument(doc.endpoint, doc.name, doc.filename)}
                         className="px-3 py-1.5 text-sm font-medium text-maroon hover:bg-maroon/5 rounded-lg transition-colors"
                       >
                         View
                       </button>
-                    </div>
+                    ) : (
+                      <span className="text-xs text-gray">No preview</span>
+                    )}
                   </div>
-                ))
-              )
+                </div>
+              ))
             )}
           </div>
         )}
@@ -449,7 +434,7 @@ export function DocumentTabs({
                 <p className="text-sm text-gray">No agreements signed yet</p>
               </div>
             ) : (
-              agreementDocs.map((agreement) => (
+              agreementDocs.map((agreement: any) => (
                 <div key={agreement.type} className="bg-white rounded-lg shadow-sm p-4">
                   <div className="flex items-center justify-between">
                     <div className="flex items-center gap-3">
@@ -477,10 +462,10 @@ export function DocumentTabs({
                     </div>
                     {agreement.signed && (
                       <div className="flex gap-2">
-                        {appIdForPreview && (
+                        {(agreement.preview_endpoint || appIdForPreview) && (
                           <button
                             onClick={() => viewHtmlPreview(
-                              `/admin/applicants/${appIdForPreview}/agreement/${agreement.type}/preview`,
+                              agreement.preview_endpoint || `/admin/applicants/${appIdForPreview}/agreement/${agreement.type}/preview`,
                               agreement.endpoint,
                               agreement.name
                             )}
@@ -513,11 +498,13 @@ export function DocumentTabs({
                 <p className="text-sm text-gray">No generated documents yet</p>
               </div>
             ) : (
-              generatedDocs.map((doc) => {
+              generatedDocs.map((doc: any) => {
                 // Build preview endpoint based on doc type
-                const previewEndpoint = appIdForPreview && doc.type === 'application' 
-                  ? `/admin/applicants/${appIdForPreview}/application/preview`
-                  : (doc as DocumentSummary['documents']['generated'][0]).preview_endpoint || null;
+                const previewEndpoint = doc.preview_endpoint || (
+                  appIdForPreview && doc.type === 'application' 
+                    ? `/admin/applicants/${appIdForPreview}/application/preview`
+                    : null
+                );
                 
                 return (
                   <div key={doc.type} className="bg-white rounded-lg shadow-sm p-4">

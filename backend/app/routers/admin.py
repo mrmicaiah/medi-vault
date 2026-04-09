@@ -712,6 +712,41 @@ async def get_document_url(
         raise HTTPException(status_code=500, detail=str(e))
 
 
+@router.get("/documents/{document_id}/url")
+async def get_document_table_url(
+    document_id: str,
+    supabase: Client = Depends(get_supabase),
+    user: dict = Depends(get_staff_user)
+):
+    """Get a signed URL for a document from the documents table."""
+    try:
+        doc_res = supabase.table("documents").select("*").eq("id", document_id).single().execute()
+        if not doc_res.data:
+            raise HTTPException(status_code=404, detail="Document not found")
+        
+        doc = doc_res.data
+        storage_path = doc.get("storage_path")
+        file_name = doc.get("filename")
+        
+        if not storage_path:
+            raise HTTPException(status_code=404, detail="No file path for this document")
+        
+        signed_url = generate_signed_url(supabase, storage_path, expires_in=3600)
+        
+        if signed_url:
+            return {"signed_url": signed_url, "file_name": file_name, "expires_in": 3600}
+        
+        raise HTTPException(
+            status_code=404, 
+            detail=f"File not found in storage. Path: {storage_path}. The file may have been deleted."
+        )
+    except HTTPException:
+        raise
+    except Exception as e:
+        logger.error(f"Document table URL error: {e}")
+        raise HTTPException(status_code=500, detail=str(e))
+
+
 @router.get("/applicants/{application_id}/agreements/{agreement_id}/pdf")
 async def get_agreement_pdf_url(
     application_id: str,
@@ -1181,14 +1216,24 @@ async def get_employee_documents(
     supabase: Client = Depends(get_supabase),
     user: dict = Depends(get_staff_user)
 ):
+    """
+    Get all documents for an employee, including:
+    - Application step uploads (steps 11-17) with view endpoints
+    - Documents table entries (background checks, renewals, etc.) with view endpoints
+    - Signed agreements with view/PDF endpoints
+    - Generated documents (Employment Application, I-9)
+    """
     try:
-        emp_res = supabase.table("employees").select("*, user_id").eq("id", employee_id).single().execute()
+        emp_res = supabase.table("employees").select("*, user_id, profiles(first_name, last_name)").eq("id", employee_id).single().execute()
         if not emp_res.data:
             raise HTTPException(status_code=404, detail="Employee not found")
         
         employee = emp_res.data
         user_id = employee.get("user_id")
+        profile = employee.get("profiles") or {}
+        employee_name = f"{profile.get('first_name', '')} {profile.get('last_name', '')}".strip()
         
+        # Find their application
         app_res = supabase.table("applications").select("id").eq("user_id", user_id).execute()
         application_id = app_res.data[0].get("id") if app_res.data and len(app_res.data) > 0 else None
         
@@ -1198,24 +1243,77 @@ async def get_employee_documents(
             "generated": []
         }
         
+        # 1. Get application step uploads (steps 11-17) - same as applicant documents
+        if application_id:
+            upload_steps = [
+                (11, "work_authorization", "Work Authorization"),
+                (12, "id_front", "ID Front"),
+                (13, "id_back", "ID Back"),
+                (14, "ssn_card", "Social Security Card"),
+                (15, "credentials", "Credentials"),
+                (16, "cpr", "CPR Certification"),
+                (17, "tb", "TB Test"),
+            ]
+            
+            steps_res = supabase.table("application_steps").select(
+                "step_number, data, is_completed, updated_at"
+            ).eq("application_id", application_id).in_(
+                "step_number", [s[0] for s in upload_steps]
+            ).execute()
+            
+            upload_steps_data = {s["step_number"]: s for s in (steps_res.data or [])}
+            
+            for step_num, doc_type, name in upload_steps:
+                step = upload_steps_data.get(step_num)
+                if step:
+                    data = step.get("data") or {}
+                    storage_path = data.get("storage_path") or data.get("file_url")
+                    if storage_path:
+                        documents["uploaded"].append({
+                            "id": f"step_{step_num}",
+                            "type": doc_type,
+                            "name": name,
+                            "step_number": step_num,
+                            "filename": data.get("file_name") or data.get("original_filename"),
+                            "uploaded_at": step.get("updated_at"),
+                            "expires_at": None,
+                            "endpoint": f"/admin/applicants/{application_id}/documents/{step_num}/url",
+                            "source": "application"
+                        })
+        
+        # 2. Get documents from documents table (background checks, renewals, etc.)
         if user_id:
             docs_res = supabase.table("documents").select("*").eq("user_id", user_id).order("created_at", desc=True).execute()
             for doc in (docs_res.data or []):
                 documents["uploaded"].append({
                     "id": doc.get("id"),
                     "type": doc.get("document_type"),
+                    "name": doc.get("document_type", "").replace("_", " ").title(),
                     "filename": doc.get("filename"),
                     "uploaded_at": doc.get("created_at"),
                     "expires_at": doc.get("expiration_date"),
-                    "storage_path": doc.get("storage_path")
+                    "endpoint": f"/admin/documents/{doc.get('id')}/url",
+                    "source": "documents_table"
                 })
         
+        # 3. Get generated documents (Employment Application, I-9)
         if application_id:
             documents["generated"] = [
-                {"type": "application", "name": "Employment Application", "endpoint": f"/admin/applicants/{application_id}/pdf/application"},
-                {"type": "i9", "name": "I-9 Form", "endpoint": f"/admin/applicants/{application_id}/pdf/i9"},
+                {
+                    "type": "application", 
+                    "name": "Employment Application", 
+                    "endpoint": f"/admin/applicants/{application_id}/pdf/application",
+                    "preview_endpoint": f"/admin/applicants/{application_id}/application/preview"
+                },
+                {
+                    "type": "i9", 
+                    "name": "I-9 Form", 
+                    "endpoint": f"/admin/applicants/{application_id}/pdf/i9",
+                    "preview_endpoint": None
+                },
             ]
             
+            # 4. Get signed agreements
             agreement_steps = [
                 (9, "confidentiality", "Confidentiality Agreement"),
                 (10, "esignature", "E-Signature Consent"),
@@ -1226,8 +1324,13 @@ async def get_employee_documents(
                 (22, "final_signature", "Final Signature"),
             ]
             
-            steps_res = supabase.table("application_steps").select("step_number, is_completed, data").eq("application_id", application_id).in_("step_number", [s[0] for s in agreement_steps]).execute()
-            completed_steps = {s["step_number"]: s for s in (steps_res.data or [])}
+            agreement_steps_res = supabase.table("application_steps").select(
+                "step_number, is_completed, data"
+            ).eq("application_id", application_id).in_(
+                "step_number", [s[0] for s in agreement_steps]
+            ).execute()
+            
+            completed_steps = {s["step_number"]: s for s in (agreement_steps_res.data or [])}
             
             for step_num, agreement_type, name in agreement_steps:
                 step = completed_steps.get(step_num)
@@ -1238,12 +1341,13 @@ async def get_employee_documents(
                         "name": name,
                         "signed": bool(data.get("signature")),
                         "signed_date": data.get("signed_date"),
-                        "endpoint": f"/admin/applicants/{application_id}/pdf/agreement/{agreement_type}"
+                        "endpoint": f"/admin/applicants/{application_id}/pdf/agreement/{agreement_type}",
+                        "preview_endpoint": f"/admin/applicants/{application_id}/agreement/{agreement_type}/preview"
                     })
         
         return {
             "employee_id": employee_id,
-            "employee_name": f"{employee.get('first_name', '')} {employee.get('last_name', '')}",
+            "employee_name": employee_name,
             "application_id": application_id,
             "documents": documents
         }
