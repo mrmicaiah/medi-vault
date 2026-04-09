@@ -1219,7 +1219,7 @@ async def get_employee_documents(
     """
     Get all documents for an employee, including:
     - Application step uploads (steps 11-17) with view endpoints
-    - Documents table entries (background checks, renewals, etc.) with view endpoints
+    - Documents table entries (background checks, renewals, etc.) with view endpoints and status
     - Signed agreements with view/PDF endpoints
     - Generated documents (Employment Application, I-9)
     """
@@ -1277,13 +1277,15 @@ async def get_employee_documents(
                             "filename": data.get("file_name") or data.get("original_filename"),
                             "uploaded_at": step.get("updated_at"),
                             "expires_at": None,
+                            "status": "approved",  # Application docs are already approved
                             "endpoint": f"/admin/applicants/{application_id}/documents/{step_num}/url",
                             "source": "application"
                         })
         
         # 2. Get documents from documents table (background checks, renewals, etc.)
+        # Include status field for pending_review support
         if user_id:
-            docs_res = supabase.table("documents").select("*").eq("user_id", user_id).order("created_at", desc=True).execute()
+            docs_res = supabase.table("documents").select("*").eq("user_id", user_id).eq("is_current", True).order("created_at", desc=True).execute()
             for doc in (docs_res.data or []):
                 documents["uploaded"].append({
                     "id": doc.get("id"),
@@ -1292,6 +1294,7 @@ async def get_employee_documents(
                     "filename": doc.get("filename"),
                     "uploaded_at": doc.get("created_at"),
                     "expires_at": doc.get("expiration_date"),
+                    "status": doc.get("status", "approved"),  # Include status for pending_review
                     "endpoint": f"/admin/documents/{doc.get('id')}/url",
                     "source": "documents_table"
                 })
