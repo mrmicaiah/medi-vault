@@ -2,169 +2,108 @@ import React, { useState, useEffect } from 'react';
 import { useAuth } from '../../hooks/useAuth';
 import { Card } from '../../components/ui/Card';
 import { Badge } from '../../components/ui/Badge';
-import { Alert } from '../../components/ui/Alert';
-import { Modal } from '../../components/ui/Modal';
 import { Button } from '../../components/ui/Button';
-import { api } from '../../lib/api';
+import { Alert } from '../../components/ui/Alert';
+import { EmployeeDocumentUpdateModal } from '../../components/employee/EmployeeDocumentUpdateModal';
 import { formatDate, daysUntil } from '../../lib/utils';
+import { api } from '../../lib/api';
 
 interface EmployeeDocument {
   id: string;
   document_type: string;
   name: string;
-  filename?: string;
-  uploaded_at?: string;
-  expiration_date?: string;
-  status: 'approved' | 'pending_review' | 'expired';
+  filename: string;
+  uploaded_at: string;
+  expiration_date: string | null;
+  status: 'approved' | 'pending_review' | 'rejected';
   version: number;
   source: 'application' | 'documents_table';
-  endpoint?: string;
+  endpoint: string | null;
 }
 
-interface EmployeeDocumentsResponse {
+interface DocumentsResponse {
   employee_id: string;
   employee_name: string;
   documents: EmployeeDocument[];
 }
 
-type ExpirationStatus = 'expired' | 'expiring_soon' | 'valid' | 'no_expiration';
+type ExpirationStatus = 'expired' | 'expiring' | 'valid' | null;
 
-function getExpirationStatus(expirationDate?: string): ExpirationStatus {
-  if (!expirationDate) return 'no_expiration';
-  
+function getExpirationStatus(expirationDate: string | null): ExpirationStatus {
+  if (!expirationDate) return null;
   const expDate = new Date(expirationDate);
-  const now = new Date();
-  const thirtyDaysFromNow = new Date(now.getTime() + 30 * 24 * 60 * 60 * 1000);
+  const today = new Date();
+  today.setHours(0, 0, 0, 0);
   
-  if (expDate < now) return 'expired';
-  if (expDate < thirtyDaysFromNow) return 'expiring_soon';
+  if (expDate < today) return 'expired';
+  
+  const daysLeft = daysUntil(expirationDate);
+  if (daysLeft <= 30) return 'expiring';
+  
   return 'valid';
 }
-
-const statusStyles: Record<ExpirationStatus, { bg: string; text: string; badge: 'error' | 'warning' | 'success' | 'neutral' }> = {
-  expired: { bg: 'bg-error/10', text: 'text-error', badge: 'error' },
-  expiring_soon: { bg: 'bg-warning/10', text: 'text-warning', badge: 'warning' },
-  valid: { bg: 'bg-success/10', text: 'text-success', badge: 'success' },
-  no_expiration: { bg: 'bg-gray-100', text: 'text-gray', badge: 'neutral' },
-};
-
-const statusLabels: Record<ExpirationStatus, string> = {
-  expired: 'Expired',
-  expiring_soon: 'Expiring Soon',
-  valid: 'Valid',
-  no_expiration: 'No Expiration',
-};
 
 export function EmployeeDashboardPage() {
   const { profile } = useAuth();
   const [loading, setLoading] = useState(true);
   const [error, setError] = useState<string | null>(null);
   const [documents, setDocuments] = useState<EmployeeDocument[]>([]);
+  const [employeeName, setEmployeeName] = useState('');
   
   // Upload modal state
   const [uploadModal, setUploadModal] = useState<{
     isOpen: boolean;
-    document?: EmployeeDocument;
-  }>({ isOpen: false });
-  
-  // View modal state
-  const [viewModal, setViewModal] = useState<{
-    isOpen: boolean;
-    documentName: string;
-    url: string | null;
-    loading: boolean;
-  }>({ isOpen: false, documentName: '', url: null, loading: false });
-  
-  // File upload state
-  const [selectedFile, setSelectedFile] = useState<File | null>(null);
-  const [uploading, setUploading] = useState(false);
-  const [uploadError, setUploadError] = useState<string | null>(null);
+    document: EmployeeDocument | null;
+  }>({ isOpen: false, document: null });
 
-  useEffect(() => {
-    loadDocuments();
-  }, []);
-
-  async function loadDocuments() {
+  const loadDocuments = async () => {
     try {
       setLoading(true);
       setError(null);
-      const res = await api.get<EmployeeDocumentsResponse>('/employee/documents');
+      
+      const res = await api.get<DocumentsResponse>('/employee/documents');
       setDocuments(res.documents || []);
+      setEmployeeName(res.employee_name || '');
     } catch (err) {
       setError(err instanceof Error ? err.message : 'Failed to load documents');
     } finally {
       setLoading(false);
     }
-  }
+  };
 
-  async function handleViewDocument(doc: EmployeeDocument) {
+  useEffect(() => {
+    loadDocuments();
+  }, []);
+
+  const handleViewDocument = async (doc: EmployeeDocument) => {
     if (!doc.endpoint) return;
     
     try {
-      setViewModal({ isOpen: true, documentName: doc.name, url: null, loading: true });
-      const data = await api.get<{ signed_url: string }>(doc.endpoint);
-      setViewModal({ isOpen: true, documentName: doc.name, url: data.signed_url, loading: false });
+      const res = await api.get<{ url: string }>(doc.endpoint);
+      if (res.url) {
+        window.open(res.url, '_blank');
+      }
     } catch (err) {
-      setError(err instanceof Error ? err.message : 'Failed to load document');
-      setViewModal({ isOpen: false, documentName: '', url: null, loading: false });
+      console.error('Error fetching document URL:', err);
     }
-  }
+  };
 
-  function handleUpdateClick(doc: EmployeeDocument) {
+  const handleUpdateClick = (doc: EmployeeDocument) => {
     setUploadModal({ isOpen: true, document: doc });
-    setSelectedFile(null);
-    setUploadError(null);
-  }
+  };
 
-  function handleFileChange(e: React.ChangeEvent<HTMLInputElement>) {
-    const file = e.target.files?.[0];
-    if (file) {
-      // Validate file type
-      const allowedTypes = ['application/pdf', 'image/jpeg', 'image/png', 'image/webp', 'image/heic'];
-      if (!allowedTypes.includes(file.type)) {
-        setUploadError('Please upload a PDF or image file (JPEG, PNG, WebP, HEIC)');
-        return;
-      }
-      // Validate file size (10MB max)
-      if (file.size > 10 * 1024 * 1024) {
-        setUploadError('File size must be under 10MB');
-        return;
-      }
-      setUploadError(null);
-      setSelectedFile(file);
-    }
-  }
-
-  async function handleUploadSubmit() {
-    if (!selectedFile || !uploadModal.document) return;
-    
-    try {
-      setUploading(true);
-      setUploadError(null);
-      
-      const formData = new FormData();
-      formData.append('file', selectedFile);
-      formData.append('document_type', uploadModal.document.document_type);
-      if (uploadModal.document.id) {
-        formData.append('previous_document_id', uploadModal.document.id);
-      }
-      
-      await api.postFormData('/employee/documents/upload', formData);
-      
-      // Close modal and refresh
-      setUploadModal({ isOpen: false });
-      setSelectedFile(null);
-      loadDocuments();
-    } catch (err) {
-      setUploadError(err instanceof Error ? err.message : 'Failed to upload document');
-    } finally {
-      setUploading(false);
-    }
-  }
+  const handleUploadSuccess = () => {
+    setUploadModal({ isOpen: false, document: null });
+    loadDocuments();
+  };
 
   // Categorize documents
-  const expiredDocs = documents.filter(d => getExpirationStatus(d.expiration_date) === 'expired');
-  const expiringDocs = documents.filter(d => getExpirationStatus(d.expiration_date) === 'expiring_soon');
+  const expiredDocs = documents.filter(d => 
+    d.status === 'approved' && getExpirationStatus(d.expiration_date) === 'expired'
+  );
+  const expiringDocs = documents.filter(d => 
+    d.status === 'approved' && getExpirationStatus(d.expiration_date) === 'expiring'
+  );
   const pendingDocs = documents.filter(d => d.status === 'pending_review');
 
   if (loading) {
@@ -189,17 +128,17 @@ export function EmployeeDashboardPage() {
           Welcome, {profile?.first_name || 'Employee'}
         </h1>
         <p className="mt-1 text-sm text-gray">
-          Manage your documents and keep your certifications up to date.
+          Manage your documents and keep your credentials up to date.
         </p>
       </div>
 
       {error && (
-        <Alert variant="error" dismissible onDismiss={() => setError(null)}>
+        <Alert variant="error" dismissible>
           {error}
         </Alert>
       )}
 
-      {/* Alerts for expired/expiring documents */}
+      {/* Alerts */}
       {expiredDocs.length > 0 && (
         <Alert variant="error" title="Expired Documents">
           You have {expiredDocs.length} expired document(s) that need to be updated immediately.
@@ -208,89 +147,126 @@ export function EmployeeDashboardPage() {
 
       {expiringDocs.length > 0 && (
         <Alert variant="warning" title="Documents Expiring Soon">
-          You have {expiringDocs.length} document(s) expiring within 30 days. Please upload updated versions.
+          You have {expiringDocs.length} document(s) expiring within 30 days. Please update them to stay compliant.
         </Alert>
       )}
 
       {pendingDocs.length > 0 && (
         <Alert variant="info" title="Pending Review">
-          You have {pendingDocs.length} document(s) pending manager review.
+          You have {pendingDocs.length} document(s) awaiting manager approval.
         </Alert>
       )}
 
       {/* Quick Stats */}
-      <div className="grid grid-cols-2 gap-4 sm:grid-cols-4">
-        <div className="bg-white rounded-lg border border-border p-4 text-center">
+      <div className="grid grid-cols-1 gap-4 sm:grid-cols-4">
+        <div className="rounded-lg border border-border bg-white p-4">
+          <p className="text-sm text-gray">Total Documents</p>
           <p className="text-2xl font-bold text-navy">{documents.length}</p>
-          <p className="text-xs text-gray">Total Documents</p>
         </div>
-        <div className="bg-white rounded-lg border border-border p-4 text-center">
-          <p className="text-2xl font-bold text-success">{documents.filter(d => getExpirationStatus(d.expiration_date) === 'valid').length}</p>
-          <p className="text-xs text-gray">Valid</p>
+        <div className="rounded-lg border border-border bg-white p-4">
+          <p className="text-sm text-gray">Up to Date</p>
+          <p className="text-2xl font-bold text-green-600">
+            {documents.filter(d => d.status === 'approved' && getExpirationStatus(d.expiration_date) === 'valid').length}
+          </p>
         </div>
-        <div className="bg-white rounded-lg border border-border p-4 text-center">
-          <p className="text-2xl font-bold text-warning">{expiringDocs.length}</p>
-          <p className="text-xs text-gray">Expiring Soon</p>
+        <div className="rounded-lg border border-border bg-white p-4">
+          <p className="text-sm text-gray">Expiring Soon</p>
+          <p className="text-2xl font-bold text-orange-500">{expiringDocs.length}</p>
         </div>
-        <div className="bg-white rounded-lg border border-border p-4 text-center">
-          <p className="text-2xl font-bold text-error">{expiredDocs.length}</p>
-          <p className="text-xs text-gray">Expired</p>
+        <div className="rounded-lg border border-border bg-white p-4">
+          <p className="text-sm text-gray">Expired</p>
+          <p className="text-2xl font-bold text-red-600">{expiredDocs.length}</p>
         </div>
       </div>
 
       {/* Documents List */}
       <Card header="My Documents">
         {documents.length === 0 ? (
-          <div className="text-center py-8">
-            <div className="text-4xl mb-3">📄</div>
-            <p className="text-gray">No documents found</p>
+          <div className="py-8 text-center">
+            <svg className="mx-auto h-12 w-12 text-gray-300" fill="none" viewBox="0 0 24 24" stroke="currentColor">
+              <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={1.5} d="M9 12h6m-6 4h6m2 5H7a2 2 0 01-2-2V5a2 2 0 012-2h5.586a1 1 0 01.707.293l5.414 5.414a1 1 0 01.293.707V19a2 2 0 01-2 2z" />
+            </svg>
+            <p className="mt-3 text-sm text-gray">No documents found</p>
           </div>
         ) : (
           <div className="space-y-3">
             {documents.map((doc) => {
               const expStatus = getExpirationStatus(doc.expiration_date);
-              const styles = statusStyles[expStatus];
+              const isExpired = expStatus === 'expired';
+              const isExpiring = expStatus === 'expiring';
               const isPending = doc.status === 'pending_review';
+              const isRejected = doc.status === 'rejected';
               
               return (
                 <div
                   key={doc.id}
-                  className={`rounded-lg border p-4 ${expStatus === 'expired' ? 'border-error/30 bg-error/5' : expStatus === 'expiring_soon' ? 'border-warning/30 bg-warning/5' : 'border-border bg-white'}`}
+                  className={`rounded-lg border p-4 ${
+                    isExpired ? 'border-red-200 bg-red-50' :
+                    isExpiring ? 'border-orange-200 bg-orange-50' :
+                    isPending ? 'border-blue-200 bg-blue-50' :
+                    isRejected ? 'border-red-200 bg-red-50' :
+                    'border-border bg-white'
+                  }`}
                 >
-                  <div className="flex items-start justify-between gap-4">
-                    <div className="flex items-start gap-3 flex-1">
-                      <div className={`flex h-10 w-10 items-center justify-center rounded-lg ${styles.bg}`}>
-                        <svg className={`h-5 w-5 ${styles.text}`} fill="none" viewBox="0 0 24 24" stroke="currentColor">
-                          <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M9 12h6m-6 4h6m2 5H7a2 2 0 01-2-2V5a2 2 0 012-2h5.586a1 1 0 01.707.293l5.414 5.414a1 1 0 01.293.707V19a2 2 0 01-2 2z" />
-                        </svg>
+                  <div className="flex items-start justify-between">
+                    <div className="flex-1">
+                      <div className="flex items-center gap-2">
+                        <h4 className="font-medium text-slate">{doc.name}</h4>
+                        
+                        {/* Status Badge */}
+                        {isPending && (
+                          <Badge variant="warning">Pending Review</Badge>
+                        )}
+                        {isRejected && (
+                          <Badge variant="error">Rejected</Badge>
+                        )}
+                        {!isPending && !isRejected && isExpired && (
+                          <Badge variant="error">Expired</Badge>
+                        )}
+                        {!isPending && !isRejected && isExpiring && (
+                          <Badge variant="warning">Expiring Soon</Badge>
+                        )}
+                        {!isPending && !isRejected && !isExpired && !isExpiring && doc.status === 'approved' && (
+                          <Badge variant="success">Valid</Badge>
+                        )}
+                        
+                        {doc.version > 1 && (
+                          <span className="text-xs text-gray">v{doc.version}</span>
+                        )}
                       </div>
-                      <div className="flex-1">
-                        <div className="flex items-center gap-2 flex-wrap">
-                          <h4 className="font-medium text-slate">{doc.name}</h4>
-                          <Badge variant={styles.badge}>
-                            {isPending ? 'Pending Review' : statusLabels[expStatus]}
-                          </Badge>
-                        </div>
-                        <p className="text-xs text-gray mt-1">
-                          {doc.filename || 'Document uploaded'}
-                          {doc.version > 1 && ` • Version ${doc.version}`}
+                      
+                      <p className="mt-1 text-sm text-gray">{doc.filename}</p>
+                      
+                      {/* Expiration Date */}
+                      {doc.expiration_date && (
+                        <p className={`mt-1 text-sm ${
+                          isExpired ? 'text-red-600 font-medium' :
+                          isExpiring ? 'text-orange-600 font-medium' :
+                          'text-gray'
+                        }`}>
+                          {isExpired ? '⚠️ Expired: ' : isExpiring ? '⏰ Expires: ' : 'Expires: '}
+                          {formatDate(doc.expiration_date)}
+                          {isExpiring && ` (${daysUntil(doc.expiration_date)} days)`}
                         </p>
-                        {doc.expiration_date && (
-                          <p className={`text-xs mt-1 ${styles.text}`}>
-                            {expStatus === 'expired' ? 'Expired' : 'Expires'}: {formatDate(doc.expiration_date)}
-                            {expStatus === 'expiring_soon' && (
-                              <span className="font-medium"> ({daysUntil(doc.expiration_date)} days)</span>
-                            )}
-                          </p>
-                        )}
-                        {!doc.expiration_date && (
-                          <p className="text-xs text-gray mt-1">No expiration date set</p>
-                        )}
-                      </div>
+                      )}
+                      {!doc.expiration_date && doc.status === 'approved' && (
+                        <p className="mt-1 text-sm text-gray">No expiration</p>
+                      )}
+
+                      {isPending && (
+                        <p className="mt-1 text-sm text-blue-600">
+                          Uploaded {formatDate(doc.uploaded_at)} — awaiting manager approval
+                        </p>
+                      )}
+                      {isRejected && (
+                        <p className="mt-1 text-sm text-red-600">
+                          Your upload was rejected. Please upload a new document.
+                        </p>
+                      )}
                     </div>
                     
-                    <div className="flex gap-2 flex-shrink-0">
-                      {doc.endpoint && (
+                    <div className="ml-4 flex gap-2">
+                      {doc.endpoint && doc.status !== 'pending_review' && (
                         <Button
                           size="sm"
                           variant="ghost"
@@ -299,14 +275,17 @@ export function EmployeeDashboardPage() {
                           View
                         </Button>
                       )}
-                      <Button
-                        size="sm"
-                        variant={expStatus === 'expired' || expStatus === 'expiring_soon' ? 'primary' : 'secondary'}
-                        onClick={() => handleUpdateClick(doc)}
-                        disabled={isPending}
-                      >
-                        {isPending ? 'Pending' : 'Update'}
-                      </Button>
+                      
+                      {/* Show Update button for expired, expiring, or rejected docs */}
+                      {(isExpired || isExpiring || isRejected || doc.status === 'approved') && (
+                        <Button
+                          size="sm"
+                          variant={isExpired || isExpiring || isRejected ? 'primary' : 'secondary'}
+                          onClick={() => handleUpdateClick(doc)}
+                        >
+                          {isExpired || isRejected ? 'Upload New' : 'Update'}
+                        </Button>
+                      )}
                     </div>
                   </div>
                 </div>
@@ -316,118 +295,18 @@ export function EmployeeDashboardPage() {
         )}
         
         <p className="mt-4 text-xs text-gray">
-          When you upload a new document, it will be sent to your manager for review. 
-          They will verify and set the new expiration date.
+          Keep your documents current to maintain compliance. When you upload a new version, 
+          it will be reviewed by your manager before becoming active.
         </p>
       </Card>
 
       {/* Upload Modal */}
-      <Modal
+      <EmployeeDocumentUpdateModal
         isOpen={uploadModal.isOpen}
-        onClose={() => setUploadModal({ isOpen: false })}
-        title={`Update ${uploadModal.document?.name || 'Document'}`}
-      >
-        <div className="space-y-4">
-          <p className="text-sm text-gray">
-            Upload a new version of this document. Your manager will review it and update the expiration date.
-          </p>
-
-          {uploadError && (
-            <div className="bg-error/10 border border-error/30 rounded-lg p-3">
-              <p className="text-sm text-error">{uploadError}</p>
-            </div>
-          )}
-
-          {/* Current document info */}
-          {uploadModal.document && (
-            <div className="bg-gray-50 rounded-lg p-3">
-              <p className="text-xs text-gray uppercase font-semibold">Current Document</p>
-              <p className="text-sm text-slate mt-1">{uploadModal.document.filename || 'No file name'}</p>
-              {uploadModal.document.expiration_date && (
-                <p className="text-xs text-gray mt-1">
-                  Expires: {formatDate(uploadModal.document.expiration_date)}
-                </p>
-              )}
-            </div>
-          )}
-
-          {/* File Upload */}
-          <div>
-            <label className="mb-1.5 block text-sm font-medium text-slate">New Document *</label>
-            <input
-              type="file"
-              accept=".pdf,.jpg,.jpeg,.png,.webp,.heic"
-              onChange={handleFileChange}
-              className="w-full text-sm text-gray file:mr-4 file:py-2 file:px-4 file:rounded-lg file:border-0 file:text-sm file:font-medium file:bg-maroon/10 file:text-maroon hover:file:bg-maroon/20 cursor-pointer"
-            />
-            <p className="mt-1 text-xs text-gray">PDF, JPEG, PNG, WebP, or HEIC (max 10MB)</p>
-          </div>
-
-          {selectedFile && (
-            <div className="flex items-center gap-2 bg-success/10 rounded-lg p-3">
-              <svg className="h-5 w-5 text-success" fill="none" viewBox="0 0 24 24" stroke="currentColor">
-                <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M9 12l2 2 4-4m6 2a9 9 0 11-18 0 9 9 0 0118 0z" />
-              </svg>
-              <span className="text-sm text-slate">{selectedFile.name}</span>
-            </div>
-          )}
-
-          <div className="flex justify-end gap-3 pt-4">
-            <Button variant="secondary" onClick={() => setUploadModal({ isOpen: false })}>
-              Cancel
-            </Button>
-            <Button
-              onClick={handleUploadSubmit}
-              loading={uploading}
-              disabled={!selectedFile}
-            >
-              Upload Document
-            </Button>
-          </div>
-        </div>
-      </Modal>
-
-      {/* View Document Modal */}
-      <Modal
-        isOpen={viewModal.isOpen}
-        onClose={() => setViewModal({ isOpen: false, documentName: '', url: null, loading: false })}
-        title={viewModal.documentName}
-      >
-        <div className="space-y-4">
-          {viewModal.loading ? (
-            <div className="flex items-center justify-center py-12">
-              <svg className="h-8 w-8 animate-spin text-maroon" fill="none" viewBox="0 0 24 24">
-                <circle className="opacity-25" cx="12" cy="12" r="10" stroke="currentColor" strokeWidth="4" />
-                <path className="opacity-75" fill="currentColor" d="M4 12a8 8 0 018-8V0C5.373 0 0 5.373 0 12h4z" />
-              </svg>
-            </div>
-          ) : viewModal.url ? (
-            <div className="space-y-4">
-              {viewModal.url.match(/\.(jpg|jpeg|png|gif|webp)$/i) || viewModal.url.includes('image') ? (
-                <img src={viewModal.url} alt={viewModal.documentName} className="max-w-full rounded-lg" />
-              ) : (
-                <iframe
-                  src={viewModal.url}
-                  className="w-full h-96 rounded-lg border border-border"
-                  title={viewModal.documentName}
-                />
-              )}
-              <div className="flex justify-end">
-                <a
-                  href={viewModal.url}
-                  target="_blank"
-                  rel="noopener noreferrer"
-                  className="text-sm text-maroon hover:underline"
-                >
-                  Open in new tab
-                </a>
-              </div>
-            </div>
-          ) : (
-            <p className="text-center text-gray py-8">Unable to load document</p>
-          )}
-        </div>
-      </Modal>
+        onClose={() => setUploadModal({ isOpen: false, document: null })}
+        onSuccess={handleUploadSuccess}
+        document={uploadModal.document}
+      />
     </div>
   );
 }

@@ -111,6 +111,10 @@ function AdminRoute({ children }: { children: React.ReactNode }) {
   }
 
   if (!isStaffRole(role)) {
+    // Redirect non-staff to appropriate place
+    if (role === 'employee') {
+      return <Navigate to="/employee" replace />;
+    }
     return <Navigate to="/applicant" replace />;
   }
 
@@ -148,7 +152,7 @@ function ApplicantRoute({ children }: { children: React.ReactNode }) {
   if (isStaffRole(role)) {
     return <Navigate to="/admin" replace />;
   }
-
+  
   // Employees go to employee dashboard
   if (role === 'employee') {
     return <Navigate to="/employee" replace />;
@@ -172,7 +176,7 @@ function EmployeeRoute({ children }: { children: React.ReactNode }) {
   if (isStaffRole(role)) {
     return <Navigate to="/admin" replace />;
   }
-
+  
   // Only employees can access employee routes
   if (role !== 'employee') {
     return <Navigate to="/applicant" replace />;
@@ -222,7 +226,7 @@ export function RouterConfig() {
         <Route path="/auth/set-password" element={<SetPasswordPage />} />
       </Route>
 
-      {/* Protected applicant routes (applicants only, not employees) */}
+      {/* Protected applicant routes */}
       <Route
         element={
           <ProtectedRoute>
@@ -237,7 +241,7 @@ export function RouterConfig() {
         <Route path="/applicant/documents" element={<ApplicantDocumentsPage />} />
       </Route>
 
-      {/* Protected employee routes (employees only) */}
+      {/* Protected employee routes */}
       <Route
         element={
           <ProtectedRoute>
