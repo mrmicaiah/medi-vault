@@ -81,8 +81,9 @@ interface DocumentTabsProps {
   applicationId?: string;
   // For employees - use employeeId
   employeeId?: string;
-  // Name for PDF downloads
-  personName: string;
+  // Name for PDF downloads (supports both applicantName and personName for backwards compatibility)
+  applicantName?: string;
+  personName?: string;
   activeTab: 'uploads' | 'agreements' | 'application';
   onTabChange: (tab: 'uploads' | 'agreements' | 'application') => void;
   // Optional: hide tab nav if parent is managing it
@@ -92,11 +93,15 @@ interface DocumentTabsProps {
 export function DocumentTabs({ 
   applicationId, 
   employeeId, 
+  applicantName,
   personName, 
   activeTab, 
   onTabChange,
   hideTabNav = false 
 }: DocumentTabsProps) {
+  // Support both applicantName (old) and personName (new) for backwards compatibility
+  const displayName = personName || applicantName || 'Person';
+  
   const [documentSummary, setDocumentSummary] = useState<DocumentSummary | null>(null);
   const [employeeDocuments, setEmployeeDocuments] = useState<EmployeeDocuments | null>(null);
   const [loading, setLoading] = useState(false);
@@ -485,7 +490,7 @@ export function DocumentTabs({
                           </button>
                         )}
                         <button
-                          onClick={() => downloadPdf(agreement.endpoint, `${personName.replace(/\s+/g, '_')}_${agreement.type}.pdf`)}
+                          onClick={() => downloadPdf(agreement.endpoint, `${displayName.replace(/\s+/g, '_')}_${agreement.type}.pdf`)}
                           disabled={downloadingId === agreement.endpoint}
                           className="px-3 py-1.5 text-sm font-medium text-gray hover:bg-gray-100 rounded-lg transition-colors disabled:opacity-50"
                         >
@@ -538,7 +543,7 @@ export function DocumentTabs({
                           </button>
                         )}
                         <button
-                          onClick={() => downloadPdf(doc.endpoint, `${personName.replace(/\s+/g, '_')}_${doc.type}.pdf`)}
+                          onClick={() => downloadPdf(doc.endpoint, `${displayName.replace(/\s+/g, '_')}_${doc.type}.pdf`)}
                           disabled={downloadingId === doc.endpoint}
                           className="px-3 py-1.5 text-sm font-medium text-gray hover:bg-gray-100 rounded-lg transition-colors disabled:opacity-50"
                         >
@@ -565,7 +570,7 @@ export function DocumentTabs({
           if (htmlPreviewModal.pdfEndpoint) {
             downloadPdf(
               htmlPreviewModal.pdfEndpoint,
-              `${personName.replace(/\s+/g, '_')}_document.pdf`
+              `${displayName.replace(/\s+/g, '_')}_document.pdf`
             );
           }
         } : undefined}
