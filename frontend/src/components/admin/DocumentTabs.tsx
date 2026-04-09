@@ -5,6 +5,8 @@ import { formatDate } from '../../lib/utils';
 import { AgreementViewModal } from './AgreementViewModal';
 import { DocumentPreviewModal } from './DocumentPreviewModal';
 import { DocumentUploadModal } from './DocumentUploadModal';
+import { Modal } from '../ui/Modal';
+import { Button } from '../ui/Button';
 
 interface DocumentSummary {
   application_id: string;
@@ -50,6 +52,7 @@ interface EmployeeDocuments {
       uploaded_at?: string;
       expires_at?: string;
       document_number?: string;
+      status?: 'approved' | 'pending_review' | 'rejected';
       endpoint: string;
       source: 'application' | 'documents_table';
     }>;
@@ -161,6 +164,14 @@ export function DocumentTabs({
       document_number?: string;
     };
   }>({ isOpen: false });
+
+  // Approval modal state
+  const [approvalModal, setApprovalModal] = useState<{
+    isOpen: boolean;
+    document: any | null;
+    expirationDate: string;
+    submitting: boolean;
+  }>({ isOpen: false, document: null, expirationDate: '', submitting: false });
 
   const isEmployee = !!employeeId;
   const id = applicationId || employeeId || '';
@@ -287,9 +298,54 @@ export function DocumentTabs({
     loadDocuments();
   }
 
+  // Approval modal functions
+  function openApprovalModal(doc: any) {
+    setApprovalModal({
+      isOpen: true,
+      document: doc,
+      expirationDate: '',
+      submitting: false,
+    });
+  }
+
+  function closeApprovalModal() {
+    setApprovalModal({ isOpen: false, document: null, expirationDate: '', submitting: false });
+  }
+
+  async function handleApprove() {
+    if (!approvalModal.document) return;
+    
+    try {
+      setApprovalModal(prev => ({ ...prev, submitting: true }));
+      
+      await api.post(`/admin/documents/${approvalModal.document.id}/approve`, {
+        expiration_date: approvalModal.expirationDate || null,
+      });
+      
+      closeApprovalModal();
+      loadDocuments();
+    } catch (err) {
+      setError(err instanceof Error ? err.message : 'Failed to approve document');
+      setApprovalModal(prev => ({ ...prev, submitting: false }));
+    }
+  }
+
+  async function handleReject(docId: string) {
+    if (!confirm('Are you sure you want to reject this document? The employee will need to upload a new version.')) {
+      return;
+    }
+    
+    try {
+      await api.post(`/admin/documents/${docId}/reject`, {});
+      loadDocuments();
+    } catch (err) {
+      setError(err instanceof Error ? err.message : 'Failed to reject document');
+    }
+  }
+
   // Get counts for applicants
   const getApplicantCounts = () => {
-    if (!documentSummary) return { uploads: 0, agreements: 0, application: 0, missingUploads: 0 };
+    if (!documentSummary) return { uploads: 0, agreements: 0, application: 0, missingUploads: 0, pendingReview: 0 };
     
     const uploadedSteps = new Set(documentSummary.documents.uploaded.map(d => d.step_number));
     const missingUploads = ALL_UPLOAD_STEPS.filter(step => !uploadedSteps.has(step)).length;
@@ -299,18 +355,22 @@ export function DocumentTabs({
       agreements: documentSummary.documents.onboarding_agreements.filter(a => a.signed).length,
       application: documentSummary.documents.generated.length,
       missingUploads,
+      pendingReview: 0,
     };
   };
 
   // Get counts for employees
   const getEmployeeCounts = () => {
-    if (!employeeDocuments) return { uploads: 0, agreements: 0, application: 0, missingUploads: 0 };
+    if (!employeeDocuments) return { uploads: 0, agreements: 0, application: 0, missingUploads: 0, pendingReview: 0 };
+    
+    const pendingReview = employeeDocuments.documents.uploaded.filter(d => d.status === 'pending_review').length;
     
     return {
       uploads: employeeDocuments.documents.uploaded.length,
       agreements: employeeDocuments.documents.agreements.filter(a => a.signed).length,
       application: employeeDocuments.documents.generated.length,
-      missingUploads: 0, // Employees don't track missing uploads the same way
+      missingUploads: 0,
+      pendingReview,
     };
   };
 
@@ -385,8 +445,12 @@ export function DocumentTabs({
             }`}
           >
             Uploads
-            <span className={`ml-1.5 rounded-full px-1.5 py-0.5 text-xs ${counts.missingUploads > 0 ? 'bg-warning/20 text-warning' : 'bg-gray-100'}`}>
-              {counts.uploads}{!isEmployee && `/${ALL_UPLOAD_STEPS.length}`}
+            <span className={`ml-1.5 rounded-full px-1.5 py-0.5 text-xs ${
+              counts.pendingReview > 0 ? 'bg-warning/20 text-warning' : 
+              counts.missingUploads > 0 ? 'bg-warning/20 text-warning' : 
+              'bg-gray-100'
+            }`}>
+              {counts.pendingReview > 0 ? `${counts.pendingReview} pending` : `${counts.uploads}${!isEmployee ? `/${ALL_UPLOAD_STEPS.length}` : ''}`}
             </span>
           </button>
           <button
@@ -414,6 +478,20 @@ export function DocumentTabs({
       <div className={hideTabNav ? '' : 'mt-4'}>
         {activeTab === 'uploads' && (
           <div className="space-y-3">
+            {/* Pending review alert */}
+            {counts.pendingReview > 0 && (
+              <div className="bg-blue-50 border border-blue-200 rounded-lg p-4">
+                <div className="flex items-center gap-2">
+                  <svg className="w-4 h-4 text-blue-600" fill="none" viewBox="0 0 24 24" stroke="currentColor">
+                    <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M15 17h5l-1.405-1.405A2.032 2.032 0 0118 14.158V11a6.002 6.002 0 00-4-5.659V5a2 2 0 10-4 0v.341C7.67 6.165 6 8.388 6 11v3.159c0 .538-.214 1.055-.595 1.436L4 17h5m6 0v1a3 3 0 11-6 0v-1m6 0H9" />
+                  </svg>
+                  <span className="font-medium text-blue-800 text-sm">
+                    {counts.pendingReview} document{counts.pendingReview > 1 ? 's' : ''} pending review
+                  </span>
+                </div>
+              </div>
+            )}
+            
             {/* Missing uploads warning (applicants only) */}
             {!isEmployee && getMissingUploads().length > 0 && (
               <div className="bg-warning/10 border border-warning/30 rounded-lg p-4">
@@ -440,32 +518,50 @@ export function DocumentTabs({
               // Unified rendering for both applicant and employee uploads
               uploadedDocs.map((doc: any) => {
                 const expirationStatus = getExpirationStatus(doc.expires_at);
+                const isPending = doc.status === 'pending_review';
                 
                 return (
-                  <div key={doc.id || doc.step_number} className="bg-white rounded-lg shadow-sm p-4">
+                  <div 
+                    key={doc.id || doc.step_number} 
+                    className={`bg-white rounded-lg shadow-sm p-4 ${isPending ? 'ring-2 ring-blue-300' : ''}`}
+                  >
                     <div className="flex items-center justify-between">
                       <div className="flex items-center gap-3">
                         <div className={`flex h-10 w-10 items-center justify-center rounded-lg ${
+                          isPending ? 'bg-blue-100' :
                           expirationStatus === 'expired' ? 'bg-error/10' :
                           expirationStatus === 'expiring' ? 'bg-warning/10' :
                           'bg-maroon/10'
                         }`}>
-                          <svg className={`h-5 w-5 ${
-                            expirationStatus === 'expired' ? 'text-error' :
-                            expirationStatus === 'expiring' ? 'text-warning' :
-                            'text-maroon'
-                          }`} fill="none" viewBox="0 0 24 24" stroke="currentColor">
-                            <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M15.172 7l-6.586 6.586a2 2 0 102.828 2.828l6.414-6.586a4 4 0 00-5.656-5.656l-6.415 6.585a6 6 0 108.486 8.486L20.5 13" />
-                          </svg>
+                          {isPending ? (
+                            <svg className="h-5 w-5 text-blue-600" fill="none" viewBox="0 0 24 24" stroke="currentColor">
+                              <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M12 8v4l3 3m6-3a9 9 0 11-18 0 9 9 0 0118 0z" />
+                            </svg>
+                          ) : (
+                            <svg className={`h-5 w-5 ${
+                              expirationStatus === 'expired' ? 'text-error' :
+                              expirationStatus === 'expiring' ? 'text-warning' :
+                              'text-maroon'
+                            }`} fill="none" viewBox="0 0 24 24" stroke="currentColor">
+                              <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M15.172 7l-6.586 6.586a2 2 0 102.828 2.828l6.414-6.586a4 4 0 00-5.656-5.656l-6.415 6.585a6 6 0 108.486 8.486L20.5 13" />
+                            </svg>
+                          )}
                         </div>
                         <div>
-                          <p className="font-medium text-slate text-sm">{doc.name}</p>
+                          <div className="flex items-center gap-2">
+                            <p className="font-medium text-slate text-sm">{doc.name}</p>
+                            {isPending && (
+                              <span className="text-xs bg-blue-100 text-blue-700 px-2 py-0.5 rounded-full font-medium">
+                                Pending Review
+                              </span>
+                            )}
+                          </div>
                           <p className="text-xs text-gray">
                             {doc.filename || 'File uploaded'}
                             {doc.uploaded_at && ` • ${formatDate(doc.uploaded_at)}`}
                           </p>
                           {/* Expiration date with status */}
-                          {doc.expires_at && (
+                          {doc.expires_at && !isPending && (
                             <p className={`text-xs ${
                               expirationStatus === 'expired' ? 'text-error font-medium' :
                               expirationStatus === 'expiring' ? 'text-warning font-medium' :
@@ -487,8 +583,25 @@ export function DocumentTabs({
                             View
                           </button>
                         )}
-                        {/* Update button for employees with documents_table documents */}
-                        {isEmployee && doc.source === 'documents_table' && (
+                        {/* Approve/Reject buttons for pending documents */}
+                        {isPending && (
+                          <>
+                            <button
+                              onClick={() => openApprovalModal(doc)}
+                              className="px-3 py-1.5 text-sm font-medium text-white bg-success hover:bg-success/90 rounded-lg transition-colors"
+                            >
+                              Approve
+                            </button>
+                            <button
+                              onClick={() => handleReject(doc.id)}
+                              className="px-3 py-1.5 text-sm font-medium text-error hover:bg-error/10 rounded-lg transition-colors"
+                            >
+                              Reject
+                            </button>
+                          </>
+                        )}
+                        {/* Update button for employees with documents_table documents (not pending) */}
+                        {isEmployee && doc.source === 'documents_table' && !isPending && (
                           <button
                             onClick={() => openUpdateModal(doc)}
                             className="px-3 py-1.5 text-sm font-medium text-gray hover:bg-gray-100 rounded-lg transition-colors"
@@ -663,6 +776,49 @@ export function DocumentTabs({
           onSuccess={handleUploadSuccess}
         />
       )}
+
+      {/* Approval Modal */}
+      <Modal
+        isOpen={approvalModal.isOpen}
+        onClose={closeApprovalModal}
+        title="Approve Document"
+      >
+        <div className="space-y-4">
+          {approvalModal.document && (
+            <>
+              <div className="bg-gray-50 rounded-lg p-3">
+                <p className="text-xs text-gray uppercase font-semibold mb-1">Document</p>
+                <p className="font-medium text-slate">{approvalModal.document.name}</p>
+                <p className="text-sm text-gray">{approvalModal.document.filename}</p>
+              </div>
+              
+              <div>
+                <label className="block text-sm font-medium text-slate mb-1.5">
+                  Expiration Date
+                </label>
+                <input
+                  type="date"
+                  value={approvalModal.expirationDate}
+                  onChange={(e) => setApprovalModal(prev => ({ ...prev, expirationDate: e.target.value }))}
+                  className="w-full px-3 py-2 border border-border rounded-lg focus:outline-none focus:ring-2 focus:ring-maroon/20 focus:border-maroon"
+                />
+                <p className="text-xs text-gray mt-1">
+                  Leave blank if this document does not expire
+                </p>
+              </div>
+              
+              <div className="flex justify-end gap-3 pt-4">
+                <Button variant="secondary" onClick={closeApprovalModal}>
+                  Cancel
+                </Button>
+                <Button onClick={handleApprove} loading={approvalModal.submitting}>
+                  Approve Document
+                </Button>
+              </div>
+            </>
+          )}
+        </div>
+      </Modal>
     </>
   );
 }
