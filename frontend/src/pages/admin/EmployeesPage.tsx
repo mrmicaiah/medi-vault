@@ -5,6 +5,7 @@ import { Input } from '../../components/ui/Input';
 import { Modal } from '../../components/ui/Modal';
 import { Alert } from '../../components/ui/Alert';
 import { api } from '../../lib/api';
+import { DocumentTabs } from '../../components/admin/DocumentTabs';
 
 interface Employee {
   id: string;
@@ -221,6 +222,9 @@ const formatTransportation = (hasTransport?: string, maxMiles?: string) => {
   return hasTransport === 'no' ? 'No' : '—';
 };
 
+// Panel tab type
+type PanelTab = 'overview' | 'uploads' | 'agreements' | 'application';
+
 export function EmployeesPage() {
   const [employees, setEmployees] = useState<Employee[]>([]);
   const [loading, setLoading] = useState(true);
@@ -237,6 +241,9 @@ export function EmployeesPage() {
   const [selectedEmployee, setSelectedEmployee] = useState<EmployeeDetail | null>(null);
   const [panelOpen, setPanelOpen] = useState(false);
   const [loadingDetail, setLoadingDetail] = useState(false);
+  
+  // Panel tab state
+  const [panelTab, setPanelTab] = useState<PanelTab>('overview');
   
   // Preferences state
   const [preferences, setPreferences] = useState<EmployeePreferences | null>(null);
@@ -412,6 +419,7 @@ export function EmployeesPage() {
   const selectEmployee = useCallback(async (employee: Employee) => {
     setSelectedEmployee(employee as EmployeeDetail);
     setPanelOpen(true);
+    setPanelTab('overview');
     setShowHistorySection(false);
     setLoadingDetail(true);
     setPreferences(null);
@@ -453,6 +461,7 @@ export function EmployeesPage() {
 
   const closePanel = () => {
     setPanelOpen(false);
+    setPanelTab('overview');
     setTimeout(() => {
       setSelectedEmployee(null);
       setAssignments([]);
@@ -875,7 +884,8 @@ export function EmployeesPage() {
             className={`fixed inset-0 bg-black/20 z-40 transition-opacity duration-250 ${panelOpen ? 'opacity-100' : 'opacity-0 pointer-events-none'}`}
             onClick={closePanel}
           />
-          <div className={`fixed top-0 right-0 h-full w-[420px] bg-white shadow-2xl z-50 flex flex-col transition-transform duration-250 ease-out ${panelOpen ? 'translate-x-0' : 'translate-x-full'}`}>
+          <div className={`fixed top-0 right-0 h-full w-[480px] bg-white shadow-2xl z-50 flex flex-col transition-transform duration-250 ease-out ${panelOpen ? 'translate-x-0' : 'translate-x-full'}`}>
+            {/* Header */}
             <div className="px-6 py-5 bg-navy flex items-center justify-between flex-shrink-0">
               <div className="flex items-center gap-3">
                 <div>
@@ -893,6 +903,42 @@ export function EmployeesPage() {
               <button onClick={closePanel} className="text-white/60 hover:text-white text-2xl leading-none p-1">×</button>
             </div>
 
+            {/* Panel Tab Navigation */}
+            <div className="flex border-b border-border bg-white flex-shrink-0">
+              <button
+                onClick={() => setPanelTab('overview')}
+                className={`flex-1 py-3 text-sm font-medium transition-colors ${
+                  panelTab === 'overview' ? 'text-maroon border-b-2 border-maroon' : 'text-gray hover:text-slate'
+                }`}
+              >
+                Overview
+              </button>
+              <button
+                onClick={() => setPanelTab('uploads')}
+                className={`flex-1 py-3 text-sm font-medium transition-colors ${
+                  panelTab === 'uploads' ? 'text-maroon border-b-2 border-maroon' : 'text-gray hover:text-slate'
+                }`}
+              >
+                Uploads
+              </button>
+              <button
+                onClick={() => setPanelTab('agreements')}
+                className={`flex-1 py-3 text-sm font-medium transition-colors ${
+                  panelTab === 'agreements' ? 'text-maroon border-b-2 border-maroon' : 'text-gray hover:text-slate'
+                }`}
+              >
+                Agreements
+              </button>
+              <button
+                onClick={() => setPanelTab('application')}
+                className={`flex-1 py-3 text-sm font-medium transition-colors ${
+                  panelTab === 'application' ? 'text-maroon border-b-2 border-maroon' : 'text-gray hover:text-slate'
+                }`}
+              >
+                Application
+              </button>
+            </div>
+
             <div className="flex-1 overflow-y-auto p-5 bg-gray-50">
               {loadingDetail ? (
                 <div className="flex items-center justify-center py-12">
@@ -901,7 +947,8 @@ export function EmployeesPage() {
                     <path className="opacity-75" fill="currentColor" d="M4 12a8 8 0 018-8V0C5.373 0 0 5.373 0 12h4z" />
                   </svg>
                 </div>
-              ) : (
+              ) : panelTab === 'overview' ? (
+                /* Overview Tab */
                 <>
                   {/* Work Preferences */}
                   {preferences && (
@@ -1071,6 +1118,15 @@ export function EmployeesPage() {
                     )}
                   </div>
                 </>
+              ) : (
+                /* Document Tabs (uploads, agreements, application) */
+                <DocumentTabs
+                  employeeId={selectedEmployee.id}
+                  personName={`${selectedEmployee.first_name} ${selectedEmployee.last_name}`}
+                  activeTab={panelTab as 'uploads' | 'agreements' | 'application'}
+                  onTabChange={(tab) => setPanelTab(tab)}
+                  hideTabNav={true}
+                />
               )}
             </div>
 
