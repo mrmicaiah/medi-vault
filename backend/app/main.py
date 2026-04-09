@@ -15,6 +15,7 @@ from .routers import (
     clients,
     compliance,
     employee_compliance,
+    employee_portal,  # Employee self-service portal
     sensitive_data,
     users,
     invitations,
@@ -32,7 +33,7 @@ logger = logging.getLogger(__name__)
 app = FastAPI(
     title="MediVault API",
     description="Healthcare applicant tracking and compliance management",
-    version="1.0.9",
+    version="1.0.10",
 )
 
 # CORS configuration
@@ -64,6 +65,7 @@ app.include_router(employees.router)
 app.include_router(clients.router)
 app.include_router(compliance.router)
 app.include_router(employee_compliance.router)
+app.include_router(employee_portal.router)  # Employee self-service
 app.include_router(sensitive_data.router)
 app.include_router(users.router)
 app.include_router(invitations.router)
@@ -78,11 +80,11 @@ app.include_router(applicant_messages.router)
 async def root():
     return {
         "name": "MediVault API",
-        "version": "1.0.9",
+        "version": "1.0.10",
         "status": "running"
     }
 
 
 @app.get("/health")
 async def health_check():
-    return {"status": "healthy", "version": "1.0.9"}
+    return {"status": "healthy", "version": "1.0.10"}

@@ -21,6 +21,8 @@ import { ApplicantDashboardPage } from '../pages/applicant/DashboardPage';
 import { ApplicationPage } from '../pages/applicant/ApplicationPage';
 import { DocumentsPage as ApplicantDocumentsPage } from '../pages/applicant/DocumentsPage';
 
+import { EmployeeDashboardPage } from '../pages/employee/DashboardPage';
+
 import { AdminDashboardPage } from '../pages/admin/DashboardPage';
 import { ApplicantsPage } from '../pages/admin/ApplicantsPage';
 import { ApplicantDetailPage } from '../pages/admin/ApplicantDetailPage';
@@ -142,8 +144,38 @@ function ApplicantRoute({ children }: { children: React.ReactNode }) {
     return <ProfileErrorScreen />;
   }
 
+  // Staff goes to admin
   if (isStaffRole(role)) {
     return <Navigate to="/admin" replace />;
+  }
+
+  // Employees go to employee dashboard
+  if (role === 'employee') {
+    return <Navigate to="/employee" replace />;
+  }
+
+  return <>{children}</>;
+}
+
+function EmployeeRoute({ children }: { children: React.ReactNode }) {
+  const { role, profile, loading, initialized } = useAuth();
+
+  console.log('[EmployeeRoute] role:', role, 'profile:', profile);
+
+  if (!initialized || loading) return null;
+
+  if (!profile) {
+    return <ProfileErrorScreen />;
+  }
+
+  // Staff goes to admin
+  if (isStaffRole(role)) {
+    return <Navigate to="/admin" replace />;
+  }
+
+  // Only employees can access employee routes
+  if (role !== 'employee') {
+    return <Navigate to="/applicant" replace />;
   }
 
   return <>{children}</>;
@@ -161,6 +193,11 @@ function RootRedirect() {
   if (isStaffRole(role)) {
     return <Navigate to="/admin" replace />;
   }
+  
+  if (role === 'employee') {
+    return <Navigate to="/employee" replace />;
+  }
+  
   return <Navigate to="/applicant" replace />;
 }
 
@@ -185,7 +222,7 @@ export function RouterConfig() {
         <Route path="/auth/set-password" element={<SetPasswordPage />} />
       </Route>
 
-      {/* Protected applicant routes */}
+      {/* Protected applicant routes (applicants only, not employees) */}
       <Route
         element={
           <ProtectedRoute>
@@ -198,6 +235,19 @@ export function RouterConfig() {
         <Route path="/applicant" element={<ApplicantDashboardPage />} />
         <Route path="/applicant/application" element={<ApplicationPage />} />
         <Route path="/applicant/documents" element={<ApplicantDocumentsPage />} />
+      </Route>
+
+      {/* Protected employee routes (employees only) */}
+      <Route
+        element={
+          <ProtectedRoute>
+            <EmployeeRoute>
+              <AppLayout />
+            </EmployeeRoute>
+          </ProtectedRoute>
+        }
+      >
+        <Route path="/employee" element={<EmployeeDashboardPage />} />
       </Route>
 
       {/* Protected admin routes */}
