@@ -81,29 +81,27 @@ const formatTimeAgo = (dateStr: string) => {
 };
 
 // Document completion status
-type DocStatus = 'complete' | 'partial' | 'missing';
+type DocStatus = 'complete' | 'partial' | 'missing' | 'unknown';
 
-// Required upload steps (11-17) and required agreement steps (9, 10, 18-22)
+// Required upload steps and agreement steps
+const ALL_UPLOAD_STEPS = [11, 12, 13, 14, 15, 16, 17];
 const REQUIRED_UPLOAD_STEPS = [12, 14]; // ID Front and SSN Card are required
-const ALL_UPLOAD_STEPS = [11, 12, 13, 14, 15, 16, 17]; // All possible uploads
-const REQUIRED_AGREEMENT_STEPS = [9, 10, 18, 19, 20, 21, 22]; // All agreements
+const REQUIRED_AGREEMENT_STEPS = [9, 10, 18, 19, 20, 21, 22];
 
 interface ApplicantWithDocs extends Applicant {
   docStatus?: DocStatus;
   uploadedCount?: number;
   agreementCount?: number;
-  totalUploads?: number;
-  totalAgreements?: number;
-  requiredUploadsComplete?: boolean;
-  allAgreementsSigned?: boolean;
 }
 
 export default function DocumentsPage() {
   const [applicants, setApplicants] = useState<ApplicantWithDocs[]>([]);
+  const [docStatuses, setDocStatuses] = useState<Record<string, { status: DocStatus; uploaded: number; agreements: number }>>({});
   const [selectedApplicant, setSelectedApplicant] = useState<ApplicantWithDocs | null>(null);
   const [documentSummary, setDocumentSummary] = useState<DocumentSummary | null>(null);
   const [searchQuery, setSearchQuery] = useState('');
   const [loading, setLoading] = useState(true);
+  const [loadingStatuses, setLoadingStatuses] = useState(false);
   const [loadingDocs, setLoadingDocs] = useState(false);
   const [error, setError] = useState<string | null>(null);
   const [downloadingId, setDownloadingId] = useState<string | null>(null);
@@ -111,8 +109,9 @@ export default function DocumentsPage() {
   // Pool collapse state
   const [expandedPools, setExpandedPools] = useState<Set<string>>(new Set());
   const [completeExpanded, setCompleteExpanded] = useState(false);
-  const [partialExpanded, setPartialExpanded] = useState(true); // Default open for partial
-  const [missingExpanded, setMissingExpanded] = useState(true); // Default open for missing
+  const [partialExpanded, setPartialExpanded] = useState(true);
+  const [missingExpanded, setMissingExpanded] = useState(true);
+  const [unknownExpanded, setUnknownExpanded] = useState(true);
   
   // Slide-out panel state
   const [panelOpen, setPanelOpen] = useState(false);
@@ -150,10 +149,10 @@ export default function DocumentsPage() {
       const submitted = (data.applications || []).filter(a => 
         ['submitted', 'under_review', 'approved', 'hired'].includes(a.status)
       );
+      setApplicants(submitted);
       
-      // Load document status for each applicant
-      const applicantsWithDocs = await loadDocumentStatuses(submitted);
-      setApplicants(applicantsWithDocs);
+      // Load document statuses in background (don't block the UI)
+      loadDocumentStatusesInBackground(submitted);
     } catch (err) {
       setError(err instanceof Error ? err.message : 'Failed to load applicants');
     } finally {
@@ -161,62 +160,52 @@ export default function DocumentsPage() {
     }
   }
 
-  async function loadDocumentStatuses(apps: Applicant[]): Promise<ApplicantWithDocs[]> {
-    // Load document summaries in parallel for all applicants
-    const results = await Promise.all(
-      apps.map(async (app) => {
-        try {
-          const summary = await api.get<DocumentSummary>(`/admin/applicants/${app.id}/documents-summary`);
-          
-          // Count uploaded documents
-          const uploadedCount = summary.documents.uploaded.length;
-          const uploadedSteps = new Set(summary.documents.uploaded.map(d => d.step_number));
-          
-          // Check if required uploads are complete (ID Front step 12, SSN Card step 14)
-          const requiredUploadsComplete = REQUIRED_UPLOAD_STEPS.every(step => uploadedSteps.has(step));
-          
-          // Count signed agreements
-          const signedAgreements = summary.documents.onboarding_agreements.filter(a => a.signed).length;
-          const totalAgreements = REQUIRED_AGREEMENT_STEPS.length;
-          const allAgreementsSigned = signedAgreements >= totalAgreements;
-          
-          // Determine status
-          let docStatus: DocStatus;
-          if (requiredUploadsComplete && allAgreementsSigned) {
-            docStatus = 'complete';
-          } else if (uploadedCount > 0 || signedAgreements > 0) {
-            docStatus = 'partial';
-          } else {
-            docStatus = 'missing';
-          }
-          
-          return {
-            ...app,
-            docStatus,
-            uploadedCount,
-            agreementCount: signedAgreements,
-            totalUploads: ALL_UPLOAD_STEPS.length,
-            totalAgreements,
-            requiredUploadsComplete,
-            allAgreementsSigned,
-          };
-        } catch {
-          // If we can't load docs, mark as missing
-          return {
-            ...app,
-            docStatus: 'missing' as DocStatus,
-            uploadedCount: 0,
-            agreementCount: 0,
-            totalUploads: ALL_UPLOAD_STEPS.length,
-            totalAgreements: REQUIRED_AGREEMENT_STEPS.length,
-            requiredUploadsComplete: false,
-            allAgreementsSigned: false,
-          };
-        }
-      })
-    );
+  async function loadDocumentStatusesInBackground(apps: Applicant[]) {
+    setLoadingStatuses(true);
     
-    return results;
+    // Process in batches of 5 to avoid overwhelming the server
+    const batchSize = 5;
+    const statuses: Record<string, { status: DocStatus; uploaded: number; agreements: number }> = {};
+    
+    for (let i = 0; i < apps.length; i += batchSize) {
+      const batch = apps.slice(i, i + batchSize);
+      
+      const results = await Promise.all(
+        batch.map(async (app) => {
+          try {
+            const summary = await api.get<DocumentSummary>(`/admin/applicants/${app.id}/documents-summary`);
+            
+            const uploadedCount = summary.documents.uploaded.length;
+            const uploadedSteps = new Set(summary.documents.uploaded.map(d => d.step_number));
+            const requiredUploadsComplete = REQUIRED_UPLOAD_STEPS.every(step => uploadedSteps.has(step));
+            
+            const signedAgreements = summary.documents.onboarding_agreements.filter(a => a.signed).length;
+            const allAgreementsSigned = signedAgreements >= REQUIRED_AGREEMENT_STEPS.length;
+            
+            let docStatus: DocStatus;
+            if (requiredUploadsComplete && allAgreementsSigned) {
+              docStatus = 'complete';
+            } else if (uploadedCount > 0 || signedAgreements > 0) {
+              docStatus = 'partial';
+            } else {
+              docStatus = 'missing';
+            }
+            
+            return { id: app.id, status: docStatus, uploaded: uploadedCount, agreements: signedAgreements };
+          } catch {
+            return { id: app.id, status: 'unknown' as DocStatus, uploaded: 0, agreements: 0 };
+          }
+        })
+      );
+      
+      // Update statuses incrementally
+      results.forEach(r => {
+        statuses[r.id] = { status: r.status, uploaded: r.uploaded, agreements: r.agreements };
+      });
+      setDocStatuses({ ...statuses });
+    }
+    
+    setLoadingStatuses(false);
   }
 
   async function loadDocuments(applicant: ApplicantWithDocs) {
@@ -229,6 +218,27 @@ export default function DocumentsPage() {
       
       const data = await api.get<DocumentSummary>(`/admin/applicants/${applicant.id}/documents-summary`);
       setDocumentSummary(data);
+      
+      // Update the status for this applicant now that we have fresh data
+      const uploadedCount = data.documents.uploaded.length;
+      const uploadedSteps = new Set(data.documents.uploaded.map(d => d.step_number));
+      const requiredUploadsComplete = REQUIRED_UPLOAD_STEPS.every(step => uploadedSteps.has(step));
+      const signedAgreements = data.documents.onboarding_agreements.filter(a => a.signed).length;
+      const allAgreementsSigned = signedAgreements >= REQUIRED_AGREEMENT_STEPS.length;
+      
+      let docStatus: DocStatus;
+      if (requiredUploadsComplete && allAgreementsSigned) {
+        docStatus = 'complete';
+      } else if (uploadedCount > 0 || signedAgreements > 0) {
+        docStatus = 'partial';
+      } else {
+        docStatus = 'missing';
+      }
+      
+      setDocStatuses(prev => ({
+        ...prev,
+        [applicant.id]: { status: docStatus, uploaded: uploadedCount, agreements: signedAgreements }
+      }));
     } catch (err) {
       setError(err instanceof Error ? err.message : 'Failed to load documents');
       setDocumentSummary(null);
@@ -317,8 +327,20 @@ export default function DocumentsPage() {
     setDocumentModal({ isOpen: false, name: '', url: null, loading: false });
   }
 
+  // Get status for an applicant (from loaded statuses or fall back to application status)
+  const getApplicantStatus = (app: Applicant): { status: DocStatus; uploaded: number; agreements: number } => {
+    if (docStatuses[app.id]) {
+      return docStatuses[app.id];
+    }
+    // Fall back to using application status as proxy while loading
+    if (app.status === 'approved' || app.status === 'hired') {
+      return { status: 'unknown', uploaded: 0, agreements: 0 };
+    }
+    return { status: 'unknown', uploaded: 0, agreements: 0 };
+  };
+
   // Filter and organize applicants
-  const { byPosition, completeApplicants, partialApplicants, missingApplicants } = useMemo(() => {
+  const { byPosition, completeApplicants, partialApplicants, missingApplicants, unknownApplicants } = useMemo(() => {
     // Apply search
     let filtered = applicants;
     if (searchQuery.trim()) {
@@ -348,18 +370,39 @@ export default function DocumentsPage() {
       }
     });
     
-    // Categorize by actual document status
-    const complete = filtered.filter(a => a.docStatus === 'complete');
-    const partial = filtered.filter(a => a.docStatus === 'partial');
-    const missing = filtered.filter(a => a.docStatus === 'missing');
+    // Categorize by document status
+    const complete: ApplicantWithDocs[] = [];
+    const partial: ApplicantWithDocs[] = [];
+    const missing: ApplicantWithDocs[] = [];
+    const unknown: ApplicantWithDocs[] = [];
+    
+    filtered.forEach(a => {
+      const { status, uploaded, agreements } = getApplicantStatus(a);
+      const appWithDocs = { ...a, docStatus: status, uploadedCount: uploaded, agreementCount: agreements };
+      
+      switch (status) {
+        case 'complete':
+          complete.push(appWithDocs);
+          break;
+        case 'partial':
+          partial.push(appWithDocs);
+          break;
+        case 'missing':
+          missing.push(appWithDocs);
+          break;
+        default:
+          unknown.push(appWithDocs);
+      }
+    });
     
     return {
       byPosition: pools,
       completeApplicants: complete,
       partialApplicants: partial,
       missingApplicants: missing,
+      unknownApplicants: unknown,
     };
-  }, [applicants, searchQuery]);
+  }, [applicants, searchQuery, docStatuses]);
 
   const togglePool = (poolId: string) => {
     setExpandedPools(prev => {
@@ -374,9 +417,18 @@ export default function DocumentsPage() {
   };
 
   const getDocStatusBadge = (applicant: ApplicantWithDocs) => {
-    const { docStatus, uploadedCount = 0, agreementCount = 0, totalUploads = 7, totalAgreements = 7 } = applicant;
+    const status = docStatuses[applicant.id];
     
-    if (docStatus === 'complete') {
+    if (!status) {
+      return (
+        <span className="inline-flex items-center gap-1 px-2 py-0.5 rounded text-xs font-medium bg-gray-100 text-gray-500">
+          <span className="w-1.5 h-1.5 rounded-full bg-gray-400 animate-pulse" />
+          Loading...
+        </span>
+      );
+    }
+    
+    if (status.status === 'complete') {
       return (
         <span className="inline-flex items-center gap-1 px-2 py-0.5 rounded text-xs font-medium bg-success/10 text-success">
           <span className="w-1.5 h-1.5 rounded-full bg-success" />
@@ -384,18 +436,26 @@ export default function DocumentsPage() {
         </span>
       );
     }
-    if (docStatus === 'partial') {
+    if (status.status === 'partial') {
       return (
         <span className="inline-flex items-center gap-1 px-2 py-0.5 rounded text-xs font-medium bg-warning/10 text-warning">
           <span className="w-1.5 h-1.5 rounded-full bg-warning" />
-          {uploadedCount}/{totalUploads} docs
+          {status.uploaded}/{ALL_UPLOAD_STEPS.length} docs
+        </span>
+      );
+    }
+    if (status.status === 'missing') {
+      return (
+        <span className="inline-flex items-center gap-1 px-2 py-0.5 rounded text-xs font-medium bg-error/10 text-error">
+          <span className="w-1.5 h-1.5 rounded-full bg-error" />
+          Missing
         </span>
       );
     }
     return (
-      <span className="inline-flex items-center gap-1 px-2 py-0.5 rounded text-xs font-medium bg-error/10 text-error">
-        <span className="w-1.5 h-1.5 rounded-full bg-error" />
-        Missing
+      <span className="inline-flex items-center gap-1 px-2 py-0.5 rounded text-xs font-medium bg-gray-100 text-gray-500">
+        <span className="w-1.5 h-1.5 rounded-full bg-gray-400" />
+        Unknown
       </span>
     );
   };
@@ -543,7 +603,7 @@ export default function DocumentsPage() {
           <circle className="opacity-25" cx="12" cy="12" r="10" stroke="currentColor" strokeWidth="4" />
           <path className="opacity-75" fill="currentColor" d="M4 12a8 8 0 018-8V0C5.373 0 0 5.373 0 12h4z" />
         </svg>
-        <p className="text-sm text-gray">Loading document statuses...</p>
+        <p className="text-sm text-gray">Loading applicants...</p>
       </div>
     );
   }
@@ -555,7 +615,11 @@ export default function DocumentsPage() {
         <div>
           <h1 className="font-display text-2xl font-bold text-navy">Documents</h1>
           <p className="text-sm text-gray mt-1">
-            {applicants.length} applicants • {completeApplicants.length} complete, {partialApplicants.length} partial, {missingApplicants.length} missing
+            {applicants.length} applicants
+            {loadingStatuses && <span className="ml-2 text-maroon">• Loading statuses...</span>}
+            {!loadingStatuses && Object.keys(docStatuses).length > 0 && (
+              <span> • {completeApplicants.length} complete, {partialApplicants.length} partial, {missingApplicants.length} missing</span>
+            )}
           </p>
         </div>
       </div>
@@ -584,11 +648,26 @@ export default function DocumentsPage() {
       <div className="space-y-4">
         <h2 className="text-sm font-semibold text-gray uppercase tracking-wide px-1">By Document Status</h2>
         
+        {/* Still Loading */}
+        {unknownApplicants.length > 0 && (
+          <PoolSection
+            id="unknown"
+            title="Loading Status..."
+            subtitle="Checking documents"
+            icon="⏳"
+            color="bg-gray-400"
+            applicants={unknownApplicants}
+            expanded={unknownExpanded}
+            onToggle={() => setUnknownExpanded(!unknownExpanded)}
+            borderColor="border-gray-200"
+          />
+        )}
+        
         {/* Missing Documents */}
         <PoolSection
           id="missing"
           title="Missing Documents"
-          subtitle="No uploads or agreements"
+          subtitle="No uploads yet"
           icon="⚠️"
           color="bg-error"
           applicants={missingApplicants}
